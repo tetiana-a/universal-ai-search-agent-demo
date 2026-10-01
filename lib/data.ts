@@ -17,6 +17,14 @@ export type Result = {
   source: string;
   url: string;
   why: string;
+  qualityGate?: {
+    gate: "PASS" | "REVIEW" | "FAIL";
+    passed: number;
+    total: number;
+    checks: Record<string, boolean>;
+    independentVerification: boolean;
+    note: string;
+  };
 };
 
 export type SourceHealth = "Healthy" | "Warning" | "Review";

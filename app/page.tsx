@@ -380,6 +380,15 @@ export default function Home() {
     qualified: 0,
     evidenceCoverage: 0,
   });
+  const [liveSources, setLiveSources] = useState<string[]>([]);
+  const [qualityGate, setQualityGate] = useState({
+    total: 0,
+    pass: 0,
+    review: 0,
+    fail: 0,
+    independentVerification: false,
+    ruleSet: [] as string[],
+  });
   const [searchPlan, setSearchPlan] = useState("");
   const [liveError, setLiveError] = useState("");
   const [selectedResult, setSelectedResult] = useState<Result | null>(null);
@@ -497,6 +506,15 @@ export default function Home() {
       qualified: 0,
       evidenceCoverage: 0,
     });
+    setLiveSources([]);
+    setQualityGate({
+      total: 0,
+      pass: 0,
+      review: 0,
+      fail: 0,
+      independentVerification: false,
+      ruleSet: [],
+    });
     setSearchPlan("");
     setLiveError("");
     setRunning(true);
@@ -553,6 +571,15 @@ export default function Home() {
         evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
       });
       setSearchPlan(String(data.searchPlan || ""));
+      setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
+      setQualityGate({
+        total: Number(data.qualityGate?.total || 0),
+        pass: Number(data.qualityGate?.pass || 0),
+        review: Number(data.qualityGate?.review || 0),
+        fail: Number(data.qualityGate?.fail || 0),
+        independentVerification: Boolean(data.qualityGate?.independentVerification),
+        ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
+      });
       setProgress(100);
       setResearchStage(6);
       setCompletedSearch(true);
@@ -573,6 +600,15 @@ export default function Home() {
       setCompletedSearch(false);
       setRunning(false);
       setLiveResults([]);
+      setLiveSources([]);
+      setQualityGate({
+        total: 0,
+        pass: 0,
+        review: 0,
+        fail: 0,
+        independentVerification: false,
+        ruleSet: [],
+      });
       setLiveStats({
         sourcesFound: 0,
         sourcesChecked: 0,
@@ -585,32 +621,50 @@ export default function Home() {
     }
   }
   function exportCsv() {
-    const rows = [
-      ["Title", "Location", "Area/Profile", "Price/Round", "Match", "Evidence", "Source", "URL"],
-      ...shownResults.map((item) => [
-        item.title,
-        item.location,
-        item.area,
-        item.price,
-        `${item.match}%`,
-        item.evidence,
-        item.source,
-        item.url,
-      ]),
+    const headers = [
+      "Title",
+      "Location",
+      "Area/Profile",
+      "Price/Round",
+      "Match",
+      "Evidence",
+      "Source",
+      "URL",
+      "Status",
+      "Quality Gate",
     ];
 
-    const csv = rows
-      .map((row) =>
-        row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","),
-      )
-      .join("\n");
+    const escapeCell = (value: unknown) => {
+      const text = String(value ?? "");
+      return `"${text.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+    };
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const rows = shownResults.map((item: any) => [
+      item.title,
+      item.location,
+      item.area,
+      item.price,
+      `${item.match}%`,
+      item.evidence,
+      item.source,
+      item.url,
+      item.status,
+      item.qualityGate?.gate || "",
+    ]);
+
+    const csv = "\uFEFF" + [
+      headers.map(escapeCell).join(";"),
+      ...rows.map((row: unknown[]) => row.map(escapeCell).join(";")),
+    ].join("\r\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `aurelius-${scenario}-results.csv`;
+    document.body.appendChild(anchor);
     anchor.click();
+    anchor.remove();
     URL.revokeObjectURL(url);
   }
 
@@ -1655,7 +1709,115 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="glass rounded-[26px] p-5 sm:p-6">
+        
+        {usingLiveData ? (
+          <section className="mt-6 grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
+            <div className="glass rounded-[26px] p-6 sm:p-7">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[.18em] text-[var(--gold)]">
+                    QUALITY GATE
+                  </div>
+                  <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
+                    {lang === "ru" ? "Проверка доказательств" : "Evidence validation"}
+                  </h3>
+                </div>
+                <div className="rounded-full border border-[var(--line)] bg-white/[.02] px-3 py-1 text-[10px] text-[var(--text-muted)]">
+                  {qualityGate.pass}/{qualityGate.total} PASS
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                {[
+                  ["PASS", qualityGate.pass, "text-[var(--success)]"],
+                  ["REVIEW", qualityGate.review, "text-[var(--warning)]"],
+                  ["FAIL", qualityGate.fail, "text-[var(--danger)]"],
+                ].map(([label, value, tone]) => (
+                  <div key={String(label)} className="rounded-xl border border-[var(--line-soft)] bg-white/[.012] p-4">
+                    <div className={`text-[10px] uppercase tracking-[.14em] ${tone}`}>{String(label)}</div>
+                    <div className="mt-2 text-2xl font-semibold text-[var(--text)]">{String(value)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 space-y-2">
+                {qualityGate.ruleSet.map((rule) => (
+                  <div
+                    key={rule}
+                    className="flex items-center gap-2 rounded-lg border border-[var(--line-soft)] bg-white/[.012] px-3 py-2 text-[11px] text-[var(--text-muted)]"
+                  >
+                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--success)]/10 text-[var(--success)]">
+                      ✓
+                    </span>
+                    {rule}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4 text-[11px] leading-5 text-[var(--warning)]">
+                {lang === "ru"
+                  ? "PASS означает, что структурные проверки пройдены. Независимая проверка вторым источником пока не включена."
+                  : "PASS means the structural checks passed. Independent second-source verification is not enabled yet."}
+              </div>
+            </div>
+
+            <div className="glass rounded-[26px] p-6 sm:p-7">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[.18em] text-[var(--cyan)]">
+                    LIVE SOURCES
+                  </div>
+                  <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
+                    {lang === "ru" ? "Источники текущего поиска" : "Sources used in this search"}
+                  </h3>
+                </div>
+                <div className="rounded-full border border-[var(--line)] bg-white/[.02] px-3 py-1 text-[10px] text-[var(--text-muted)]">
+                  {liveStats.sourcesFound}
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-2">
+                {liveSources.slice(0, 12).map((url) => {
+                  let host = url;
+                  try {
+                    host = new URL(url).hostname.replace(/^www\./, "");
+                  } catch {}
+                  return (
+                    <a
+                      key={url}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center gap-3 rounded-xl border border-[var(--line-soft)] bg-white/[.012] px-3 py-3 hover:border-[var(--line)]"
+                    >
+                      <img
+                        src={sourceFavicon(host)}
+                        alt=""
+                        className="h-5 w-5 shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-soft)]">
+                        {host}
+                      </span>
+                      <ExternalLink
+                        size={12}
+                        className="shrink-0 text-[var(--text-faint)] group-hover:text-[var(--gold-bright)]"
+                      />
+                    </a>
+                  );
+                })}
+              </div>
+
+              {liveSources.length === 0 ? (
+                <div className="mt-5 rounded-xl border border-[var(--line-soft)] bg-white/[.012] p-4 text-xs text-[var(--text-faint)]">
+                  {lang === "ru" ? "URL источников не вернулись из текущего ответа. Результаты ниже всё равно содержат прямые ссылки." : "Source URLs were not returned in the current response. Results below still contain direct links."}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
+<section className="glass rounded-[26px] p-5 sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
@@ -1784,7 +1946,42 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="glass overflow-hidden rounded-[26px]">
+        
+        <div className="glass rounded-[26px] p-6">
+          <div className="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--cyan)]">
+            LIVE SEARCH SOURCES
+          </div>
+          <h2 className="mt-2 text-lg font-semibold text-[var(--text)]">
+            {lang === "ru" ? "Источники последнего реального поиска" : "Sources from the latest live search"}
+          </h2>
+          <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+            {lang === "ru"
+              ? "Эти домены добавляются из фактических live-результатов. Ниже остаётся Stage 1 матрица из 30 предварительно выбранных источников."
+              : "These domains come from actual live results. The 30-source Stage 1 matrix remains below as the planned source baseline."}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {(liveSources.length ? liveSources.slice(0, 20) : ["REALTOR.UA", "DIM.RIA", "OLX", "Prozorro.Sale"]).map((item) => {
+              let label = item;
+              let href = item.startsWith("http") ? item : `https://${item}`;
+              try {
+                label = new URL(item).hostname.replace(/^www\./, "");
+              } catch {}
+              return (
+                <a
+                  key={item}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-3 py-1.5 text-[10px] text-[var(--text-muted)] hover:border-[var(--line)] hover:text-[var(--gold-bright)]"
+                >
+                  {label}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
+<div className="glass overflow-hidden rounded-[26px]">
           <div className="thin-scroll overflow-x-auto">
             <table className="mobile-table w-full border-collapse">
               <thead>

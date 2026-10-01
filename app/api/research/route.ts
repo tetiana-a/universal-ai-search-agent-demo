@@ -244,7 +244,6 @@ After the research, you MUST call emit_research_results with the structured resu
   }
 
   const webSources = new Set<string>();
-  const output = Array.isArray(response?.output) ? response.output : [];
 
   for (const item of output) {
     if (item?.type === "web_search_call") {
@@ -252,6 +251,15 @@ After the research, you MUST call emit_research_results with the structured resu
       if (Array.isArray(sources)) {
         for (const source of sources) {
           if (typeof source?.url === "string") webSources.add(source.url);
+        }
+      }
+    }
+
+    if (item?.type === "message" && Array.isArray(item?.content)) {
+      for (const part of item.content) {
+        const annotations = Array.isArray(part?.annotations) ? part.annotations : [];
+        for (const annotation of annotations) {
+          if (typeof annotation?.url === "string") webSources.add(annotation.url);
         }
       }
     }
@@ -279,6 +287,60 @@ After the research, you MUST call emit_research_results with the structured resu
     : [];
 
   const uniqueResultUrls = new Set(results.map((item) => item.url).filter(Boolean));
+  const resultDomains = new Set<string>();
+  const liveSourceUrls = new Set<string>(webSources);
+
+  for (const item of results) {
+    if (item.url) {
+      liveSourceUrls.add(item.url);
+      try {
+        resultDomains.add(new URL(item.url).hostname.replace(/^www\./, ""));
+      } catch {
+        // Keep the raw URL in sourceUrls; domain parsing is best-effort.
+      }
+    }
+  }
+
+  // Server-side Quality Gate:
+  // deterministic checks prevent the UI from treating a weakly structured record as verified.
+  const gatedResults = results.map((item) => {
+    const checks = {
+      sourceUrl: Boolean(item.url),
+      sourceName: Boolean(item.source),
+      evidence: Boolean(item.evidence && item.evidence !== "No evidence summary"),
+      title: Boolean(item.title && item.title !== "Untitled result"),
+      location: Boolean(item.location && item.location !== "not specified"),
+      structuredValue: Boolean(
+        (item.area && item.area !== "not specified") ||
+        (item.price && item.price !== "not specified"),
+      ),
+      statusAllowed: ["Verified", "Reviewed", "Manual review"].includes(item.status),
+    };
+
+    const passed = Object.values(checks).filter(Boolean).length;
+    const total = Object.keys(checks).length;
+    const gate = passed === total ? "PASS" : passed >= 5 ? "REVIEW" : "FAIL";
+
+    return {
+      ...item,
+      qualityGate: {
+        gate,
+        passed,
+        total,
+        checks,
+        independentVerification: false,
+        note:
+          gate === "PASS"
+            ? "Structured source + evidence checks passed. Independent second-source verification is still separate."
+            : "Manual review required before treating this record as fully verified.",
+      },
+    };
+  });
+
+  const passCount = gatedResults.filter((item) => item.qualityGate.gate === "PASS").length;
+  const reviewCount = gatedResults.filter((item) => item.qualityGate.gate === "REVIEW").length;
+  const failCount = gatedResults.filter((item) => item.qualityGate.gate === "FAIL").length;
+  const evidenceCount = gatedResults.filter((item) => item.qualityGate.checks.evidence).length;
 
   return NextResponse.json({
     live: true,
@@ -287,27 +349,38 @@ After the research, you MUST call emit_research_results with the structured resu
     elapsedMs: Date.now(),
     searchPlan: String(parsed?.search_plan || ""),
     summary: String(parsed?.search_summary || ""),
-    results,
-    sourceUrls: Array.from(webSources),
+    results: gatedResults,
+    sourceUrls: Array.from(liveSourceUrls),
+    sourceDomains: Array.from(resultDomains),
     stats: {
-      sourcesFound: webSources.size,
-      sourcesChecked: webSources.size,
-      pagesProcessed: webSources.size,
+      sourcesFound: resultDomains.size,
+      sourcesChecked: resultDomains.size,
+      pagesProcessed: uniqueResultUrls.size,
       recordsExtracted: Number(parsed?.candidates_seen || results.length),
       duplicatesRemoved: Number(
         parsed?.duplicates_removed ??
           Math.max(0, Number(parsed?.candidates_seen || results.length) - uniqueResultUrls.size),
       ),
-      qualified: results.length,
-      evidenceCoverage: results.length
-        ? Math.round(
-            (results.filter(
-              (item) => item.evidence && item.evidence !== "No evidence summary",
-            ).length /
-              results.length) *
-              100,
-          )
+      qualified: passCount + reviewCount,
+      evidenceCoverage: gatedResults.length
+        ? Math.round((evidenceCount / gatedResults.length) * 100)
         : 0,
+    },
+    qualityGate: {
+      total: gatedResults.length,
+      pass: passCount,
+      review: reviewCount,
+      fail: failCount,
+      independentVerification: false,
+      ruleSet: [
+        "source URL present",
+        "source name present",
+        "evidence present",
+        "title present",
+        "location present",
+        "area or price present",
+        "allowed verification status",
+      ],
     },
   });
 }

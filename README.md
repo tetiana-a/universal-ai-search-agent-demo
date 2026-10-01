@@ -108,3 +108,19 @@ The live research route now uses two tools in the Responses API:
 2. strict `emit_research_results` function calling for the typed result contract.
 
 This avoids relying on `response.output_text` being a raw JSON string after a tool-enabled response. The client still has a defensive fallback parser and never displays demo counters after a failed live run.
+
+
+## v1.7 — Build fix
+
+- Removed the duplicate `const output` declaration that caused the Vercel TypeScript/build failure in v1.6.
+- Web source extraction now also checks message annotations as a compatibility fallback.
+
+
+## v1.8 — Quality Gate + live source accounting + Excel-safe CSV
+
+- Live sources are now counted by unique domain; pages/URLs are counted separately.
+- Current live source URLs are visible in the Research dashboard and Sources page.
+- Server-side Quality Gate validates: source URL, source name, evidence, title, location, area/price, and verification status.
+- Each live result carries `qualityGate: PASS | REVIEW | FAIL`.
+- Independent second-source verification is explicitly shown as a separate, not-yet-enabled check.
+- CSV export uses UTF-8 BOM, semicolon delimiters, CRLF and escaped quoted cells for better Excel compatibility.
