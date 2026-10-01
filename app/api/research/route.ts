@@ -122,13 +122,26 @@ Do not bypass CAPTCHA, login or technical source restrictions.`;
       ? `Запрос пользователя:
 ${query}
 
-Найди до ${maxResults} релевантных результатов. Сначала расширь web search по Мадриду/Испании, затем просмотри наиболее подходящие страницы.
-Верни только JSON по схеме.`
+Найди до ${maxResults} релевантных результатов. Сначала расширь web search по географии и критериям пользователя, затем просмотри наиболее подходящие страницы.
+После исследования обязательно вызови функцию emit_research_results с итоговыми структурированными данными.`
       : `User query:
 ${query}
 
-Find up to ${maxResults} relevant results. Expand the web search across Madrid/Spain first, then inspect the best-matching pages.
-Return JSON only according to the schema.`;
+Find up to ${maxResults} relevant results. Expand the web search across the geography and criteria in the user's query, then inspect the best-matching pages.
+After the research, you MUST call emit_research_results with the structured result data.`;
+
+
+  const tools = [
+    { type: "web_search", search_context_size: "medium" },
+    {
+      type: "function",
+      name: "emit_research_results",
+      description:
+        "Emit the final structured results after you have completed web research. Use only facts grounded in the web search. Never invent unknown fields.",
+      parameters: schema,
+      strict: true,
+    },
+  ];
 
   const upstream = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -142,15 +155,7 @@ Return JSON only according to the schema.`;
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      tools: [{ type: "web_search", search_context_size: "medium" }],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "aurelius_research",
-          strict: true,
-          schema,
-        },
-      },
+      tools,
       max_output_tokens: 5000,
     }),
   });
@@ -159,19 +164,83 @@ Return JSON only according to the schema.`;
 
   if (!upstream.ok) {
     return NextResponse.json(
-      { error: response?.error?.message || "OpenAI live research request failed." },
+      {
+        error:
+          response?.error?.message ||
+          "OpenAI live research request failed.",
+        diagnostics: {
+          upstreamStatus: upstream.status,
+        },
+      },
       { status: upstream.status },
     );
   }
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(outputText(response));
-  } catch {
-    return NextResponse.json(
-      { error: "The live research response was not valid JSON." },
-      { status: 502 },
-    );
+  const output = Array.isArray(response?.output) ? response.output : [];
+  const functionCall = output.find(
+    (item: any) =>
+      item?.type === "function_call" &&
+      item?.name === "emit_research_results",
+  );
+
+  let parsed: any = null;
+
+  if (functionCall?.arguments) {
+    try {
+      parsed = JSON.parse(functionCall.arguments);
+    } catch {
+      return NextResponse.json(
+        {
+          error: "The structured function-call arguments were invalid JSON.",
+          diagnostics: {
+            outputTypes: output.map((item: any) => item?.type).filter(Boolean),
+            functionCallFound: true,
+          },
+        },
+        { status: 502 },
+      );
+    }
+  } else {
+    // Fallback: only for providers/models that return structured text instead
+    // of a function_call. Strip common markdown fences and extract the outer JSON object.
+    const raw = outputText(response).trim();
+    const cleaned = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    const first = cleaned.indexOf("{");
+    const last = cleaned.lastIndexOf("}");
+
+    if (first >= 0 && last > first) {
+      try {
+        parsed = JSON.parse(cleaned.slice(first, last + 1));
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!parsed) {
+      const refusal = output
+        .filter((item: any) => item?.type === "message")
+        .flatMap((item: any) => item?.content || [])
+        .find((item: any) => item?.type === "refusal");
+
+      return NextResponse.json(
+        {
+          error:
+            refusal?.refusal ||
+            "The live research response could not be converted into structured data.",
+          diagnostics: {
+            outputTypes: output.map((item: any) => item?.type).filter(Boolean),
+            functionCallFound: false,
+            outputTextPrefix: raw.slice(0, 180),
+          },
+        },
+        { status: 502 },
+      );
+    }
   }
 
   const webSources = new Set<string>();

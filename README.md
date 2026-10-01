@@ -98,3 +98,13 @@ Settings are stored in browser localStorage for demo purposes. Production secret
 - The client no longer blindly assumes every error response is JSON.
 - A 504/timeout now stays visibly failed at 94% and shows "LIVE RESEARCH NOT COMPLETED".
 - Failed live searches no longer display the old demo counters or demo result table.
+
+
+## v1.6 — Structured function-call output
+
+The live research route now uses two tools in the Responses API:
+
+1. built-in `web_search` for current public web research;
+2. strict `emit_research_results` function calling for the typed result contract.
+
+This avoids relying on `response.output_text` being a raw JSON string after a tool-enabled response. The client still has a defensive fallback parser and never displays demo counters after a failed live run.

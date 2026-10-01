@@ -1203,6 +1203,12 @@ export default function Home() {
           />
         </div>
 
+        {liveAttempted && !running && !usingLiveData && liveError ? (
+          <div className="mt-3 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-3 text-xs leading-5 text-[var(--warning)]">
+            Live search reached the API, but the response was not converted into the structured result contract. No demo metrics are being counted as real results.
+          </div>
+        ) : null}
+
         {(searchPlan || liveError) && (
           <div className="mt-4 grid gap-3 lg:grid-cols-[1.5fr_.7fr]">
             {searchPlan ? (
