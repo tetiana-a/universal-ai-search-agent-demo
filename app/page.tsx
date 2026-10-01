@@ -178,7 +178,7 @@ export default function Home() {
 
   const [scenario, setScenario] = useState<Scenario>("realEstate");
   const [activeNav, setActiveNav] = useState<NavKey>("research");
-  const [query, setQuery] = useState(scenarios.realEstate.query);
+  const [query, setQuery] = useState<string>(scenarios.realEstate.query);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -1298,4 +1298,3 @@ export default function Home() {
     </main>
   );
 }
- 
