@@ -1924,7 +1924,7 @@ export default function Home() {
                       }`}
                     >
                       <Mic size={14} />
-                      {audioState === "listening" ? radioText("listen")ing : t.speak}
+                      {audioState === "listening" ? t.listening : t.speak}
                     </button>
 
                     <label className="panel-hover inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3.5 py-2.5 text-xs text-[var(--text-muted)]">
