@@ -373,6 +373,16 @@ const labels = {
   },
 } as const;
 
+function readSourceMemoryFromStorage() {
+  try {
+    const raw = window.localStorage.getItem("aurelius-source-memory-v1");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, 120) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ru");
   const [theme, setTheme] = useState<Theme>("dark");
@@ -486,17 +496,7 @@ export default function Home() {
     return results;
   }, [filter, results]);
 
-  function readSourceMemoryFromStorage() {
-  try {
-    const raw = window.localStorage.getItem("aurelius-source-memory-v1");
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.slice(0, 120) : [];
-  } catch {
-    return [];
-  }
-}
-
-function detectScenarioFromQuery(text: string): Scenario {
+  function detectScenarioFromQuery(text: string): Scenario {
     const q = text.toLowerCase();
     if (/(инвестор|инвести|investor|vc|angel|fund)/i.test(q)) return "investors";
     if (/(компан|производ|manufacturer|supplier|producer|компан)/i.test(q)) return "companies";
@@ -505,14 +505,14 @@ function detectScenarioFromQuery(text: string): Scenario {
 
   function saveSourceMemory(registry: any[]) {
     try {
-      const existing = loadSourceMemory();
+      const existing = readSourceMemoryFromStorage();
       const merged = new Map<string, any>();
       [...existing, ...(Array.isArray(registry) ? registry : [])].forEach((item: any) => {
         const key = String(item?.url || item?.domain || item?.name || "").trim().toLowerCase();
         if (key) merged.set(key, { ...item, lastChecked: item?.lastChecked || new Date().toISOString() });
       });
       window.localStorage.setItem("aurelius-source-memory-v1", JSON.stringify(Array.from(merged.values()).slice(-500)));
-    } catch {}
+    } catch { return; }
   }
 
   function saveActiveTask(task: any) {
@@ -1378,11 +1378,12 @@ function detectScenarioFromQuery(text: string): Scenario {
     { ru: "Quality Gate + Evidence", en: "Quality Gate + Evidence", icon: ShieldCheck, from: 94, to: 100 },
   ];
 
-  const liveResultCount = completedSearch
-    ? results.length
-    : running
-      ? Math.max(0, Math.min(results.length, Math.ceil((progress / 100) * results.length)))
-      : 0;
+  let liveResultCount = 0;
+  if (completedSearch) {
+    liveResultCount = results.length;
+  } else if (running) {
+    liveResultCount = Math.max(0, Math.min(results.length, Math.ceil((progress / 100) * results.length)));
+  }
 
   const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
   const taskStateLabel = running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY";
