@@ -69,7 +69,11 @@ function resultRow(item: ExportResult, index: number) {
 
 export function exportCsvFile(payload: ResearchExportPayload) {
   const rows = [resultHeaders, ...payload.results.map((item, index) => resultRow(item, index))];
-  const csv = "\uFEFF" + rows.map(row => row.map(value => `\"${String(value ?? "").replace(/"/g, \"""\").replace(/\r?\n/g, " ")}\"`).join(";")).join("\r\n");
+  const csvEscape = (value: unknown) => {
+    const text = value === null || value === undefined ? "" : String(value);
+    return '"' + text.replace(/"/g, '""').replace(/\r?\n/g, " ") + '"';
+  };
+  const csv = "\uFEFF" + rows.map((row) => row.map(csvEscape).join(";")).join("\r\n");
   downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `aurelius-${safePart(payload.query || "research")}.csv`);
 }
 
