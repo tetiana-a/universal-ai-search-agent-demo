@@ -34,11 +34,16 @@ function extractSearchRows(payload: any): any[] {
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.items)) return payload.items;
+  if (payload && typeof payload === "object") {
+    // Some Jina responses expose a single result object.
+    if (payload.url || payload.link) return [payload];
+  }
   return [];
 }
 
 async function jinaSearch(query: string): Promise<FreeSearchHit[]> {
-  const url = "https://s.jina.ai/" + encodeURIComponent(query);
+  // Jina Search uses the ?q= form for the SERP endpoint.
+  const url = "https://s.jina.ai/?q=" + encodeURIComponent(query);
   const headers: Record<string, string> = { Accept: "application/json" };
   if (useJinaKey && process.env.JINA_API_KEY) {
     headers.Authorization = "Bearer " + process.env.JINA_API_KEY;
