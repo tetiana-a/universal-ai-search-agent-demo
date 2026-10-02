@@ -1,11 +1,14 @@
 name: Production build
+
 on:
   push:
     branches:
-      - fix/production-research-and-exports
+      - main
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,5 +17,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
