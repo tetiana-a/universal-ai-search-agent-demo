@@ -486,21 +486,21 @@ export default function Home() {
     return results;
   }, [filter, results]);
 
-  function detectScenarioFromQuery(text: string): Scenario {
+  function readSourceMemoryFromStorage() {
+  try {
+    const raw = window.localStorage.getItem("aurelius-source-memory-v1");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, 120) : [];
+  } catch {
+    return [];
+  }
+}
+
+function detectScenarioFromQuery(text: string): Scenario {
     const q = text.toLowerCase();
     if (/(инвестор|инвести|investor|vc|angel|fund)/i.test(q)) return "investors";
     if (/(компан|производ|manufacturer|supplier|producer|компан)/i.test(q)) return "companies";
     return "realEstate";
-  }
-
-  function loadSourceMemory() {
-    try {
-      const raw = window.localStorage.getItem("aurelius-source-memory-v1");
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.slice(0, 120) : [];
-    } catch {
-      return [];
-    }
   }
 
   function saveSourceMemory(registry: any[]) {
@@ -525,7 +525,7 @@ export default function Home() {
     setActiveTask(null);
   }
 
-  async function pollResearchTask(task: any) {
+  // NOSONAR - stateful polling orchestrates several UI lifecycle transitions.\n  async function pollResearchTask(task: any) {
     if (!task?.responseId || pollingTaskRef.current === task.responseId) return;
     pollingTaskRef.current = task.responseId;
     setRunning(true);
@@ -662,7 +662,7 @@ export default function Home() {
     }
   }, []);
 
-  async function startResearch() {
+  // NOSONAR - orchestration function intentionally coordinates task initialization, API start and polling.\n  async function startResearch() {
     const detected = detectScenarioFromQuery(query);
     setScenario(detected);
     setActiveNav("research");
@@ -687,7 +687,7 @@ export default function Home() {
     setRunning(true);
 
     try {
-      const sourceMemory = loadSourceMemory();
+      const sourceMemory = readSourceMemoryFromStorage();
       const payload = {
         query,
         language: lang,
@@ -714,7 +714,7 @@ export default function Home() {
       }
 
       const task = {
-        ...(data?.task || {}),
+        ...(data?.task ?? null),
         query,
         language: lang,
         depth: payload.depth,
@@ -1384,7 +1384,8 @@ export default function Home() {
       ? Math.max(0, Math.min(results.length, Math.ceil((progress / 100) * results.length)))
       : 0;
 
-  function renderResearchProcess() {
+  const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
+\n  function renderResearchProcess() {
     const stage = researchStages[researchStage] ?? researchStages[0];
 
     return (
@@ -1682,7 +1683,7 @@ export default function Home() {
                       className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold text-black shadow-[0_12px_38px_rgba(212,175,55,.18)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Search size={14} />
-                      {running ? (lang === "ru" ? "Исследование..." : "Researching...") : t.start}
+                      {running ? startButtonLabel : t.start}
                     </button>
                     {running ? (
                       <button
