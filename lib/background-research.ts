@@ -283,7 +283,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   }
   const relevance = filterResearchResults(rawResults, input.query);
   rawResults = relevance.accepted;
-  const relevance = filterResearchResults(rawResults, input.query);\n  rawResults = relevance.accepted;\n  const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
+  const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
   const deduped = dedupeResults(filtered); const now = new Date().toISOString();
   const results = deduped.out.slice(0, input.maxResults).map((item: any, i: number) => ({
     id: i + 1, title: String(item?.title || "Untitled result"),
