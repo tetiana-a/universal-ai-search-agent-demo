@@ -2849,7 +2849,7 @@ export default function Home() {
               </button>
 
               <button
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
                 className="panel-hover grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
                 aria-label={theme === "dark" ? t.light : t.dark}
                 title={theme === "dark" ? t.light : t.dark}
