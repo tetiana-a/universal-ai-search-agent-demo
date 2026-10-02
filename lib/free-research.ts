@@ -43,7 +43,10 @@ function extractSearchRows(payload: any): any[] {
 }
 
 async function jinaSearch(query: string): Promise<FreeSearchHit[]> {
-  // Jina Search uses the ?q= form for the SERP endpoint.
+  // Current Jina Search requires an API key; the no-key endpoint is blocked.
+  if (!process.env.JINA_API_KEY) {
+    throw new Error("JINA_API_KEY is required for live free-mode web search.");
+  }
   const url = "https://s.jina.ai/?q=" + encodeURIComponent(query);
   const headers: Record<string, string> = { Accept: "application/json" };
   if (useJinaKey && process.env.JINA_API_KEY) {
@@ -167,9 +170,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const batches = await Promise.allSettled(queries.map((query) => jinaSearch(query)));
   const allHits: FreeSearchHit[] = [];
   const seen = new Set<string>();
+  const searchErrors: string[] = [];
 
   for (const batch of batches) {
-    if (batch.status !== "fulfilled") continue;
+    if (batch.status !== "fulfilled") {
+      searchErrors.push(batch.reason instanceof Error ? batch.reason.message : "Jina Search request failed.");
+      continue;
+    }
     for (const hit of batch.value) {
       if (!seen.has(hit.url)) {
         seen.add(hit.url);
@@ -384,17 +391,34 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     : [];
 
   const relevance = filterResearchResults(groundedResults, input.query);
-  const filteredFallback = filterResearchResults(
-    fallbackResults(researchedHits.length ? researchedHits : candidateHits, input),
-    input.query,
-  ).accepted;
-  const safeResults = relevance.accepted.length ? relevance.accepted.slice(0, input.maxResults) : filteredFallback.slice(0, input.maxResults);
+  const fallbackCandidates = fallbackResults(
+    researchedHits.length ? researchedHits : candidateHits,
+    input,
+  );
+  const filteredFallback = filterResearchResults(fallbackCandidates, input.query).accepted;
+  // Never hide all live candidates merely because a deterministic gate is inconclusive.
+  // When no candidate passes, preserve the live hits as Manual review rather than returning
+  // an empty result set; the Quality Gate can still prevent them from becoming Verified.
+  const safeResults = relevance.accepted.length
+    ? relevance.accepted.slice(0, input.maxResults)
+    : fallbackCandidates.slice(0, input.maxResults).map((item) => ({
+        ...item,
+        status: "Manual review",
+        why: "Live candidate preserved because no result passed the strict relevance gate; manual verification is required.",
+        match: Math.min(Number(item.match || 0), 55),
+        confidence: Math.min(Number(item.confidence || 0), 55),
+      }));
 
   const finalParsed = {
     query_understanding: parsed?.query_understanding || { intent: "research", entity_type: "unknown", geography: [], languages: [input.language], criteria: [], exclusions: [], required_fields: [], source_classes: ["web"] },
     search_plan: String(parsed?.search_plan || "Live web search with free AI extraction."),
     search_branches: Array.isArray(parsed?.search_branches) ? parsed.search_branches.map(String).slice(0, 20) : queries,
-    search_summary: String(parsed?.search_summary || "Free AI research grounded in live web evidence."),
+    search_summary: String(
+      parsed?.search_summary ||
+      (searchErrors.length
+        ? "Live search could not retrieve candidates. " + Array.from(new Set(searchErrors)).join(" ")
+        : "Free AI research grounded in live web evidence.")
+    ),
     candidates_seen: Number(parsed?.candidates_seen || allHits.length),
     duplicates_removed: Number(parsed?.duplicates_removed || Math.max(0, allHits.length - candidateHits.length)),
     access_events: Array.isArray(parsed?.access_events) ? parsed.access_events.slice(0, 30) : [],
