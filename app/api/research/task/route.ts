@@ -3,6 +3,7 @@ import { UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN, UNIVERSAL_RESEARCH_SYSTEM_PROMPT_R
 import { getSearchProviderCatalog, runProviderDiscovery } from "@/lib/provider-search";
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { startBackgroundResearch, retrieveBackgroundResponse, cancelBackgroundResponse, backgroundProgress, normalizeCompletedResearch, type BackgroundResearchRequest } from "@/lib/background-research";
+import { runFreeResearch } from "@/lib/free-research";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -10,7 +11,33 @@ export const maxDuration = 60;
 function taskId(responseId: string) { return "AURE-" + responseId.replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase(); }
 
 export async function POST(request: Request) {
+  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
   const apiKey = process.env.OPENAI_API_KEY;
+  if (provider === "free") {
+    try {
+      const body = await request.json();
+      const query = String(body?.query || "").trim();
+      if (!query) return NextResponse.json({ error: "Query is required." }, { status: 400 });
+      const language = body?.language === "en" ? "en" : "ru";
+      const testMode = body?.testMode === true;
+      const input: BackgroundResearchRequest = {
+        query,
+        language,
+        depth: testMode ? "Quick" : (body?.depth || "Balanced"),
+        maxResults: testMode ? 3 : Math.min(Math.max(Number(body?.maxResults || 8), 3), 15),
+        maxSources: testMode ? 8 : Math.min(Math.max(Number(body?.maxSources || 20), 5), 30),
+        maxPages: testMode ? 20 : Math.min(Math.max(Number(body?.maxPages || 100), 20), 200),
+        multilingual: testMode ? false : body?.multilingual !== false,
+        followRelatedLinks: testMode ? false : body?.followRelatedLinks !== false,
+        testMode,
+        sourceMemory: Array.isArray(body?.sourceMemory) ? body.sourceMemory.slice(0, 40) : [],
+      };
+      const result = await runFreeResearch(input);
+      return NextResponse.json(result, { status: 200, headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Free research failed." }, { status: 502 });
+    }
+  }
   if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 503 });
   let body: BackgroundResearchRequest;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 }); }
@@ -55,6 +82,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
+  if (provider === "free") return NextResponse.json({ error: "Free research tasks are completed in the initial request; polling is not required." }, { status: 400 });
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 503 });
   const url = new URL(request.url); const responseId = url.searchParams.get("responseId")?.trim();
@@ -80,6 +109,8 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
+  if (provider === "free") return NextResponse.json({ live: true, cancelled: true, status: "cancelled" }, { headers: { "Cache-Control": "no-store" } });
   const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 503 });
   const url = new URL(request.url); const responseId = url.searchParams.get("responseId")?.trim();
   if (!responseId) return NextResponse.json({ error: "responseId is required." }, { status: 400 });

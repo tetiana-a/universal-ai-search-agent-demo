@@ -127,6 +127,10 @@ const labels = {
     verified: "Проверено",
     reviewed: "Проверено",
     manual: "Ручная проверка",
+    telegramSending: "Отправка…",
+    telegramSent: "Telegram ✓",
+    telegramFailed: "Telegram !",
+    telegramNotConfigured: "Telegram не настроен",
     resultsTitle: "Подходящие результаты",
     all: "Все",
     high: "Высокое совпадение",
@@ -257,7 +261,13 @@ const labels = {
     exportPdf: "PDF",
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
-    testMode: "TEST MODE • экономия",
+    testMode: "Эконом режим",
+    aiFree: "Бесплатный AI",
+    aiPaid: "Платный AI",
+    aiModeLoading: "AI режим…",
+    economyOn: "Экономия включена",
+    economyOff: "Обычный режим",
+    economyDetails: "Quick • 3 результата • 8 источников • 20 страниц",
   },
   en: {
     product: "Universal AI Research Engine",
@@ -281,6 +291,10 @@ const labels = {
     verified: "Verified",
     reviewed: "Reviewed",
     manual: "Manual review",
+    telegramSending: "Sending…",
+    telegramSent: "Telegram ✓",
+    telegramFailed: "Telegram !",
+    telegramNotConfigured: "Telegram not configured",
     resultsTitle: "Qualified results",
     all: "All",
     high: "High match",
@@ -411,7 +425,13 @@ const labels = {
     exportPdf: "PDF",
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
-    testMode: "TEST MODE • low cost",
+    testMode: "Economy mode",
+    aiFree: "Free AI",
+    aiPaid: "Paid AI",
+    aiModeLoading: "AI mode…",
+    economyOn: "Economy enabled",
+    economyOff: "Standard mode",
+    economyDetails: "Quick • 3 results • 8 sources • 20 pages",
   },
 } as const;
 
@@ -482,6 +502,7 @@ export default function Home() {
   const [radioError, setRadioError] = useState("");
   const [radioVolume, setRadioVolume] = useState(0.55);
   const [shareEmailFallback, setShareEmailFallback] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
   const radioAudioRef = useRef<HTMLAudioElement | null>(null);
   const radioPanelRef = useRef<HTMLDivElement | null>(null);
@@ -491,6 +512,8 @@ export default function Home() {
   const radioText = (key: RadioCopyKey) => radioCopy[key][lang === "ru" ? 0 : 1];
 
   const [testMode, setTestMode] = useState(true);
+  const [aiMode, setAiMode] = useState<"free" | "paid" | "unknown">("unknown");
+  const [aiModel, setAiModel] = useState("");
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -500,6 +523,30 @@ export default function Home() {
     ? (liveResults ?? [])
     : resultsByScenario[scenario];
   const usingLiveData = liveAttempted && liveResults !== null;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/research/mode", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(String(data?.error || "AI mode unavailable"));
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAiMode(data?.provider === "free" ? "free" : data?.provider === "paid" ? "paid" : "unknown");
+        setAiModel(String(data?.model || ""));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAiMode("unknown");
+          setAiModel("");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!radioOpen) return;
@@ -640,16 +687,30 @@ export default function Home() {
     return ["AURELIUS — Universal AI Research Engine", "Запрос: " + query, rows.join("\n\n")].join("\n\n");
   }
 
-  function shareViaTelegram() {
-    const fullText = buildShareText();
-    const text = fullText.length > 3800 ? fullText.slice(0, 3797) + "..." : fullText;
-    const shareUrl =
-      "https://t.me/share/url?url=" +
-      encodeURIComponent(window.location.href) +
-      "&text=" +
-      encodeURIComponent(text);
-    const popup = window.open(shareUrl, "_blank", "noopener,noreferrer");
-    if (!popup) window.location.href = shareUrl;
+  async function shareViaTelegram() {
+    setTelegramStatus("sending");
+
+    try {
+      const response = await fetch("/api/telegram/send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "AURELIUS — " + query.slice(0, 100),
+          text: buildShareText(),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(String(data?.error || t.telegramNotConfigured));
+      }
+
+      setTelegramStatus("sent");
+      window.setTimeout(() => setTelegramStatus("idle"), 3000);
+    } catch {
+      setTelegramStatus("error");
+      window.setTimeout(() => setTelegramStatus("idle"), 5000);
+    }
   }
 
   function shareViaEmail() {
@@ -767,10 +828,31 @@ export default function Home() {
   }
 
   function renderShareActions(compact = false) {
+    const telegramLabel =
+      telegramStatus === "sending"
+        ? t.telegramSending
+        : telegramStatus === "sent"
+          ? t.telegramSent
+          : telegramStatus === "error"
+            ? t.telegramFailed
+            : radioText("telegram");
+
     const actions = [
-      { label: radioText("telegram"), icon: Send, run: shareViaTelegram },
-      { label: radioText("email"), icon: Mail, run: shareViaEmail },
-      { label: compact ? radioText("systemShare") : radioText("share"), icon: Share2, run: () => void shareViaSystem() },
+      {
+        label: telegramLabel,
+        icon: Send,
+        run: () => void shareViaTelegram(),
+        disabled: telegramStatus === "sending" || shownResults.length === 0,
+        accent: telegramStatus === "sent",
+      },
+      { label: radioText("email"), icon: Mail, run: shareViaEmail, disabled: false, accent: false },
+      {
+        label: compact ? radioText("systemShare") : radioText("share"),
+        icon: Share2,
+        run: () => void shareViaSystem(),
+        disabled: false,
+        accent: false,
+      },
     ];
 
     return (
@@ -781,7 +863,16 @@ export default function Home() {
             <button
               key={action.label}
               onClick={action.run}
-              className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
+              disabled={action.disabled}
+              title={action.label}
+              className={
+                "panel-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] transition " +
+                (action.disabled
+                  ? "cursor-not-allowed border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-faint)] opacity-60"
+                  : action.accent
+                    ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]"
+                    : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")
+              }
             >
               <Icon size={12} /> {action.label}
             </button>
@@ -818,6 +909,46 @@ export default function Home() {
   function clearActiveTask() {
     window.localStorage.removeItem("aurelius-active-task-v1");
     setActiveTask(null);
+  }
+
+  function applyResearchResult(data: any) {
+    setLiveResults(data.results);
+    setLiveStats({
+      sourcesFound: Number(data.stats?.sourcesFound || 0),
+      sourcesChecked: Number(data.stats?.sourcesChecked || 0),
+      pagesProcessed: Number(data.stats?.pagesProcessed || 0),
+      recordsExtracted: Number(data.stats?.recordsExtracted || 0),
+      duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
+      qualified: Number(data.stats?.qualified || 0),
+      evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
+      sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
+      sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
+      averageConfidence: Number(data.stats?.averageConfidence || 0),
+    });
+    setSearchPlan(String(data.searchPlan || ""));
+    setResearchSummary(String(data.summary || ""));
+    setLiveBilling(data.billing || undefined);
+    setQueryUnderstanding(data.queryUnderstanding || null);
+    setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
+    setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
+    setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+    setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
+    setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
+    setQualityGate({
+      total: Number(data.qualityGate?.total || 0),
+      pass: Number(data.qualityGate?.pass || 0),
+      review: Number(data.qualityGate?.review || 0),
+      fail: Number(data.qualityGate?.fail || 0),
+      independentVerification: Boolean(data.qualityGate?.independentVerification),
+      ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
+    });
+    saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+    setProgress(100);
+    setResearchStage(6);
+    setCompletedSearch(true);
+    setRunning(false);
+    clearActiveTask();
+    window.setTimeout(() => document.getElementById("results-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
   }
 
   // NOSONAR - stateful polling orchestrates several UI lifecycle transitions.
@@ -869,43 +1000,7 @@ export default function Home() {
         }
 
         if (data?.live === true && Array.isArray(data.results)) {
-          setLiveResults(data.results);
-          setLiveStats({
-            sourcesFound: Number(data.stats?.sourcesFound || 0),
-            sourcesChecked: Number(data.stats?.sourcesChecked || 0),
-            pagesProcessed: Number(data.stats?.pagesProcessed || 0),
-            recordsExtracted: Number(data.stats?.recordsExtracted || 0),
-            duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
-            qualified: Number(data.stats?.qualified || 0),
-            evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
-            sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
-            sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
-            averageConfidence: Number(data.stats?.averageConfidence || 0),
-          });
-          setSearchPlan(String(data.searchPlan || ""));
-          setResearchSummary(String(data.summary || ""));
-          setLiveBilling(data.billing || undefined);
-          setQueryUnderstanding(data.queryUnderstanding || null);
-          setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
-          setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
-          setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-          setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
-          setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
-          setQualityGate({
-            total: Number(data.qualityGate?.total || 0),
-            pass: Number(data.qualityGate?.pass || 0),
-            review: Number(data.qualityGate?.review || 0),
-            fail: Number(data.qualityGate?.fail || 0),
-            independentVerification: Boolean(data.qualityGate?.independentVerification),
-            ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
-          });
-          saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-          setProgress(100);
-          setResearchStage(6);
-          setCompletedSearch(true);
-          setRunning(false);
-          clearActiveTask();
-          window.setTimeout(() => document.getElementById("results-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+          applyResearchResult(data);
           break;
         }
 
@@ -1020,6 +1115,11 @@ export default function Home() {
         maxSources: payload.maxSources,
         maxPages: payload.maxPages,
       };
+
+      if (data?.live === true && Array.isArray(data.results)) {
+        applyResearchResult(data);
+        return;
+      }
 
       if (!task?.responseId) throw new Error("The research task did not return a background response ID.");
 
@@ -1983,15 +2083,19 @@ export default function Home() {
                       type="button"
                       onClick={() => setTestMode((value) => !value)}
                       disabled={running}
-                      title={lang === "ru" ? "Дешёвый контрольный запуск: Quick, 3 результата, 8 источников, 20 страниц. Дополнительные провайдеры отключены." : "Low-cost control run: Quick, 3 results, 8 sources, 20 pages. Supplemental providers are disabled."}
-                      className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs transition ${
+                      title={lang === "ru" ? "Контрольный запуск без лишних расходов: Quick, 3 результата, 8 источников, 20 страниц." : "Controlled low-cost run: Quick, 3 results, 8 sources, 20 pages."}
+                      aria-pressed={testMode}
+                      className={`group inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs transition ${
                         testMode
                           ? "border-[var(--success)]/35 bg-[var(--success)]/8 text-[var(--success)]"
                           : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
                       }`}
                     >
-                      <Gauge size={14} />
-                      {t.testMode}
+                      <Gauge size={14} className={testMode ? "text-[var(--success)]" : ""} />
+                      <span>{testMode ? t.economyOn : t.economyOff}</span>
+                      <span className="hidden max-w-[420px] text-[10px] text-[var(--text-faint)] xl:inline">
+                        {t.economyDetails}
+                      </span>
                     </button>
 
                     <button
@@ -2095,7 +2199,7 @@ export default function Home() {
         <section className="grid gap-4 sm:grid-cols-3">
           {[
             ["AI Models", settings.planningModel, Bot],
-            ["Search", settings.braveEnabled && settings.exaEnabled ? "Brave + Exa" : "Configured providers", Search],
+            ["Search", aiMode === "free" ? "Jina Search + Reader" : (settings.braveEnabled && settings.exaEnabled ? "Brave + Exa" : "Configured providers"), Search],
             ["Acquisition", settings.playwrightEnabled ? "HTTP → Browser" : "HTTP only", Globe2],
           ].map(([label, value, Icon]) => (
             <div key={String(label)} className="glass-soft panel-hover rounded-2xl p-4">
@@ -2929,6 +3033,22 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] md:flex">
                 <Command size={13} /> K
+              </div>
+
+              <div
+                className={`group relative hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex ${
+                  aiMode === "free"
+                    ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
+                    : aiMode === "paid"
+                      ? "border-[var(--gold)]/30 bg-[var(--gold)]/8 text-[var(--gold-bright)]"
+                      : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
+                }`}
+                title={aiModel ? `Model: ${aiModel}` : t.aiModeLoading}
+              >
+                <Bot size={13} />
+                <span>{aiMode === "free" ? t.aiFree : aiMode === "paid" ? t.aiPaid : t.aiModeLoading}</span>
+                <span className="h-1 w-1 rounded-full bg-current opacity-70" />
+                <span className="font-medium">{testMode ? t.economyOn : t.economyOff}</span>
               </div>
 
               <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-3 py-1.5 text-[11px] text-[var(--gold-bright)]">
