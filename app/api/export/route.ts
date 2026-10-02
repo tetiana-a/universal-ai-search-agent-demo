@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 function disposition(filename: string) {
-  return 'attachment; filename="' + filename + '"; filename*=UTF-8\\'\\'' + encodeURIComponent(filename);
+  return "attachment; filename=\"" + filename + "\"; filename*=UTF-8''" + encodeURIComponent(filename);
 }
 
 function isPayload(value: unknown): value is ResearchExportPayload {
