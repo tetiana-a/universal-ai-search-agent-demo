@@ -1385,6 +1385,7 @@ function detectScenarioFromQuery(text: string): Scenario {
       : 0;
 
   const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
+  const taskStateLabel = running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY";
 \n  function renderResearchProcess() {
     const stage = researchStages[researchStage] ?? researchStages[0];
 
@@ -1400,7 +1401,7 @@ function detectScenarioFromQuery(text: string): Scenario {
               {running ? t.engineRunning : completedSearch ? t.engineComplete : t.liveFeed}
             </div>
             <div className="mt-1 text-xs text-[var(--text-muted)]">
-              {current.label} · {activeTask?.id || "—"} · {running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY"}
+              {current.label} · {activeTask?.id || "—"} · {taskStateLabel}
             </div>
           </div>
           <div className="text-left lg:text-right">
