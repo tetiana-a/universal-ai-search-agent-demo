@@ -337,7 +337,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
         : genericStructuredValue,
       confidence: result.confidence >= 70,
       sourceCaptured: sourceUrls.size === 0 || sourceUrls.has(result.url) || sourceRegistry.some((s) => s.url === result.url || s.domain === result.sourceDomain),
-      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),\n      relevance: true,
+      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),
       relevance: true,
     };
     const passed = Object.values(checks).filter(Boolean).length; const total = Object.keys(checks).length; const gate = passed === total ? "PASS" : passed >= Math.ceil(total * 0.75) ? "REVIEW" : "FAIL";
