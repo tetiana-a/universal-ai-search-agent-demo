@@ -1776,6 +1776,7 @@ export default function Home() {
                   {lang === "ru" ? "Открыть все результаты" : "Open all results"}
                 </button>
               ) : null}
+              {completedSearch ? renderShareActions(true) : null}
             </div>
 
             <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -2653,6 +2654,7 @@ export default function Home() {
             ))}
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {renderShareActions(true)}
               <button onClick={exportCsv} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
                 <Download size={12} /> CSV
               </button>
@@ -2852,7 +2854,17 @@ export default function Home() {
               </div>
 
               <button
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                onClick={() => setRadioOpen((value) => !value)}
+                className={"panel-hover inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-[10px] " + (radioPlaying ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]" : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")}
+                aria-label={radioPlaying ? t.radioOn : t.radioOff}
+                title={radioPlaying ? t.radioOn : t.radioOff}
+              >
+                <RadioIcon size={15} />
+                <span className="hidden md:inline">{radioPlaying ? t.radioOn : t.radio}</span>
+              </button>
+
+              <button
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")
                 className="panel-hover grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
                 aria-label={theme === "dark" ? t.light : t.dark}
                 title={theme === "dark" ? t.light : t.dark}
