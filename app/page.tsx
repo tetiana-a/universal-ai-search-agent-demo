@@ -1216,7 +1216,9 @@ export default function Home() {
   }
 
   function exportCsv() {
-    exportCsvFile(buildExportPayload());
+    void exportCsvFile(buildExportPayload()).catch((error) => {
+      setLiveError(error instanceof Error ? error.message : "CSV export failed.");
+    });
   }
 
   async function exportExcel() {
@@ -1236,7 +1238,9 @@ export default function Home() {
   }
 
   function exportJson() {
-    exportJsonFile(buildExportPayload());
+    void exportJsonFile(buildExportPayload()).catch((error) => {
+      setLiveError(error instanceof Error ? error.message : "JSON export failed.");
+    });
   }
 
   /* legacy CSV implementation moved to lib/exporters.ts */
@@ -3283,11 +3287,12 @@ export default function Home() {
       {shareEmailFallback && (
         <div
           className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-md"
-          onMouseDown={() => setShareEmailFallback(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            tabIndex={-1}
             className="glass w-full max-w-[620px] rounded-[26px] p-5 sm:p-6"
-            onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -3369,11 +3374,12 @@ export default function Home() {
       {telegramModalOpen && (
         <div
           className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-md"
-          onMouseDown={() => setTelegramModalOpen(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            tabIndex={-1}
             className="glass w-full max-w-[620px] rounded-[26px] p-5 sm:p-6"
-            onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
