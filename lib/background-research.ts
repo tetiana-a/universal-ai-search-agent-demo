@@ -333,7 +333,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   };
   const escalation = accessEscalationSummary(sourcePlans); const accessCheckpoints = sourcePlans.flatMap((p) => p.checkpoint?.required ? [p.checkpoint] : []);
   const sourceDomains = unique([...sourceRegistry.map((s) => s.domain), ...results.map((r) => r.sourceDomain)].filter(Boolean));
-  return { live: true, partial: false, status: "completed", query: input.query, generatedAt: now, searchPlan: String(parsed?.search_plan || ""), summary: String(parsed?.search_summary || ""),
+  return { live: true, partial: false, status: "completed", query: input.query, generatedAt: now, searchPlan: searchPlanText || "Search plan generated from live web research.", summary: String(parsed?.search_summary || ""),
     queryUnderstanding, searchBranches: Array.isArray(parsed?.search_branches) ? parsed.search_branches.map(String).slice(0, 40) : [], sourceRegistry, accessEvents, accessCheckpoints, results: gated,
     sourceUrls: unique([...retrievedSources.map((s) => s.url), ...sourceRegistry.map((s) => s.url), ...results.map((r) => r.url)].filter(Boolean)), sourceDomains,
     stats: { sourcesFound: sourceDomains.length, sourcesChecked: sourceRegistry.filter((s) => s.accessStatus === "checked").length,
