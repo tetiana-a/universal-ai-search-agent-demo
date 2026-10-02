@@ -95,8 +95,8 @@ export const defaultSettings: AppSettings = {
   multilingualSearch: true,
   followRelatedLinks: true,
 
-  planningModel: "GPT-6.1 Sol",
-  extractionModel: "GPT-6 Luna",
+  planningModel: "GPT-5.5",
+  extractionModel: "GPT-5.5",
   hardMatchModel: "Claude Sonnet 5.5",
   qualityCheckModel: "Claude Sonnet 5.5",
   visionModel: "GPT / Gemini Vision",
