@@ -38,6 +38,15 @@ import {
   Target,
   Upload,
   X,
+  Radio as RadioIcon,
+  Music2,
+  Play as PlayIcon,
+  Pause as PauseIcon,
+  Share2,
+  Send,
+  Mail,
+  Volume2,
+  SkipForward,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
@@ -56,6 +65,20 @@ type Theme = "dark" | "light";
 type ResultFilter = "All" | "Verified" | "High match";
 type AudioState = "idle" | "listening" | "transcribing";
 
+type RadioStation = {
+  stationuuid: string;
+  name: string;
+  country: string;
+  language: string;
+  tags: string;
+  favicon: string;
+  homepage: string;
+  streamUrl: string;
+  codec: string;
+  bitrate: number;
+  votes: number;
+};
+
 const nav: Array<{ key: NavKey; icon: typeof Sparkles; ru: string; en: string }> = [
   { key: "research", icon: Sparkles, ru: "Исследование", en: "Research" },
   { key: "tasks", icon: Layers3, ru: "Задачи", en: "Tasks" },
@@ -63,6 +86,23 @@ const nav: Array<{ key: NavKey; icon: typeof Sparkles; ru: string; en: string }>
   { key: "results", icon: BarChart3, ru: "Результаты", en: "Results" },
   { key: "settings", icon: Settings2, ru: "Настройки", en: "Settings" },
 ];
+
+const radioCopy = {
+  share: ["Поделиться", "Share"],
+  telegram: ["Telegram", "Telegram"],
+  email: ["Почта", "Email"],
+  systemShare: ["Поделиться", "Share"],
+  radio: ["Радио", "Radio"],
+  radioOn: ["Радио играет", "Radio playing"],
+  radioOff: ["Открыть радио", "Open radio"],
+  radioLoading: ["Ищем станции…", "Finding stations…"],
+  radioEmpty: ["Подходящих станций нет", "No matching stations"],
+  radioError: ["Не удалось загрузить радио", "Radio unavailable"],
+  listen: ["Слушать", "Listen"],
+  stopRadio: ["Выключить", "Stop"],
+} as const;
+
+type RadioCopyKey = keyof typeof radioCopy;
 
 const labels = {
   ru: {
@@ -434,9 +474,21 @@ export default function Home() {
   const [filter, setFilter] = useState<ResultFilter>("All");
   const [audioState, setAudioState] = useState<AudioState>("idle");
   const [transcript, setTranscript] = useState("");
+  const [radioOpen, setRadioOpen] = useState(false);
+  const [radioGenre, setRadioGenre] = useState("chillout");
+  const [radioStations, setRadioStations] = useState<RadioStation[]>([]);
+  const [radioLoading, setRadioLoading] = useState(false);
+  const [radioPlaying, setRadioPlaying] = useState(false);
+  const [radioError, setRadioError] = useState("");
+  const [radioVolume, setRadioVolume] = useState(0.55);
+  const [shareEmailFallback, setShareEmailFallback] = useState(false);
+  const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
+  const radioAudioRef = useRef<HTMLAudioElement | null>(null);
+  const radioPanelRef = useRef<HTMLDivElement | null>(null);
   const [voiceError, setVoiceError] = useState("");
   const recognitionRef = useRef<any>(null);
   const t = labels[lang];
+  const radioText = (key: RadioCopyKey) => radioCopy[key][lang === "ru" ? 0 : 1];
 
   const [testMode, setTestMode] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -448,6 +500,70 @@ export default function Home() {
     ? (liveResults ?? [])
     : resultsByScenario[scenario];
   const usingLiveData = liveAttempted && liveResults !== null;
+
+  useEffect(() => {
+    if (!radioOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !radioPanelRef.current?.contains(target)) {
+        setRadioOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRadioOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [radioOpen]);
+
+  useEffect(() => {
+    return () => {
+      radioAudioRef.current?.pause();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!radioOpen) return;
+    let cancelled = false;
+    setRadioLoading(true);
+    setRadioError("");
+    fetch("/api/radio?tag=" + encodeURIComponent(radioGenre) + "&limit=12", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data?.ok) throw new Error(String(data?.error || "Radio unavailable"));
+        return Array.isArray(data.stations) ? data.stations : [];
+      })
+      .then((stations: RadioStation[]) => {
+        if (!cancelled) setRadioStations(stations);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRadioStations([]);
+          setRadioError(error instanceof Error ? error.message : radioText("radioError"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRadioLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [radioOpen, radioGenre, radioText("radioError")]);
+
+  useEffect(() => {
+    const audio = radioAudioRef.current;
+    if (audio) audio.volume = radioVolume;
+  }, [radioVolume]);
+
+  // Media Session is progressive enhancement; playback itself remains on HTMLAudioElement.
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("aurelius-theme") as Theme | null;
@@ -498,6 +614,182 @@ export default function Home() {
     if (filter === "High match") return results.filter((item) => item.match >= 90);
     return results;
   }, [filter, results]);
+
+  function buildShareText() {
+    const rows = shownResults.slice(0, 12).map((item, index) => {
+      let evidence = "";
+      if (item.evidenceQuote) {
+        evidence = "Evidence: " + item.evidenceQuote;
+      } else if (item.evidence) {
+        evidence = "Evidence: " + item.evidence;
+      }
+
+      return [
+        (index + 1) + ". " + item.title,
+        item.organization ? "Организация: " + item.organization : "",
+        item.specialization ? "Профиль: " + item.specialization : "",
+        item.geography ? "География: " + item.geography : "Место: " + item.location,
+        item.investmentType ? "Тип: " + item.investmentType : "",
+        item.stage ? "Стадия: " + item.stage : "",
+        item.ticket ? "Ticket: " + item.ticket : "Цена/параметр: " + item.price,
+        "Источник: " + item.source,
+        "URL: " + item.url,
+        evidence,
+      ].filter(Boolean).join("\n");
+    });
+    return ["AURELIUS — Universal AI Research Engine", "Запрос: " + query, rows.join("\n\n")].join("\n\n");
+  }
+
+  function shareViaTelegram() {
+    const fullText = buildShareText();
+    const text = fullText.length > 3800 ? fullText.slice(0, 3797) + "..." : fullText;
+    const shareUrl =
+      "https://t.me/share/url?url=" +
+      encodeURIComponent(window.location.href) +
+      "&text=" +
+      encodeURIComponent(text);
+    const popup = window.open(shareUrl, "_blank", "noopener,noreferrer");
+    if (!popup) window.location.href = shareUrl;
+  }
+
+  function shareViaEmail() {
+    const subject = "Aurelius research: " + query.slice(0, 80);
+    const body = buildShareText();
+    const mailto = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+    setShareEmailFallback(false);
+    window.location.href = mailto;
+
+    window.setTimeout(() => {
+      setShareEmailFallback(true);
+    }, 1200);
+  }
+
+  async function shareViaSystem() {
+    const text = buildShareText();
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Aurelius Research", text, url: window.location.href });
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      }
+    } catch {}
+  }
+
+  function handleRadioPlay() {
+    const station = currentStation ?? radioStations[0];
+    if (station) void playRadioStation(station);
+  }
+
+  function renderRadioStations() {
+    if (radioLoading || radioStations.length === 0) {
+      const message = radioLoading ? radioText("radioLoading") : radioText("radioEmpty");
+      return (
+        <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">
+          {message}
+        </div>
+      );
+    }
+
+    return radioStations.map((station) => (
+      <button
+        key={station.stationuuid}
+        onClick={() => void playRadioStation(station)}
+        className={
+          "group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition " +
+          (currentStation?.stationuuid === station.stationuuid
+            ? "border-[var(--gold)]/25 bg-[var(--gold)]/7"
+            : "border-[var(--line-soft)] bg-white/[.012] hover:bg-white/[.025]")
+        }
+      >
+        {station.favicon ? (
+          <img src={station.favicon} alt="" className="h-8 w-8 rounded-lg object-cover" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--gold)]/8 text-[var(--gold)]">
+            <RadioIcon size={14} />
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[11px] font-medium text-[var(--text-soft)]">{station.name}</span>
+          <span className="mt-0.5 block truncate text-[9px] text-[var(--text-faint)]">
+            {station.country} · {station.tags || station.language || "international"}
+          </span>
+        </span>
+        <PlayIcon
+          size={12}
+          className={
+            currentStation?.stationuuid === station.stationuuid && radioPlaying
+              ? "text-[var(--success)]"
+              : "text-[var(--text-faint)]"
+          }
+        />
+      </button>
+    ));
+  }
+
+  async function playRadioStation(station: RadioStation) {
+    const audio = radioAudioRef.current;
+    if (!audio) return;
+    setRadioError("");
+    try {
+      if (currentStation?.stationuuid === station.stationuuid) {
+        if (audio.paused) {
+          await audio.play();
+          setRadioPlaying(true);
+        } else {
+          audio.pause();
+          setRadioPlaying(false);
+        }
+        return;
+      }
+      audio.pause();
+      audio.src = station.streamUrl;
+      audio.volume = radioVolume;
+      audio.load();
+      setCurrentStation(station);
+      await audio.play();
+      setRadioPlaying(true);
+    } catch (error) {
+      setRadioPlaying(false);
+      setRadioError(error instanceof Error ? error.message : "Unable to start this station.");
+    }
+  }
+
+  function stopRadio() {
+    radioAudioRef.current?.pause();
+    setRadioPlaying(false);
+  }
+
+  function skipRadio() {
+    if (!radioStations.length) return;
+    const index = currentStation ? radioStations.findIndex((station) => station.stationuuid === currentStation.stationuuid) : -1;
+    const next = radioStations[(index + 1 + radioStations.length) % radioStations.length];
+    if (next) void playRadioStation(next);
+  }
+
+  function renderShareActions(compact = false) {
+    const actions = [
+      { label: radioText("telegram"), icon: Send, run: shareViaTelegram },
+      { label: radioText("email"), icon: Mail, run: shareViaEmail },
+      { label: compact ? radioText("systemShare") : radioText("share"), icon: Share2, run: () => void shareViaSystem() },
+    ];
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {actions.map((action) => {
+          const Icon = action.icon;
+          return (
+            <button
+              key={action.label}
+              onClick={action.run}
+              className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
+            >
+              <Icon size={12} /> {action.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   function detectScenarioFromQuery(text: string): Scenario {
     const q = text.toLowerCase();
@@ -1566,6 +1858,7 @@ export default function Home() {
                   {lang === "ru" ? "Открыть все результаты" : "Open all results"}
                 </button>
               ) : null}
+              {completedSearch ? renderShareActions(true) : null}
             </div>
 
             <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -2443,6 +2736,7 @@ export default function Home() {
             ))}
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {renderShareActions(true)}
               <button onClick={exportCsv} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
                 <Download size={12} /> CSV
               </button>
@@ -2508,10 +2802,11 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
-      <div className="app-grid pointer-events-none fixed inset-0 -z-10 opacity-45" />
+    <main className={"relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell " + (radioPlaying ? "radio-live" : "")}>
+      <div className={"music-atmosphere pointer-events-none fixed inset-0 z-0 " + (radioPlaying ? "is-live" : "")} aria-hidden="true" />
+      <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
 
-      <div className="mx-auto flex min-h-screen max-w-[1900px]">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
         <aside
           className={`fixed inset-y-0 left-0 z-50 w-[280px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 ${
             mobileOpen ? "translate-x-0" : "-translate-x-full"
@@ -2642,6 +2937,16 @@ export default function Home() {
               </div>
 
               <button
+                onClick={() => setRadioOpen((value) => !value)}
+                className={"panel-hover inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-[10px] " + (radioPlaying ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]" : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")}
+                aria-label={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
+                title={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
+              >
+                <RadioIcon size={15} />
+                <span className="hidden md:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
+              </button>
+
+              <button
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
                 className="panel-hover grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
                 aria-label={theme === "dark" ? t.light : t.dark}
@@ -2759,6 +3064,190 @@ export default function Home() {
           </aside>
         </div>
       )}
+
+      {shareEmailFallback && (
+        <div
+          className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-md"
+          onMouseDown={() => setShareEmailFallback(false)}
+        >
+          <div
+            className="glass w-full max-w-[520px] rounded-[26px] p-5 sm:p-6"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
+                  <Mail size={14} />
+                  {lang === "ru" ? "Открыть письмо" : "Open email"}
+                </div>
+                <h3 className="mt-2 text-lg font-semibold text-[var(--text)]">
+                  {lang === "ru"
+                    ? "Письмо с результатами подготовлено"
+                    : "Your research email is prepared"}
+                </h3>
+                <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                  {lang === "ru"
+                    ? "Если системная почта не открылась автоматически, выберите почтовый сервис ниже."
+                    : "If your default mail app did not open, choose a mail service below."}
+                </p>
+              </div>
+              <button
+                onClick={() => setShareEmailFallback(false)}
+                className="rounded-xl border border-[var(--line-soft)] p-2 text-[var(--text-muted)]"
+                aria-label="Close email options"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+              <a
+                href={"https://mail.google.com/mail/?view=cm&fs=1&su=" + encodeURIComponent("Aurelius research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
+                target="_blank"
+                rel="noreferrer"
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+              >
+                Gmail
+              </a>
+              <a
+                href={"https://outlook.live.com/mail/0/deeplink/compose?subject=" + encodeURIComponent("Aurelius research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
+                target="_blank"
+                rel="noreferrer"
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+              >
+                Outlook
+              </a>
+              <button
+                onClick={() => {
+                  void navigator.clipboard?.writeText(buildShareText());
+                  setShareEmailFallback(false);
+                }}
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+              >
+                {lang === "ru" ? "Скопировать" : "Copy"}
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-3 text-[10px] leading-4 text-[var(--text-faint)]">
+              {lang === "ru"
+                ? "В письмо попадут запрос, найденные результаты, источники и evidence."
+                : "The email contains the query, results, sources and evidence."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {radioOpen && (
+        <div ref={radioPanelRef} className="radio-panel fixed right-4 top-[82px] z-[65] w-[calc(100vw-2rem)] max-w-[390px] overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent)] shadow-2xl backdrop-blur-2xl">
+          <div className="spectrum-line h-px opacity-80" />
+          <div className="p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
+                  <Music2 size={14} />
+                  {radioText("radio")}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-[var(--text)]">
+                  {currentStation?.name || (lang === "ru" ? "Международное онлайн-радио" : "International online radio")}
+                </div>
+                {currentStation ? (
+                  <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                    {currentStation.country} · {currentStation.codec} {currentStation.bitrate ? currentStation.bitrate + " kbps" : ""}
+                  </div>
+                ) : null}
+              </div>
+              <button onClick={() => setRadioOpen(false)} className="rounded-xl border border-[var(--line-soft)] p-2 text-[var(--text-muted)]" aria-label="Close radio">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {[
+                ["chillout", "Chill / Ambient"],
+                ["jazz", "Jazz"],
+                ["classical", "Classical"],
+                ["electronic", "Electronic"],
+                ["pop", "International Pop"],
+              ].map(([tag, label]) => (
+                <button
+                  key={tag}
+                  onClick={() => setRadioGenre(tag)}
+                  className={"rounded-full border px-2.5 py-1.5 text-[9px] transition " + (radioGenre === tag ? "border-[var(--gold)]/40 bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "border-[var(--line-soft)] text-[var(--text-muted)]")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--line-soft)] bg-black/10 p-3">
+              <button
+                onClick={handleRadioPlay}
+                disabled={!currentStation && radioStations.length === 0}
+                className={"grid h-10 w-10 shrink-0 place-items-center rounded-xl " + (radioPlaying ? "bg-[var(--success)]/12 text-[var(--success)]" : "bg-[var(--gold)]/12 text-[var(--gold-bright)]") + " disabled:opacity-30"}
+                aria-label={radioPlaying ? radioText("stopRadio") : radioText("listen")}
+              >
+                {radioPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+              </button>
+              <button
+                onClick={skipRadio}
+                disabled={radioStations.length < 2}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[var(--line-soft)] text-[var(--text-muted)] disabled:opacity-30"
+                aria-label="Next station"
+              >
+                <SkipForward size={15} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between text-[9px] uppercase tracking-[.14em] text-[var(--text-faint)]">
+                  <span>{radioPlaying ? radioText("radioOn") : radioText("radioOff")}</span>
+                  <span>{Math.round(radioVolume * 100)}%</span>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Volume2 size={12} className="shrink-0 text-[var(--text-faint)]" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={radioVolume}
+                    onChange={(event) => setRadioVolume(Number(event.target.value))}
+                    className="w-full accent-[var(--gold)]"
+                    aria-label="Radio volume"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {radioError ? (
+              <div className="mt-3 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger)]/5 p-3 text-[10px] leading-4 text-[var(--danger)]">
+                {radioError}
+              </div>
+            ) : null}
+
+            <div className="mt-4 max-h-[290px] space-y-1.5 overflow-y-auto pr-1">
+              {renderRadioStations()}
+            </div>
+
+            <div className="mt-3 text-[9px] leading-4 text-[var(--text-faint)]">
+              {lang === "ru"
+                ? "Открытое интернет-радио. Запуск только после клика — так браузеры не блокируют звук."
+                : "Open internet radio. Playback starts only after a click so browsers can allow audio."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <audio
+        ref={radioAudioRef}
+        onPlay={() => setRadioPlaying(true)}
+        onPause={() => setRadioPlaying(false)}
+        onError={() => {
+          setRadioPlaying(false);
+          setRadioError(lang === "ru" ? "Поток станции недоступен. Выберите другую станцию." : "This station stream is unavailable. Choose another station.");
+        }}
+        preload="none"
+      >
+        <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
+      </audio>
 
       <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
         <span className="inline-flex items-center gap-2">
