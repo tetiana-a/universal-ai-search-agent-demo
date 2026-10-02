@@ -78,8 +78,8 @@ export function escapeHtml(value: unknown) {
     .replace(/'/g, "&#39;");
 }
 
-function valueOrDash() {
-  for (const value of arguments) {
+function valueOrDash(...values: unknown[]) {
+  for (const value of values) {
     const text = String(value ?? "").trim();
     if (text && !/^not specified$/i.test(text) && text !== "—") return text;
   }
