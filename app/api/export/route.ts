@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
     if (format === "json") {
       const buffer = createJsonBuffer(payload);
-      return new Response(buffer, {
+      return new Response(buffer as unknown as BodyInit, {
         status: 200,
         headers: {
           "Content-Type": "application/json; charset=utf-8",
