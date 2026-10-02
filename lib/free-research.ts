@@ -91,14 +91,27 @@ async function jinaRead(url: string): Promise<string> {
   return (await response.text()).slice(0, 8000);
 }
 
-function buildBranches(query: string, language: "ru" | "en", testMode = false) {
+function buildBranches(
+  query: string,
+  language: "ru" | "en",
+  testMode = false,
+  sourceMemory: BackgroundResearchRequest["sourceMemory"] = [],
+) {
   const matrix = buildSearchMatrix(query, language);
   const branches = matrix
     .sort((a, b) => b.priority - a.priority)
     .flatMap((branch) => Array.isArray(branch.queries) ? branch.queries : [])
     .filter(Boolean);
+
+  const memoryBranches = sourceMemory
+    .slice(0, 12)
+    .flatMap((source) => {
+      const domain = String(source?.domain || "").trim();
+      return domain ? [`site:${domain} ${query}`] : [];
+    });
+
   const limit = testMode ? 3 : 4;
-  return [...new Set([query, ...branches])].slice(0, limit);
+  return [...new Set([query, ...memoryBranches, ...branches])].slice(0, limit);
 }
 
 function extractJsonText(response: any) {
@@ -149,7 +162,7 @@ function fallbackResults(hits: FreeSearchHit[], input: BackgroundResearchRequest
 
 export async function runFreeResearch(input: BackgroundResearchRequest) {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
-  const queries = buildBranches(input.query, input.language, input.testMode === true);
+  const queries = buildBranches(input.query, input.language, input.testMode === true, input.sourceMemory);
   const batches = await Promise.allSettled(queries.map((query) => jinaSearch(query)));
   const allHits: FreeSearchHit[] = [];
   const seen = new Set<string>();
@@ -164,11 +177,37 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     }
   }
 
-  const candidateHits = allHits.slice(0, Math.min(input.maxSources, input.testMode ? 8 : 16));
+  let candidateHits = allHits.slice(0, Math.min(input.maxSources, input.testMode ? 8 : 16));
+
+  // If the live search endpoint is unavailable or rate-limited, reuse previously
+  // learned public source URLs instead of returning an unexplained empty result.
+  if (!candidateHits.length && Array.isArray(input.sourceMemory)) {
+    const memoryHits = await Promise.all(
+      input.sourceMemory
+        .slice(0, input.testMode ? 3 : 8)
+        .filter((source) => /^https?:\\/\\//i.test(String(source?.url || "")))
+        .map(async (source) => {
+          const url = normalizeUrl(String(source.url));
+          const content = await jinaRead(url);
+          return content
+            ? {
+                title: String(source?.name || source?.domain || url),
+                url,
+                snippet: content.slice(0, 1400),
+                domain: host(url),
+                content,
+                retrievedAt: new Date().toISOString(),
+              }
+            : null;
+        }),
+    );
+    candidateHits = memoryHits.filter(Boolean) as FreeSearchHit[];
+  }
+
   const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 5);
 
   const readResults = await Promise.allSettled(
-    candidateHits.slice(0, readerLimit).map(async (hit) => ({ hit, content: await jinaRead(hit.url) })),
+    candidateHits.slice(0, readerLimit).map(async (hit) => ({ hit, content: hit.content || await jinaRead(hit.url) })),
   );
 
   for (const result of readResults) {
@@ -210,6 +249,9 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     "",
     "MODE: " + input.depth,
     "LIMITS: results=" + input.maxResults + ", sources=" + candidateHits.length,
+    "",
+    "LEARNED SOURCE MEMORY:",
+    JSON.stringify(input.sourceMemory || []),
     "",
     "LIVE SEARCH BRANCHES:",
     ...queries.map((q) => "- " + q),
