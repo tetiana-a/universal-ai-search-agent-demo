@@ -28,6 +28,7 @@ export type LiveSourceRecord = {
   reason: string;
   evidenceAvailable: boolean;
   quality: number;
+  lastChecked?: string;
 };
 
 export type AccessEvent = {
