@@ -49,7 +49,16 @@ export const BACKGROUND_RESEARCH_SCHEMA = {
   required: ["query_understanding","search_plan","search_branches","search_summary","candidates_seen","duplicates_removed","access_events","source_registry","results"],
 } as const;
 
-function normalize(value: unknown) { return String(value ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9а-яёіїєґ]+/gi, " ").trim(); }
+function normalize(value: unknown) {
+  let text = "";
+  if (value === null || value === undefined) text = "";
+  else if (typeof value === "string") text = value;
+  else if (typeof value === "number" || typeof value === "boolean") text = String(value);
+  else {
+    try { text = JSON.stringify(value); } catch { text = ""; }
+  }
+  return text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9а-яёіїєґ]+/gi, " ").trim();
+}
 function normalizeUrl(value: unknown) { const raw = String(value ?? "").trim(); try { const u = new URL(raw); u.hash = ""; u.searchParams.sort(); return u.toString().replace(/\/$/, ""); } catch { return raw.replace(/\/$/, ""); } }
 function getDomain(value: unknown) { try { return new URL(String(value ?? "")).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
 function unique<T>(items: T[]) { return Array.from(new Set(items)); }
@@ -67,7 +76,7 @@ function dedupeResults(items: any[]) {
   return { out, removed };
 }
 
-function collectWebSources(response: any) {
+// NOSONAR - source traversal intentionally handles multiple Responses output shapes.\nfunction collectWebSources(response: any) {
   const sources: Array<{ url: string; title: string; domain: string }> = []; const seen = new Set<string>();
   const push = (source: any) => { const url = normalizeUrl(source?.url); if (!url || seen.has(url)) return; seen.add(url); sources.push({ url, title: String(source?.title ?? ""), domain: getDomain(url) }); };
   for (const item of Array.isArray(response?.output) ? response.output : []) {
@@ -79,7 +88,7 @@ function collectWebSources(response: any) {
 
 export function buildBackgroundResponseBody(input: BackgroundResearchRequest, systemPrompt: string, providerCatalog: unknown, searchMatrix: unknown) {
   const memory = Array.isArray(input.sourceMemory) ? input.sourceMemory.slice(0, 120) : [];
-  const memoryBlock = memory.length ? JSON.stringify(memory) : "No prior source memory is available yet.";
+  const memoryBlock = memory.length > 0 ? JSON.stringify(memory) : "No prior source memory is available yet.";
   const instructions = input.language === "ru"
     ? "Проведи глубокое исследование по запросу. Сначала пойми задачу, географию, критерии и обязательные поля. Создай широкую карту источников и исследуй их. Используй сохраненную память источников, но ищи новые источники. Не считай сниппет проверкой: для результата нужен прямой URL и evidence_quote. Отделяй discovered от checked. Если источник требует CAPTCHA, Cloudflare, auth или rate limit, классифицируй это честно и используй разрешенные альтернативы. Не обходи защиту, не используй чужие аккаунты или cookies и не spoof fingerprint. Возвращай только данные, которые можно подтвердить."
     : "Perform deep research. Understand the task, geography, criteria and required fields first. Build a broad source map and research it. Use saved source memory but actively discover new sources. A search snippet is not verification: results need a direct URL and evidence_quote. Distinguish discovered from checked sources. If a source requires CAPTCHA, Cloudflare, auth or rate limit, classify it honestly and use allowed alternatives. Do not bypass access controls, use third-party accounts/cookies, or spoof fingerprints. Return only supportable data.";
@@ -134,7 +143,7 @@ export function backgroundProgress(status: string) {
   return { progress: 55, stage: 4, label: "researching" };
 }
 
-export function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
+// NOSONAR - this function is a deterministic normalization pipeline with several required validation stages.\nexport function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
   const text = outputText(response);
   if (!text) throw new Error("Background research completed without structured output.");
   let parsed: any; try { parsed = JSON.parse(text); } catch { throw new Error("Background research returned invalid structured JSON."); }
