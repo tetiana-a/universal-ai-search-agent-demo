@@ -1,378 +1,82 @@
 "use client";
 
-import type { Result } from "@/lib/data";
-
-export type ExportContext = {
-  query: string;
-  searchPlan: string;
-  summary?: string;
-  generatedAt?: string;
-  sourceUrls?: string[];
-  stats?: Record<string, number>;
-  queryUnderstanding?: any;
-  searchBranches?: string[];
-  sourceRegistry?: any[];
-  accessEvents?: any[];
+export type ExportResult = {
+  id?: number;
+  title?: string; location?: string; area?: string; price?: string;
+  match?: number; confidence?: number; evidence?: string; evidenceQuote?: string;
+  source?: string; sourceType?: string; sourceDomain?: string; url?: string;
+  status?: string; why?: string; retrievedAt?: string; freshnessDays?: number;
+  independentVerification?: boolean;
+  qualityGate?: { gate?: string; passed?: number; total?: number };
 };
 
-function escHtml(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;");
+export type ExportSource = {
+  name?: string; url?: string; domain?: string; category?: string;
+  accessStatus?: string; access_status?: string; accessMethod?: string;
+  access_method?: string; reason?: string; evidenceAvailable?: boolean;
+  evidence_available?: boolean; quality?: number;
+};
+
+export type ResearchExportPayload = {
+  query?: string; generatedAt?: string; searchPlan?: string; searchSummary?: string;
+  stats?: Record<string, number|string>; billing?: Record<string, unknown>;
+  results: ExportResult[]; sourceRegistry?: ExportSource[];
+};
+
+function safePart(v:string){return (v.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9_-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,70)||"research");}
+function downloadBlob(blob:Blob,name:string){const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);}
+function pct(v:any){return `${Math.max(0,Math.min(100,Number(v||0)))}%`;}
+function sourceStatus(s:ExportSource){return s.accessStatus||s.access_status||"";}
+function sourceMethod(s:ExportSource){return s.accessMethod||s.access_method||"";}
+function sourceEvidence(s:ExportSource){return s.evidenceAvailable??s.evidence_available??false;}
+
+const resultHeaders=["#","Title","Location","Area / Profile","Price / Round","Match","Confidence","Status","Quality Gate","Source","Domain","URL","Evidence","Evidence Quote","Why it matches","Retrieved At","Freshness (days)","Independent Verification"];
+
+function resultRow(item:ExportResult,i:number){
+ return [i+1,item.title||"",item.location||"",item.area||"",item.price||"",pct(item.match),pct(item.confidence),item.status||"",item.qualityGate?.gate||"",item.source||"",item.sourceDomain||"",item.url||"",item.evidence||"",item.evidenceQuote||"",item.why||"",item.retrievedAt||"",item.freshnessDays??"",item.independentVerification?"Yes":"No"];
 }
 
-function filenameBase(query: string) {
-  const safe = query
-    .toLowerCase()
-    .replace(/[^a-z0-9а-яёіїєґ]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 70);
-  return `aurelius-research-${safe || "results"}`;
+export function exportCsvFile(payload:ResearchExportPayload){
+ const rows=[resultHeaders,...payload.results.map(resultRow)];
+ const csv="\uFEFF"+rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""').replace(/\r?\n/g," ")}"`).join(";")).join("\r\n");
+ downloadBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}),`aurelius-${safePart(payload.query||"research")}.csv`);
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function exportExcelFile(payload:ResearchExportPayload){
+ const mod:any=await import("exceljs"); const ExcelJS:any=mod.default??mod;
+ const wb=new ExcelJS.Workbook(); wb.creator="AURELIUS Universal AI Research Engine"; wb.created=new Date(); wb.modified=new Date();
+ const ws=wb.addWorksheet("Results",{views:[{state:"frozen",ySplit:6}],pageSetup:{orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0}});
+ ws.mergeCells("A1:R1");ws.getCell("A1").value="AURELIUS • RESEARCH RESULTS";ws.getCell("A1").font={bold:true,size:16,color:{argb:"FFFFFFFF"}};ws.getCell("A1").fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF1F2937"}};ws.getCell("A1").alignment={horizontal:"center"};ws.getRow(1).height=26;
+ ws.mergeCells("A2:R2");ws.getCell("A2").value=`Query: ${payload.query||"—"}`;ws.getCell("A2").alignment={wrapText:true};
+ ws.mergeCells("A3:R3");ws.getCell("A3").value=`Generated: ${payload.generatedAt||new Date().toISOString()}`;
+ const stats=Object.entries(payload.stats||{}); let sc=1; for(const [k,v] of stats.slice(0,8)){ws.getCell(4,sc).value=k;ws.getCell(4,sc).font={bold:true,size:9};ws.getCell(4,sc+1).value=v;sc+=2;}
+ resultHeaders.forEach((h,i)=>{const c=ws.getCell(6,i+1);c.value=h;c.font={bold:true,color:{argb:"FFFFFFFF"},size:9};c.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF374151"}};c.alignment={horizontal:"center",vertical:"middle",wrapText:true};});ws.getRow(6).height=32;
+ payload.results.forEach((item,i)=>{const row=ws.addRow(resultRow(item,i));row.height=70;row.eachCell((c,n)=>{c.alignment={vertical:"top",wrapText:true};c.font={size:9};c.border={bottom:{style:"thin",color:{argb:"FFE5E7EB"}}};if(n===6||n===7)c.alignment={horizontal:"center",vertical:"top"};});const gate=String(item.qualityGate?.gate||"");row.getCell(9).font={bold:true,size:9,color:{argb:gate==="PASS"?"FF15803D":gate==="REVIEW"?"FFB45309":"FFDC2626"}};if(item.url){row.getCell(12).value={text:item.url,hyperlink:item.url};row.getCell(12).font={color:{argb:"FF2563EB"},underline:true,size:9};}});
+ [6,34,24,18,18,11,12,16,14,26,22,48,44,50,42,22,16,22].forEach((w,i)=>ws.getColumn(i+1).width=w);
+ ws.autoFilter={from:"A6",to:`R${Math.max(6,ws.rowCount)}`}; if(ws.rowCount>=6)ws.addTable({name:"AureliusResults",ref:`A6:R${Math.max(6,ws.rowCount)}`,headerRow:true,style:{theme:"TableStyleMedium2",showRowStripes:true}});
+ const ss=wb.addWorksheet("Search Summary");ss.columns=[{header:"Field",key:"field",width:32},{header:"Value",key:"value",width:120}];ss.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};ss.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF374151"}};ss.addRow({field:"Query",value:payload.query||""});ss.addRow({field:"Generated",value:payload.generatedAt||new Date().toISOString()});ss.addRow({field:"Search plan",value:payload.searchPlan||""});ss.addRow({field:"Search summary",value:payload.searchSummary||""});for(const [k,v] of Object.entries(payload.stats||{}))ss.addRow({field:k,value:String(v)});for(const [k,v] of Object.entries(payload.billing||{}))ss.addRow({field:`billing.${k}`,value:typeof v==="object"?JSON.stringify(v):String(v)});ss.eachRow(r=>r.alignment={vertical:"top",wrapText:true});
+ const src=wb.addWorksheet("Source Registry");src.columns=[{header:"Source",key:"name",width:34},{header:"Domain",key:"domain",width:28},{header:"Category",key:"category",width:24},{header:"Access",key:"access",width:18},{header:"Method",key:"method",width:22},{header:"Quality",key:"quality",width:10},{header:"Evidence",key:"evidence",width:12},{header:"URL",key:"url",width:60},{header:"Reason",key:"reason",width:65}];src.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};src.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF374151"}};(payload.sourceRegistry||[]).forEach(s=>{const r=src.addRow({name:s.name||"",domain:s.domain||"",category:s.category||"",access:sourceStatus(s),method:sourceMethod(s),quality:Number(s.quality??0),evidence:sourceEvidence(s)?"Yes":"No",url:s.url||"",reason:s.reason||""});r.alignment={vertical:"top",wrapText:true};if(s.url){r.getCell(8).value={text:s.url,hyperlink:s.url};r.getCell(8).font={color:{argb:"FF2563EB"},underline:true}}});src.autoFilter={from:"A1",to:`I${Math.max(1,src.rowCount)}`};
+ const buf=await wb.xlsx.writeBuffer();downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),`aurelius-${safePart(payload.query||"research")}.xlsx`);
 }
 
-function rowsFor(results: Result[]) {
-  return results.map((item) => [
-    item.title,
-    item.location,
-    item.area,
-    item.price,
-    `${item.match}%`,
-    item.status,
-    item.qualityGate?.gate || "",
-    item.source,
-    item.url,
-    item.evidence,
-    item.why,
-  ]);
+function compact(v:any,n=170){const s=String(v??"").replace(/\s+/g," ").trim();return s.length>n?s.slice(0,n-1)+"…":s;}
+export async function exportPdfFile(payload:ResearchExportPayload){
+ const pm:any=(await import("pdfmake/build/pdfmake")).default??await import("pdfmake/build/pdfmake");
+ const pf:any=(await import("pdfmake/build/vfs_fonts")).default??await import("pdfmake/build/vfs_fonts");
+ const pdf:any=pm;const vfs=pf?.pdfMake?.vfs??pf?.vfs;if(!vfs)throw new Error("PDF fonts are unavailable.");pdf.vfs=vfs;
+ const body=[resultHeaders.slice(0,12).map(text=>({text,bold:true,color:"#FFFFFF"})),...payload.results.map((x,i)=>resultRow(x,i).slice(0,12).map(v=>compact(v,90)))];
+ const sourceBody=[[{text:"Source",bold:true,color:"#FFFFFF"},{text:"Domain",bold:true,color:"#FFFFFF"},{text:"Access",bold:true,color:"#FFFFFF"},{text:"Quality",bold:true,color:"#FFFFFF"},{text:"URL",bold:true,color:"#FFFFFF"}],...(payload.sourceRegistry||[]).map(s=>[compact(s.name||s.domain,35),compact(s.domain,28),sourceStatus(s),String(s.quality??""),s.url||""])];
+ const statBody=Object.entries(payload.stats||{}).map(([k,v])=>[{text:k,bold:true},String(v)]);
+ const doc:any={pageSize:"A4",pageOrientation:"landscape",pageMargins:[18,24,18,24],defaultStyle:{font:"Roboto",fontSize:7},footer:(p:number,n:number)=>({text:`AURELIUS • ${p}/${n}`,alignment:"right",fontSize:7,margin:[18,6,18,0]}),content:[
+ {text:"AURELIUS • RESEARCH EXPORT",fontSize:16,bold:true,margin:[0,0,0,5]},
+ {text:`Query: ${payload.query||"—"}`,fontSize:9,margin:[0,0,0,3]},
+ {text:`Generated: ${payload.generatedAt||new Date().toISOString()}`,fontSize:8,color:"#666666",margin:[0,0,0,8]},
+ ...(payload.searchSummary?[{text:compact(payload.searchSummary,600),fontSize:8,margin:[0,0,0,8]}]:[]),
+ ...(statBody.length?[{table:{widths:[90,70],body:statBody},layout:"lightHorizontalLines",margin:[0,0,0,8]}]:[]),
+ {table:{headerRows:1,widths:[16,70,55,40,48,30,34,45,28,60,58,130],body},layout:{fillColor:(r:number)=>r===0?"#374151":r%2===0?"#F3F4F6":null,hLineColor:()=>"#D1D5DB",vLineColor:()=>"#D1D5DB",paddingLeft:()=>2,paddingRight:()=>2,paddingTop:()=>2,paddingBottom:()=>2}},
+ ...(sourceBody.length>1?[{text:"Source Registry",pageBreak:"before",fontSize:12,bold:true,margin:[0,0,0,7]},{table:{headerRows:1,widths:[125,85,60,45,330],body:sourceBody},layout:{fillColor:(r:number)=>r===0?"#374151":null,hLineColor:()=>"#D1D5DB",vLineColor:()=>"#D1D5DB",fontSize:7}}]:[])
+ ],};
+ pdf.createPdf(doc).download(`aurelius-${safePart(payload.query||"research")}.pdf`);
 }
-
-const headers = [
-  "Title",
-  "Location",
-  "Area / Profile",
-  "Price / Round",
-  "Match",
-  "Status",
-  "Quality Gate",
-  "Source",
-  "URL",
-  "Evidence",
-  "Why it matches",
-];
-
-export function exportCsv(results: Result[], ctx: ExportContext) {
-  const escapeCell = (value: unknown) => {
-    const text = String(value ?? "");
-    return `"${text.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
-  };
-
-  const csv =
-    "\uFEFF" +
-    [headers.map(escapeCell).join(";"), ...rowsFor(results).map((row) => row.map(escapeCell).join(";"))].join("\r\n");
-
-  downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${filenameBase(ctx.query)}.csv`);
-}
-
-function columnLetter(index: number) {
-  let n = index + 1;
-  let out = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
-  }
-  return out;
-}
-
-function xmlEscape(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function crc32(data: Uint8Array) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < data.length; i += 1) {
-    crc ^= data[i];
-    for (let j = 0; j < 8; j += 1) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function u16(value: number) {
-  return new Uint8Array([value & 0xff, (value >>> 8) & 0xff]);
-}
-
-function u32(value: number) {
-  return new Uint8Array([
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff,
-  ]);
-}
-
-function concatBytes(parts: Uint8Array[]) {
-  const size = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
-
-function zipStore(files: Array<{ name: string; content: string }>) {
-  const encoder = new TextEncoder();
-  const local: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
-  let offset = 0;
-
-  for (const file of files) {
-    const name = encoder.encode(file.name);
-    const data = encoder.encode(file.content);
-    const crc = crc32(data);
-
-    const localHeader = concatBytes([
-      new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
-      u16(20),
-      u16(0x800),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(crc),
-      u32(data.length),
-      u32(data.length),
-      u16(name.length),
-      u16(0),
-      name,
-      data,
-    ]);
-    local.push(localHeader);
-
-    const centralHeader = concatBytes([
-      new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
-      u16(20),
-      u16(20),
-      u16(0x800),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(crc),
-      u32(data.length),
-      u32(data.length),
-      u16(name.length),
-      u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(0),
-      u32(offset),
-      name,
-    ]);
-    central.push(centralHeader);
-    offset += localHeader.length;
-  }
-
-  const localBytes = concatBytes(local);
-  const centralBytes = concatBytes(central);
-  const end = concatBytes([
-    new Uint8Array([0x50, 0x4b, 0x05, 0x06]),
-    u16(0),
-    u16(0),
-    u16(files.length),
-    u16(files.length),
-    u32(centralBytes.length),
-    u32(localBytes.length),
-    u16(0),
-  ]);
-
-  return concatBytes([localBytes, centralBytes, end]);
-}
-
-function makeSheetXml(headers: string[], rows: unknown[][], filterLastCol?: string) {
-  const allRows = [headers, ...rows];
-  const widths = headers.map((header) => Math.min(65, Math.max(14, Math.min(42, header.length + 8))));
-  const cols = widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
-  const sheetRows = allRows
-    .map((row, rowIndex) => {
-      const cells = row
-        .map((value, colIndex) => {
-          const ref = `${columnLetter(colIndex)}${rowIndex + 1}`;
-          const style = rowIndex === 0 ? ' s="1"' : '';
-          return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
-        })
-        .join("");
-      return `<row r="${rowIndex + 1}">${cells}</row>`;
-    })
-    .join("");
-
-  const lastCol = filterLastCol || columnLetter(headers.length - 1);
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-    <sheetViews><sheetView workbookViewId="0" showGridLines="1"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-    <cols>${cols}</cols>
-    <sheetData>${sheetRows}</sheetData>
-    <autoFilter ref="A1:${lastCol}${allRows.length}"/>
-  </worksheet>`;
-}
-
-export function exportXlsx(results: Result[], ctx: ExportContext) {
-  const resultRows = rowsFor(results);
-  const sourceRows = (ctx.sourceRegistry || []).map((source: any) => [
-    source.name, source.domain, source.category, source.accessStatus, source.accessMethod, source.evidenceAvailable ? "YES" : "NO", `${source.quality ?? 0}%`, source.reason, source.url,
-  ]);
-  const accessRows = (ctx.accessEvents || []).map((event: any) => [event.status, event.method, event.url, event.reason, event.fallback]);
-  const statsRows = Object.entries(ctx.stats || {}).map(([key, value]) => [key, value]);
-  const understandingRows = [
-    ["Intent", ctx.queryUnderstanding?.intent || ""],
-    ["Entity type", ctx.queryUnderstanding?.entityType || ""],
-    ["Geography", Array.isArray(ctx.queryUnderstanding?.geography) ? ctx.queryUnderstanding.geography.join("; ") : ""],
-    ["Languages", Array.isArray(ctx.queryUnderstanding?.languages) ? ctx.queryUnderstanding.languages.join("; ") : ""],
-    ["Criteria", Array.isArray(ctx.queryUnderstanding?.criteria) ? ctx.queryUnderstanding.criteria.join("; ") : ""],
-    ["Exclusions", Array.isArray(ctx.queryUnderstanding?.exclusions) ? ctx.queryUnderstanding.exclusions.join("; ") : ""],
-    ["Required fields", Array.isArray(ctx.queryUnderstanding?.requiredFields) ? ctx.queryUnderstanding.requiredFields.join("; ") : ""],
-    ["Source classes", Array.isArray(ctx.queryUnderstanding?.sourceClasses) ? ctx.queryUnderstanding.sourceClasses.join("; ") : ""],
-  ];
-
-  const workbookSheets = [
-    { name: "Results", xml: makeSheetXml(headers, resultRows, "K") },
-    { name: "Sources", xml: makeSheetXml(["Source","Domain","Category","Access","Method","Evidence","Quality","Reason","URL"], sourceRows, "I") },
-    { name: "Run Summary", xml: makeSheetXml(["Metric","Value"], [["Generated at", ctx.generatedAt || new Date().toISOString()], ["Query", ctx.query], ["Summary", ctx.summary || ""], ["Search Plan", ctx.searchPlan || ""], ...statsRows, ...understandingRows], "B") },
-    { name: "Search Branches", xml: makeSheetXml(["Branch"], (ctx.searchBranches || []).map((item) => [item]), "A") },
-    { name: "Access Events", xml: makeSheetXml(["Status","Method","URL","Reason","Fallback"], accessRows, "E") },
-  ];
-
-  const sheetEntries = workbookSheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
-  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-    <sheets>${sheetEntries}</sheets>
-  </workbook>`;
-
-  const rels = workbookSheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
-  const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}<Relationship Id="rId${workbookSheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
-
-  const contentSheetOverrides = workbookSheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
-  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-    <Default Extension="xml" ContentType="application/xml"/>
-    ${contentSheetOverrides}
-    <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-    <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  </Types>`;
-
-  const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
-  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-    <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
-    <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
-    <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-    <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyFont="1"/></cellXfs>
-  </styleSheet>`;
-  const coreProps = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(ctx.query)}</dc:title><dc:creator>Aurelius Universal AI Search Agent</dc:creator></cp:coreProperties>`;
-  const appProps = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Aurelius Universal AI Search Agent</Application><Sheets>${workbookSheets.length}</Sheets></Properties>`;
-
-  const files = [
-    { name: "[Content_Types].xml", content: contentTypes },
-    { name: "_rels/.rels", content: rootRels },
-    { name: "docProps/app.xml", content: appProps },
-    { name: "docProps/core.xml", content: coreProps },
-    { name: "xl/workbook.xml", content: workbook },
-    { name: "xl/_rels/workbook.xml.rels", content: workbookRels },
-    { name: "xl/styles.xml", content: styles },
-    ...workbookSheets.map((sheet, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, content: sheet.xml })),
-  ];
-
-  const bytes = zipStore(files);
-  downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${filenameBase(ctx.query)}.xlsx`);
-}
-
-function reportHtml(results: Result[], ctx: ExportContext) {
-  const stats = ctx.stats
-    ? Object.entries(ctx.stats)
-        .map(([key, value]) => `<tr><td>${escHtml(key)}</td><td>${escHtml(value)}</td></tr>`)
-        .join("")
-    : "";
-  const resultRows = rowsFor(results)
-    .map(
-      (row) =>
-        `<tr>${row.map((cell) => `<td>${escHtml(cell)}</td>`).join("")}</tr>`,
-    )
-    .join("");
-  const sources = (ctx.sourceUrls || [])
-    .map((url) => `<li><a href="${escHtml(url)}">${escHtml(url)}</a></li>`)
-    .join("");
-  const accessEvents = (ctx.accessEvents || [])
-    .map((event: any) => `<tr><td>${escHtml(event.status)}</td><td>${escHtml(event.method)}</td><td>${escHtml(event.url)}</td><td>${escHtml(event.reason)}</td><td>${escHtml(event.fallback)}</td></tr>`)
-    .join("");
-
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Aurelius Research</title>
-  <style>
-    body{font-family:Arial,sans-serif;color:#161616;padding:32px;line-height:1.45}h1{margin:0 0 6px;font-size:26px}h2{margin-top:26px;font-size:16px}p{font-size:12px;color:#444}.meta{border:1px solid #ddd;padding:12px;border-radius:8px}table{border-collapse:collapse;width:100%;font-size:10px;margin-top:12px}th{background:#162b26;color:#fff;text-align:left}th,td{border:1px solid #ddd;padding:7px;vertical-align:top}ul{font-size:11px}.muted{color:#666}@media print{body{padding:10px}}
-  </style></head><body>
-  <h1>AURELIUS — Universal AI Research Report</h1>
-  <p class="muted">Generated ${escHtml(ctx.generatedAt || new Date().toISOString())}</p>
-  <div class="meta"><strong>Query</strong><br>${escHtml(ctx.query)}<br><br><strong>Search Plan</strong><br>${escHtml(ctx.searchPlan || "—")}<br><br><strong>Summary</strong><br>${escHtml(ctx.summary || "—")}</div>
-  <h2>Run statistics</h2><table><tbody>${stats}</tbody></table>
-  <h2>Qualified results (${results.length})</h2><table><thead><tr>${headers.map((h) => `<th>${escHtml(h)}</th>`).join("")}</tr></thead><tbody>${resultRows}</tbody></table>
-  <h2>Sources</h2><ul>${sources || "<li>No sources captured</li>"}</ul>
-  <h2>Access events</h2><table><thead><tr><th>Status</th><th>Method</th><th>URL</th><th>Reason</th><th>Fallback</th></tr></thead><tbody>${accessEvents || "<tr><td colspan=\"5\">No access events</td></tr>"}</tbody></table>
-  </body></html>`;
-}
-
-export function exportDoc(results: Result[], ctx: ExportContext) {
-  downloadBlob(
-    new Blob([reportHtml(results, ctx)], { type: "application/msword;charset=utf-8" }),
-    `${filenameBase(ctx.query)}.doc`,
-  );
-}
-
-export function exportJson(results: Result[], ctx: ExportContext) {
-  const payload = {
-    generatedAt: ctx.generatedAt || new Date().toISOString(),
-    query: ctx.query,
-    searchPlan: ctx.searchPlan,
-    summary: ctx.summary || "",
-    stats: ctx.stats || {},
-    sourceUrls: ctx.sourceUrls || [],
-    results,
-  };
-  downloadBlob(
-    new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }),
-    `${filenameBase(ctx.query)}.json`,
-  );
-}
-
-export function printPdf(results: Result[], ctx: ExportContext) {
-  const popup = window.open("", "_blank", "noopener,noreferrer,width=1280,height=900");
-  if (!popup) return;
-  popup.document.open();
-  popup.document.write(reportHtml(results, ctx));
-  popup.document.close();
-  popup.focus();
-  window.setTimeout(() => popup.print(), 350);
-}
+export const exportXlsxFile=exportExcelFile;
+export const exportJsonFile=(payload:ResearchExportPayload)=>downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),`aurelius-${safePart(payload.query||"research")}.json`);
