@@ -2528,8 +2528,8 @@ export default function Home() {
                 [t.area, selectedResult.area],
                 [t.price, selectedResult.price],
                 [t.match, `${selectedResult.match}%`],
-                [lang === "ru" ? "Confidence" : "Confidence", `${selectedResult.confidence ?? 0}%`],
-                [lang === "ru" ? "Quality Gate" : "Quality Gate", selectedResult.qualityGate?.gate || "—"],
+                [lang === "ru" ? "Уверенность" : "Confidence", `${selectedResult.confidence ?? 0}%`],
+                [lang === "ru" ? "Контроль качества" : "Quality Gate", selectedResult.qualityGate?.gate || "-"],
               ].map(([label, value]) => (
                 <div className="glass-soft rounded-xl p-4" key={String(label)}>
                   <div className="text-[10px] text-[var(--text-faint)]">{String(label)}</div>
