@@ -597,8 +597,15 @@ export default function Home() {
   }, [filter, results]);
 
   function buildShareText() {
-    const rows = shownResults.slice(0, 12).map((item, index) =>
-      [
+    const rows = shownResults.slice(0, 12).map((item, index) => {
+      let evidence = "";
+      if (item.evidenceQuote) {
+        evidence = "Evidence: " + item.evidenceQuote;
+      } else if (item.evidence) {
+        evidence = "Evidence: " + item.evidence;
+      }
+
+      return [
         (index + 1) + ". " + item.title,
         item.organization ? "Организация: " + item.organization : "",
         item.specialization ? "Профиль: " + item.specialization : "",
@@ -608,9 +615,9 @@ export default function Home() {
         item.ticket ? "Ticket: " + item.ticket : "Цена/параметр: " + item.price,
         "Источник: " + item.source,
         "URL: " + item.url,
-        item.evidenceQuote ? "Evidence: " + item.evidenceQuote : item.evidence ? "Evidence: " + item.evidence : "",
-      ].filter(Boolean).join("\n")
-    );
+        evidence,
+      ].filter(Boolean).join("\n");
+    });
     return ["AURELIUS — Universal AI Research Engine", "Запрос: " + query, rows.join("\n\n")].join("\n\n");
   }
 
@@ -635,6 +642,64 @@ export default function Home() {
         await navigator.clipboard.writeText(text);
       }
     } catch {}
+  }
+
+  function handleRadioPlay() {
+    const station = currentStation ?? radioStations[0];
+    if (station) void playRadioStation(station);
+  }
+
+  function renderRadioStations() {
+    if (radioLoading) {
+      return (
+        <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">
+          {t.radioLoading}
+        </div>
+      );
+    }
+
+    if (radioStations.length === 0) {
+      return (
+        <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">
+          {t.radioEmpty}
+        </div>
+      );
+    }
+
+    return radioStations.map((station) => (
+      <button
+        key={station.stationuuid}
+        onClick={() => void playRadioStation(station)}
+        className={
+          "group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition " +
+          (currentStation?.stationuuid === station.stationuuid
+            ? "border-[var(--gold)]/25 bg-[var(--gold)]/7"
+            : "border-[var(--line-soft)] bg-white/[.012] hover:bg-white/[.025]")
+        }
+      >
+        {station.favicon ? (
+          <img src={station.favicon} alt="" className="h-8 w-8 rounded-lg object-cover" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--gold)]/8 text-[var(--gold)]">
+            <RadioIcon size={14} />
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[11px] font-medium text-[var(--text-soft)]">{station.name}</span>
+          <span className="mt-0.5 block truncate text-[9px] text-[var(--text-faint)]">
+            {station.country} · {station.tags || station.language || "international"}
+          </span>
+        </span>
+        <PlayIcon
+          size={12}
+          className={
+            currentStation?.stationuuid === station.stationuuid && radioPlaying
+              ? "text-[var(--success)]"
+              : "text-[var(--text-faint)]"
+          }
+        />
+      </button>
+    ));
   }
 
   async function playRadioStation(station: RadioStation) {
@@ -2993,11 +3058,11 @@ export default function Home() {
 
             <div className="mt-4 flex flex-wrap gap-1.5">
               {[
-                ["chillout", lang === "ru" ? "Chill / Ambient" : "Chill / Ambient"],
+                ["chillout", "Chill / Ambient"],
                 ["jazz", "Jazz"],
                 ["classical", "Classical"],
                 ["electronic", "Electronic"],
-                ["pop", lang === "ru" ? "International Pop" : "International Pop"],
+                ["pop", "International Pop"],
               ].map(([tag, label]) => (
                 <button
                   key={tag}
@@ -3011,7 +3076,7 @@ export default function Home() {
 
             <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--line-soft)] bg-black/10 p-3">
               <button
-                onClick={() => (currentStation ? void playRadioStation(currentStation) : radioStations[0] ? void playRadioStation(radioStations[0]) : undefined)}
+                onClick={handleRadioPlay}
                 disabled={!currentStation && radioStations.length === 0}
                 className={"grid h-10 w-10 shrink-0 place-items-center rounded-xl " + (radioPlaying ? "bg-[var(--success)]/12 text-[var(--success)]" : "bg-[var(--gold)]/12 text-[var(--gold-bright)]") + " disabled:opacity-30"}
                 aria-label={radioPlaying ? t.stopRadio : t.listen}
@@ -3054,30 +3119,7 @@ export default function Home() {
             ) : null}
 
             <div className="mt-4 max-h-[290px] space-y-1.5 overflow-y-auto pr-1">
-              {radioLoading ? (
-                <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">{t.radioLoading}</div>
-              ) : radioStations.length === 0 ? (
-                <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">{t.radioEmpty}</div>
-              ) : (
-                radioStations.map((station) => (
-                  <button
-                    key={station.stationuuid}
-                    onClick={() => void playRadioStation(station)}
-                    className={"group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition " + (currentStation?.stationuuid === station.stationuuid ? "border-[var(--gold)]/25 bg-[var(--gold)]/7" : "border-[var(--line-soft)] bg-white/[.012] hover:bg-white/[.025]")}
-                  >
-                    {station.favicon ? (
-                      <img src={station.favicon} alt="" className="h-8 w-8 rounded-lg object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--gold)]/8 text-[var(--gold)]"><RadioIcon size={14} /></span>
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium text-[var(--text-soft)]">{station.name}</span>
-                      <span className="mt-0.5 block truncate text-[9px] text-[var(--text-faint)]">{station.country} · {station.tags || station.language || "international"}</span>
-                    </span>
-                    <PlayIcon size={12} className={currentStation?.stationuuid === station.stationuuid && radioPlaying ? "text-[var(--success)]" : "text-[var(--text-faint)]"} />
-                  </button>
-                ))
-              )}
+              {renderRadioStations()}
             </div>
 
             <div className="mt-3 text-[9px] leading-4 text-[var(--text-faint)]">
@@ -3098,7 +3140,9 @@ export default function Home() {
           setRadioError(lang === "ru" ? "Поток станции недоступен. Выберите другую станцию." : "This station stream is unavailable. Choose another station.");
         }}
         preload="none"
-      />
+      >
+        <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
+      </audio>
 
       <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
         <span className="inline-flex items-center gap-2">
