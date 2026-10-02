@@ -427,6 +427,15 @@ html.light .gold-text {
 
 .radio-panel {
   animation: radio-panel-in 420ms cubic-bezier(.22,1,.36,1) both;
+  width: min(390px, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.radio-panel,
+.radio-panel * {
+  min-width: 0;
 }
 
 @keyframes radio-panel-in {

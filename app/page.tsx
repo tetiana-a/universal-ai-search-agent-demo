@@ -823,6 +823,8 @@ export default function Home() {
       <button
         key={station.stationuuid}
         onClick={() => void playRadioStation(station)}
+        aria-pressed={currentStation?.stationuuid === station.stationuuid}
+        title={station.name}
         className={
           "group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition " +
           (currentStation?.stationuuid === station.stationuuid
@@ -3295,7 +3297,7 @@ export default function Home() {
             className="glass w-full max-w-[620px] rounded-[26px] p-5 sm:p-6"
           >
             <div className="flex items-start justify-between gap-4">
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                   <Mail size={14} />
                   {lang === "ru" ? "Отправить отчёт по почте" : "Send research report by email"}
@@ -3479,11 +3481,17 @@ export default function Home() {
                   <Music2 size={14} />
                   {radioText("radio")}
                 </div>
-                <div className="mt-1 text-sm font-semibold text-[var(--text)]">
+                <div
+                  className="mt-1 max-w-full overflow-hidden break-words text-sm font-semibold text-[var(--text)]"
+                  style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
+                >
                   {currentStation?.name || (lang === "ru" ? "Международное онлайн-радио" : "International online radio")}
                 </div>
                 {currentStation ? (
-                  <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                  <div
+                    className="mt-1 max-w-full truncate text-[10px] text-[var(--text-muted)]"
+                    title={currentStation.country + " · " + currentStation.codec + (currentStation.bitrate ? " · " + currentStation.bitrate + " kbps" : "")}
+                  >
                     {currentStation.country} · {currentStation.codec} {currentStation.bitrate ? currentStation.bitrate + " kbps" : ""}
                   </div>
                 ) : null}
