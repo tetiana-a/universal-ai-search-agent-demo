@@ -22,8 +22,7 @@ export async function POST(request: Request) {
       const language = body?.language === "en" ? "en" : "ru";
       const testMode = body?.testMode === true;
       const memoryContext = await getResearchMemoryContext(query, 40);
-      const memoryContext = await getResearchMemoryContext(query, 40);
-  const input: BackgroundResearchRequest = {
+      const input: BackgroundResearchRequest = {
         query,
         language,
         depth: testMode ? "Quick" : (body?.depth || "Balanced"),
@@ -61,6 +60,7 @@ export async function POST(request: Request) {
   if (!query) return NextResponse.json({ error: "Query is required." }, { status: 400 });
   const language = body.language === "en" ? "en" : "ru";
   const testMode = body.testMode === true;
+  const memoryContext = await getResearchMemoryContext(query, 40);
   const input: BackgroundResearchRequest = {
     query,
     language,
@@ -112,7 +112,8 @@ export async function GET(request: Request) {
     const status = String(response?.status || "queued"); const p = backgroundProgress(status);
     if (status === "completed") {
       const query = url.searchParams.get("query") || "";
-      const memoryContext = await getResearchMemoryContext(query, 40); const language = url.searchParams.get("language") === "en" ? "en" : "ru";
+      const memoryContext = await getResearchMemoryContext(query, 40);
+      const language = url.searchParams.get("language") === "en" ? "en" : "ru";
       const depthParam = url.searchParams.get("depth"); const depth = depthParam === "Quick" || depthParam === "Balanced" ? depthParam : "Deep";
       const input: BackgroundResearchRequest = { query, language, depth, maxResults: Math.min(Math.max(Number(url.searchParams.get("maxResults") || 12), 4), 30), maxSources: Math.min(Math.max(Number(url.searchParams.get("maxSources") || 50), 5), 120), maxPages: Math.min(Math.max(Number(url.searchParams.get("maxPages") || 150), 20), 1500), multilingual: true, followRelatedLinks: true };
       const result = normalizeCompletedResearch(response, input);
