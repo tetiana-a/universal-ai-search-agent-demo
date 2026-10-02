@@ -87,6 +87,23 @@ const nav: Array<{ key: NavKey; icon: typeof Sparkles; ru: string; en: string }>
   { key: "settings", icon: Settings2, ru: "Настройки", en: "Settings" },
 ];
 
+const radioCopy = {
+  share: ["Поделиться", "Share"],
+  telegram: ["Telegram", "Telegram"],
+  email: ["Почта", "Email"],
+  systemShare: ["Поделиться", "Share"],
+  radio: ["Радио", "Radio"],
+  radioOn: ["Радио играет", "Radio playing"],
+  radioOff: ["Открыть радио", "Open radio"],
+  radioLoading: ["Ищем станции…", "Finding stations…"],
+  radioEmpty: ["Подходящих станций нет", "No matching stations"],
+  radioError: ["Не удалось загрузить радио", "Radio unavailable"],
+  listen: ["Слушать", "Listen"],
+  stopRadio: ["Выключить", "Stop"],
+} as const;
+
+type RadioCopyKey = keyof typeof radioCopy;
+
 const labels = {
   ru: {
     product: "Универсальный AI Research Engine",
@@ -241,18 +258,6 @@ const labels = {
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
     testMode: "TEST MODE • экономия",
-    share: "Поделиться",
-    telegram: "Telegram",
-    email: "Почта",
-    systemShare: "Поделиться",
-    radio: "Радио",
-    radioOn: "Радио играет",
-    radioOff: "Открыть радио",
-    radioLoading: "Ищем станции…",
-    radioEmpty: "Подходящих станций нет",
-    radioError: "Не удалось загрузить радио",
-    listen: "Слушать",
-    stopRadio: "Выключить",
   },
   en: {
     product: "Universal AI Research Engine",
@@ -407,18 +412,6 @@ const labels = {
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
     testMode: "TEST MODE • low cost",
-    share: "Share",
-    telegram: "Telegram",
-    email: "Email",
-    systemShare: "Share",
-    radio: "Radio",
-    radioOn: "Radio playing",
-    radioOff: "Open radio",
-    radioLoading: "Finding stations…",
-    radioEmpty: "No matching stations",
-    radioError: "Radio unavailable",
-    listen: "Listen",
-    stopRadio: "Stop",
   },
 } as const;
 
@@ -493,6 +486,7 @@ export default function Home() {
   const [voiceError, setVoiceError] = useState("");
   const recognitionRef = useRef<any>(null);
   const t = labels[lang];
+  const radioText = (key: RadioCopyKey) => radioCopy[key][lang === "ru" ? 0 : 1];
 
   const [testMode, setTestMode] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -528,7 +522,7 @@ export default function Home() {
       .catch((error) => {
         if (!cancelled) {
           setRadioStations([]);
-          setRadioError(error instanceof Error ? error.message : t.radioError);
+          setRadioError(error instanceof Error ? error.message : radioText("radioError"));
         }
       })
       .finally(() => {
@@ -537,7 +531,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [radioOpen, radioGenre, t.radioError]);
+  }, [radioOpen, radioGenre, radioText("radioError")]);
 
   useEffect(() => {
     const audio = radioAudioRef.current;
@@ -651,7 +645,7 @@ export default function Home() {
 
   function renderRadioStations() {
     if (radioLoading || radioStations.length === 0) {
-      const message = radioLoading ? t.radioLoading : t.radioEmpty;
+      const message = radioLoading ? radioText("radioLoading") : radioText("radioEmpty");
       return (
         <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">
           {message}
@@ -737,9 +731,9 @@ export default function Home() {
 
   function renderShareActions(compact = false) {
     const actions = [
-      { label: t.telegram, icon: Send, run: shareViaTelegram },
-      { label: t.email, icon: Mail, run: shareViaEmail },
-      { label: compact ? t.systemShare : t.share, icon: Share2, run: () => void shareViaSystem() },
+      { label: radioText("telegram"), icon: Send, run: shareViaTelegram },
+      { label: radioText("email"), icon: Mail, run: shareViaEmail },
+      { label: compact ? radioText("systemShare") : radioText("share"), icon: Share2, run: () => void shareViaSystem() },
     ];
 
     return (
@@ -1930,7 +1924,7 @@ export default function Home() {
                       }`}
                     >
                       <Mic size={14} />
-                      {audioState === "listening" ? t.listening : t.speak}
+                      {audioState === "listening" ? radioText("listen")ing : t.speak}
                     </button>
 
                     <label className="panel-hover inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3.5 py-2.5 text-xs text-[var(--text-muted)]">
@@ -2908,11 +2902,11 @@ export default function Home() {
               <button
                 onClick={() => setRadioOpen((value) => !value)}
                 className={"panel-hover inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-[10px] " + (radioPlaying ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]" : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")}
-                aria-label={radioPlaying ? t.radioOn : t.radioOff}
-                title={radioPlaying ? t.radioOn : t.radioOff}
+                aria-label={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
+                title={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
               >
                 <RadioIcon size={15} />
-                <span className="hidden md:inline">{radioPlaying ? t.radioOn : t.radio}</span>
+                <span className="hidden md:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
               </button>
 
               <button
@@ -3042,7 +3036,7 @@ export default function Home() {
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                   <Music2 size={14} />
-                  {t.radio}
+                  {radioText("radio")}
                 </div>
                 <div className="mt-1 text-sm font-semibold text-[var(--text)]">
                   {currentStation?.name || (lang === "ru" ? "Международное онлайн-радио" : "International online radio")}
@@ -3081,7 +3075,7 @@ export default function Home() {
                 onClick={handleRadioPlay}
                 disabled={!currentStation && radioStations.length === 0}
                 className={"grid h-10 w-10 shrink-0 place-items-center rounded-xl " + (radioPlaying ? "bg-[var(--success)]/12 text-[var(--success)]" : "bg-[var(--gold)]/12 text-[var(--gold-bright)]") + " disabled:opacity-30"}
-                aria-label={radioPlaying ? t.stopRadio : t.listen}
+                aria-label={radioPlaying ? radioText("stopRadio") : radioText("listen")}
               >
                 {radioPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
               </button>
@@ -3095,7 +3089,7 @@ export default function Home() {
               </button>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between text-[9px] uppercase tracking-[.14em] text-[var(--text-faint)]">
-                  <span>{radioPlaying ? t.radioOn : t.radioOff}</span>
+                  <span>{radioPlaying ? radioText("radioOn") : radioText("radioOff")}</span>
                   <span>{Math.round(radioVolume * 100)}%</span>
                 </div>
                 <div className="mt-2 flex items-center gap-2">
