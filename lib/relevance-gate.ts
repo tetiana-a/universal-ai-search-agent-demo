@@ -22,72 +22,64 @@ export function inferResearchKind(query: string): ResearchKind {
   return "general";
 }
 
-const INVESTOR_POSITIVE = /venture capital|vc fund|angel investor|investment fund|private equity|investor|investments|portfolio|portfolio companies|backed by|seed|series a|series b|growth capital|startup|saas|b2b|enterprise|software|technology|tech|инвест|венчур|ангел|портфел|стартап|saas|b2b|enterprise/i;
-const INVESTOR_SECTOR = /saas|b2b|enterprise|software|technology|tech|startup|digital|cloud|cyber|fintech|ai|data|platform/i;
-const INVESTOR_NOISE = /\b(event|events|conference|conferences|networking|programmes?|programme|webinar|meetup|jobs?|job|career|hiring|vacanc|ipo|initial public offering|stock price|share price|shares|listing|ticker|news)\b|конферен|мероприят|нетворкинг|ваканс|работ|ipo|акци|листинг|новост/i;
+const INVESTOR_ENTITY = /venture capital|vc fund|venture firm|angel investor|investment fund|private equity|family office|investor|investors|инвестор|инвесторы|венчур|инвестиц|бизнес ангел|інвестор/i;
+const INVESTMENT_ACTIVITY = /invests?|investment strategy|investment focus|portfolio companies?|backed by|funding|financ(?:e|ing)|seed|series a|series b|growth capital|investment mandate|инвестирует|инвестицион|портфел|финансир|стартап/i;
+const INVESTOR_SECTOR = /saas|b2b|enterprise|software|technology|tech|startup|digital|cloud|cyber|fintech|ai|data|platform|software as a service/i;
+const INVESTOR_NOISE = /\b(event|events|conference|conferences|networking|programmes?|programme|webinar|meetup|jobs?|job|career|hiring|vacanc(?:y|ies)|ipo|initial public offering|stock price|share price|shares|listing|ticker|news)\b|конферен|мероприят|нетворкинг|ваканс|работ|ipo|акци|листинг|новост/i;
 
-function hasCyprusSignal(value: string) {
-  return /cyprus|κυπρ|кипр|кипре|κυπρος/i.test(value);
-}
-
-export type RelevanceDecision = {
-  accepted: boolean;
-  score: number;
-  reason: string;
-};
-
-export function evaluateResearchRelevance(item: any, query: string): RelevanceDecision {
+function hasCyprusSignal(value:export function evaluateResearchRelevance(item: any, query: string): RelevanceDecision {
   const kind = inferResearchKind(query);
   const title = join([item?.title, item?.organization, item?.source]);
   const body = join([
-    item?.title,
-    item?.organization,
-    item?.specialization,
-    item?.geography,
-    item?.investment_type,
-    item?.stage,
-    item?.ticket,
-    item?.why,
-    item?.evidence,
-    item?.evidence_quote,
-    item?.source,
-    item?.url,
+    item?.title, item?.organization, item?.specialization, item?.geography,
+    item?.investment_type, item?.stage, item?.ticket, item?.why,
+    item?.evidence, item?.evidence_quote, item?.source, item?.url,
   ]);
   const q = text(query);
 
   if (!item?.url || !/^https?:\/\//i.test(String(item.url))) {
     return { accepted: false, score: 0, reason: "missing_valid_url" };
   }
-  if (String(item?.evidence_quote || "").trim().length < 20 && String(item?.evidence || "").trim().length < 30) {
-    return { accepted: false, score: 25, reason: "insufficient_evidence_text" };
+
+  const evidenceText = String(item?.evidence_quote || item?.evidence || "").trim();
+  if (evidenceText.length < 20) {
+    return { accepted: false, score: 15, reason: "insufficient_evidence_text" };
   }
 
   if (kind === "investor") {
     let score = 0;
-    if (INVESTOR_POSITIVE.test(title)) score += 30;
-    if (INVESTOR_POSITIVE.test(body)) score += 25;
-    if (INVESTOR_SECTOR.test(body)) score += 20;
-    if (hasCyprusSignal(body) || hasCyprusSignal(q)) score += 15;
+    const hasInvestorEntity = INVESTOR_ENTITY.test(body);
+    const hasInvestmentActivity = INVESTMENT_ACTIVITY.test(body);
+    const hasSector = INVESTOR_SECTOR.test(body);
+    const hasCyprus = hasCyprusSignal(body);
+    const queryHasCyprus = hasCyprusSignal(q);
+    const noise = INVESTOR_NOISE.test(title) || INVESTOR_NOISE.test(String(item?.evidence || "") + " " + String(item?.evidence_quote || ""));
+
+    if (hasInvestorEntity) score += 35;
+    if (hasInvestmentActivity) score += 25;
+    if (hasSector) score += 15;
+    if (hasCyprus) score += 15;
     if (item?.investment_type || item?.stage || item?.ticket) score += 10;
 
-    const noise = INVESTOR_NOISE.test(title) || INVESTOR_NOISE.test(String(item?.evidence || "") + " " + String(item?.evidence_quote || ""));
-    if (noise && !INVESTOR_POSITIVE.test(body)) {
+    if (noise && !hasInvestorEntity && !hasInvestmentActivity) {
       return { accepted: false, score: Math.min(score, 20), reason: "investor_query_noise" };
     }
-    if (!INVESTOR_POSITIVE.test(body)) {
-      return { accepted: false, score, reason: "no_investor_signal" };
+    if (!hasInvestorEntity && !hasInvestmentActivity) {
+      return { accepted: false, score, reason: "no_investor_activity_signal" };
     }
-    if (!INVESTOR_SECTOR.test(body)) {
-      return { accepted: false, score, reason: "no_target_sector_signal" };
-    }
-    if (hasCyprusSignal(q) && !hasCyprusSignal(body)) {
-      return { accepted: false, score, reason: "no_cyprus_signal" };
+
+    if (queryHasCyprus && !hasCyprus) {
+      return {
+        accepted: score >= 45,
+        score,
+        reason: score >= 45 ? "investor_found_cyprus_link_unconfirmed" : "weak_cyprus_fit",
+      };
     }
 
     return {
-      accepted: score >= 55,
+      accepted: score >= 45,
       score,
-      reason: score >= 55 ? "investor_relevance_confirmed" : "weak_investor_relevance",
+      reason: score >= 60 ? "investor_relevance_confirmed" : "investor_identity_needs_review",
     };
   }
 
@@ -106,6 +98,8 @@ export function evaluateResearchRelevance(item: any, query: string): RelevanceDe
   }
 
   return { accepted: true, score: 60, reason: "general_research" };
+}
+return { accepted: true, score: 60, reason: "general_research" };
 }
 
 export function filterResearchResults(items: any[], query: string) {
