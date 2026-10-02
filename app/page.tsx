@@ -544,23 +544,7 @@ export default function Home() {
     if (audio) audio.volume = radioVolume;
   }, [radioVolume]);
 
-  useEffect(() => {
-    if (!radioPlaying || !currentStation || typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-    try {
-      const ctor = (window as typeof window & { MediaMetadata?: typeof MediaMetadata }).MediaMetadata;
-      if (ctor) {
-        navigator.mediaSession.metadata = new ctor({
-          title: currentStation.name,
-          artist: currentStation.country || "Internet Radio",
-          album: currentStation.tags || "Aurelius Radio",
-          artwork: currentStation.favicon ? [{ src: currentStation.favicon, sizes: "96x96", type: "image/png" }] : [],
-        });
-      }
-      navigator.mediaSession.playbackState = "playing";
-      navigator.mediaSession.setActionHandler("play", () => void radioAudioRef.current?.play());
-      navigator.mediaSession.setActionHandler("pause", () => radioAudioRef.current?.pause());
-    } catch {}
-  }, [radioPlaying, currentStation]);
+  // Media Session is progressive enhancement; playback itself remains on HTMLAudioElement.
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("aurelius-theme") as Theme | null;
