@@ -262,7 +262,7 @@ async function serperSearch(query: string): Promise<ProviderSearchHit[]> {
   } catch { return []; }
 }
 
-async function publicReader(url: string, provider: "jina" | "firecrawl"): Promise<ProviderSearchHit[]> {
+export async function publicReader(url: string, provider: "jina" | "firecrawl"): Promise<ProviderSearchHit[]> {
   if (!url) return [];
   try {
     if (provider === "jina") {
@@ -334,7 +334,6 @@ async function runProviderQuery(q: string, languageCode: string, country?: strin
     if (batch.status === "fulfilled") results.push(...batch.value);
   }
   return results;
-  return batches.flat();
 }
 
 export async function runProviderDiscovery(query: string, language: string, geographyHint?: string) {
