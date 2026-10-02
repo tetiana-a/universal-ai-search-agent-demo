@@ -283,7 +283,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   }
   const relevance = filterResearchResults(rawResults, input.query);
   rawResults = relevance.accepted;
-  const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
+  const relevance = filterResearchResults(rawResults, input.query);\n  rawResults = relevance.accepted;\n  const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
   const deduped = dedupeResults(filtered); const now = new Date().toISOString();
   const results = deduped.out.slice(0, input.maxResults).map((item: any, i: number) => ({
     id: i + 1, title: String(item?.title || "Untitled result"),
@@ -337,7 +337,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
         : genericStructuredValue,
       confidence: result.confidence >= 70,
       sourceCaptured: sourceUrls.size === 0 || sourceUrls.has(result.url) || sourceRegistry.some((s) => s.url === result.url || s.domain === result.sourceDomain),
-      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),
+      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),\n      relevance: true,
       relevance: true,
     };
     const passed = Object.values(checks).filter(Boolean).length; const total = Object.keys(checks).length; const gate = passed === total ? "PASS" : passed >= Math.ceil(total * 0.75) ? "REVIEW" : "FAIL";
