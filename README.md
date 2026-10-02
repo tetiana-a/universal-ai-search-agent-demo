@@ -135,3 +135,22 @@ The project **does not bypass CAPTCHA, access controls, borrowed credentials or 
 See `docs/PRODUCTION_READINESS.md` and `docs/MASTER_CODING_PROMPT.md` for the current implementation boundary and the next production steps.
 
 For the global-search layer, also see `docs/GLOBAL_SEARCH_AND_PUBLIC_COMMUNITIES.md`, `docs/SEARCH_PROVIDER_SOURCES_2026-10-02.md` and `docs/SEARCH_PROVIDER_REGISTRY.json`. These define the multi-engine and public-community discovery matrix and the provider lifecycle notes.
+
+
+## v2.1 — Production results, Telegram delivery, persistent memory
+
+- Live research now preserves real search candidates when structured LLM output is empty instead of silently returning an empty result set.
+- Direct Telegram Bot API delivery is server-side via `/api/telegram/send`; the bot token and chat ID never enter the browser.
+- Persistent Source Memory / learning is supported through Upstash Redis REST or compatible KV REST credentials:
+  - `KV_REST_API_URL`
+  - `KV_REST_API_TOKEN`
+  - or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`
+- `/api/memory` exposes memory health and query-relevant learned sources.
+- Source memory records access/evidence/verification outcomes, duplicates, CAPTCHA/blocked events, quality score, task categories and recent query examples.
+- Future searches reuse learned public sources while still performing live search; memory does not replace current verification for volatile facts.
+- The browser localStorage source memory remains only as a client-side convenience. Persistent learning requires the server-side Redis/KV variables above.
+- CAPTCHA/access controls are not bypassed. Blocked sources become manual-review/fallback states.
+
+### Required free-research configuration
+
+Free mode uses Jina Search/Reader plus OpenRouter free-model inference. Jina Search requires a suitable Jina API-key/rate-limit configuration for reliable production use; OpenRouter's `openrouter/free` routes to currently available free models.
