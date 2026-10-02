@@ -177,7 +177,12 @@ export async function createPdfBuffer(payload: ResearchExportPayload) {
   const fontsModule: any = await import("pdfmake/build/vfs_fonts");
   const pdf: any = pdfmakeModule.default || pdfmakeModule;
   const fonts: any = fontsModule.default || fontsModule;
-  pdf.vfs = fonts?.pdfMake?.vfs || fonts?.vfs || fonts;
+  const virtualFonts = fonts?.pdfMake || fonts;
+  if (typeof pdf.addVirtualFileSystem === "function") {
+    pdf.addVirtualFileSystem(virtualFonts);
+  } else {
+    pdf.vfs = virtualFonts?.vfs || virtualFonts;
+  }
 
   const summaryRows = Object.entries(payload.stats || {}).slice(0, 10).map(function(entry) {
     return [{ text: compactText(entry[0], 32), bold: true, color: "#4b463f" }, compactText(entry[1], 70)];
