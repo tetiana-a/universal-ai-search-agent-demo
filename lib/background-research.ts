@@ -62,7 +62,21 @@ function normalize(value: unknown) {
 function normalizeUrl(value: unknown) { const raw = String(value ?? "").trim(); try { const u = new URL(raw); u.hash = ""; u.searchParams.sort(); return u.toString().replace(/\/$/, ""); } catch { return raw.replace(/\/$/, ""); } }
 function getDomain(value: unknown) { try { return new URL(String(value ?? "")).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
 function unique<T>(items: T[]) { return Array.from(new Set(items)); }
-function outputText(response: any) { return typeof response?.output_text === "string" ? response.output_text.trim() : ""; }
+function outputText(response: any) {
+  return typeof response?.output_text === "string" ? response.output_text.trim() : "";
+}
+
+function parseResearchJson(text: string) {
+  const trimmed = text.trim();
+  const unfenced = trimmed.replace(/^\s*\`\`\`(?:json)?\s*/i, "").replace(/\s*\`\`\`\s*$/i, "");
+  try { return JSON.parse(unfenced); } catch {}
+  const first = unfenced.indexOf("{");
+  const last = unfenced.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    try { return JSON.parse(unfenced.slice(first, last + 1)); } catch {}
+  }
+  throw new Error("Background research returned invalid JSON.");
+}
 
 function dedupeResults(items: any[]) {
   const groups = new Map<string, any[]>();
@@ -103,7 +117,9 @@ export function buildBackgroundResponseBody(input: BackgroundResearchRequest, sy
     tool_choice: "required",
     include: ["web_search_call.action.sources"],
     reasoning: { effort: input.depth === "Deep" ? "medium" : "low" },
-    text: { format: { type: "json_schema", name: "aurelius_research_result", strict: true, schema: BACKGROUND_RESEARCH_SCHEMA } },
+    // Background mode is intentionally kept on plain text output. Structured Outputs have had
+    // intermittent background-mode failures; the completed payload is validated locally instead.
+
     max_output_tokens: input.depth === "Deep" ? 12000 : 8000,
   };
 }
@@ -148,7 +164,7 @@ export function backgroundProgress(status: string) {
 export function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
   const text = outputText(response);
   if (!text) throw new Error("Background research completed without structured output.");
-  let parsed: any; try { parsed = JSON.parse(text); } catch { throw new Error("Background research returned invalid structured JSON."); }
+  const parsed = parseResearchJson(text);
   const retrievedSources = collectWebSources(response);
   const sourceUrls = new Set(retrievedSources.map((s) => s.url));
   const rawResults = Array.isArray(parsed.results) ? parsed.results : [];
