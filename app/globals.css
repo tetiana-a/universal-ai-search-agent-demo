@@ -382,3 +382,63 @@ html.light .gold-text {
     transition-duration: .001ms !important;
   }
 }
+
+
+.music-atmosphere {
+  position: fixed;
+  inset: -18%;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 18% 26%, rgba(0,199,190,.18), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(88,86,214,.15), transparent 28%),
+    radial-gradient(circle at 64% 82%, rgba(255,149,0,.10), transparent 32%);
+  transform: translate3d(0,0,0) scale(1);
+  transition: opacity 1200ms ease;
+  will-change: transform, opacity;
+}
+
+.music-atmosphere.is-live {
+  opacity: .34;
+  animation: music-ambient 26s ease-in-out infinite alternate;
+}
+
+.radio-panel {
+  animation: radio-panel-in 420ms cubic-bezier(.22,1,.36,1) both;
+}
+
+@keyframes radio-panel-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0,-8px,0) scale(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0,0,0) scale(1);
+  }
+}
+
+@keyframes music-ambient {
+  0% {
+    transform: translate3d(-1.5%, -1%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(1%, .8%, 0) scale(1.025);
+  }
+  100% {
+    transform: translate3d(1.5%, -1%, 0) scale(1.01);
+  }
+}
+
+@media (max-width: 767px) {
+  .music-atmosphere.is-live {
+    opacity: .24;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .music-atmosphere.is-live,
+  .radio-panel {
+    animation: none !important;
+  }
+}
