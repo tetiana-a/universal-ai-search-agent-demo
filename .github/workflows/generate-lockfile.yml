@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - fix/production-research-and-exports
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
