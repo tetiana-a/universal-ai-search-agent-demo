@@ -1389,7 +1389,8 @@ export default function Home() {
 
   const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
   const taskStateLabel = running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY";
-\n  function renderResearchProcess() {
+
+  function renderResearchProcess() {
     const stage = researchStages[researchStage] ?? researchStages[0];
 
     return (
