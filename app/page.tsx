@@ -217,6 +217,7 @@ const labels = {
     exportPdf: "PDF",
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
+    testMode: "TEST MODE • экономия",
   },
   en: {
     product: "Universal AI Research Engine",
@@ -370,6 +371,7 @@ const labels = {
     exportPdf: "PDF",
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
+    testMode: "TEST MODE • low cost",
   },
 } as const;
 
@@ -436,6 +438,7 @@ export default function Home() {
   const recognitionRef = useRef<any>(null);
   const t = labels[lang];
 
+  const [testMode, setTestMode] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -693,12 +696,13 @@ export default function Home() {
       const payload = {
         query,
         language: lang,
-        depth: settings.defaultDepth as "Quick" | "Balanced" | "Deep",
-        maxResults: Math.min(20, Math.max(8, Math.floor(settings.maxSources / 5))),
-        maxSources: Math.min(120, Math.max(20, settings.maxSources)),
-        maxPages: Math.min(1500, Math.max(50, settings.maxPages)),
-        multilingual: settings.multilingualSearch,
-        followRelatedLinks: settings.followRelatedLinks,
+        depth: testMode ? "Quick" : (settings.defaultDepth as "Quick" | "Balanced" | "Deep"),
+        maxResults: testMode ? 3 : Math.min(20, Math.max(8, Math.floor(settings.maxSources / 5))),
+        maxSources: testMode ? 8 : Math.min(120, Math.max(20, settings.maxSources)),
+        maxPages: testMode ? 20 : Math.min(1500, Math.max(50, settings.maxPages)),
+        testMode,
+        multilingual: testMode ? false : settings.multilingualSearch,
+        followRelatedLinks: testMode ? false : settings.followRelatedLinks,
         sourceMemory,
       };
 
@@ -1681,6 +1685,21 @@ export default function Home() {
                         }}
                       />
                     </label>
+
+                    <button
+                      type="button"
+                      onClick={() => setTestMode((value) => !value)}
+                      disabled={running}
+                      title={lang === "ru" ? "Дешёвый контрольный запуск: Quick, 3 результата, 8 источников, 20 страниц. Дополнительные провайдеры отключены." : "Low-cost control run: Quick, 3 results, 8 sources, 20 pages. Supplemental providers are disabled."}
+                      className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs transition ${
+                        testMode
+                          ? "border-[var(--success)]/35 bg-[var(--success)]/8 text-[var(--success)]"
+                          : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
+                      }`}
+                    >
+                      <Gauge size={14} />
+                      {t.testMode}
+                    </button>
 
                     <button
                       onClick={startResearch}
