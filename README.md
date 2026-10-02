@@ -154,3 +154,15 @@ For the global-search layer, also see `docs/GLOBAL_SEARCH_AND_PUBLIC_COMMUNITIES
 ### Required free-research configuration
 
 Free mode uses Jina Search/Reader plus OpenRouter free-model inference. Jina Search requires a suitable Jina API-key/rate-limit configuration for reliable production use; OpenRouter's `openrouter/free` routes to currently available free models.
+
+
+## v2.2 — Production exports and outbound delivery
+
+- CSV, XLSX, PDF and JSON exports now use the server-side \`/api/export\` route so browser bundling does not block Excel/PDF downloads.
+- XLSX is formatted as a professional workbook with Results, Executive Summary and Source Registry sheets, frozen headers, filters, wrapped evidence and source hyperlinks.
+- PDF is generated as an A4 landscape report with an executive summary, readable result table and evidence detail pages.
+- Telegram delivery is server-side and can send a formatted HTML report plus XLSX/PDF attachments.
+- Telegram recipients are protected by \`TELEGRAM_ALLOWED_CHAT_IDS\`; the configured target must be a real user/group/channel Chat ID. A bot's own user ID is rejected.
+- For multiple Telegram users, each user must first open the bot and press Start; add their resulting Chat IDs to the allowlist.
+- Email delivery uses the Resend REST API, with a styled HTML report and XLSX/PDF attachments. Configure \`RESEND_API_KEY\`, \`EMAIL_FROM\` and \`EMAIL_ALLOWED_RECIPIENTS\`.
+- Gmail/Outlook compose links remain available as a client-side fallback.
