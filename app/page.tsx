@@ -401,6 +401,7 @@ export default function Home() {
   const [liveSources, setLiveSources] = useState<string[]>([]);
   const [liveSourceRegistry, setLiveSourceRegistry] = useState<any[]>([]);
   const [accessEvents, setAccessEvents] = useState<any[]>([]);
+  const [accessCheckpoints, setAccessCheckpoints] = useState<any[]>([]);
   const [searchBranches, setSearchBranches] = useState<string[]>([]);
   const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
   const [researchSummary, setResearchSummary] = useState("");
@@ -536,6 +537,7 @@ export default function Home() {
     setLiveSources([]);
     setLiveSourceRegistry([]);
     setAccessEvents([]);
+    setAccessCheckpoints([]);
     setSearchBranches([]);
     setQueryUnderstanding(null);
     setResearchSummary("");
@@ -622,6 +624,7 @@ export default function Home() {
       setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
       setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
       setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
+      setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
       setQualityGate({
         total: Number(data.qualityGate?.total || 0),
         pass: Number(data.qualityGate?.pass || 0),
@@ -653,6 +656,7 @@ export default function Home() {
       setLiveSources([]);
       setLiveSourceRegistry([]);
       setAccessEvents([]);
+      setAccessCheckpoints([]);
       setSearchBranches([]);
       setQueryUnderstanding(null);
       setResearchSummary("");
@@ -1971,7 +1975,7 @@ export default function Home() {
           </section>
         ) : null}
 
-        {usingLiveData && (liveSourceRegistry.length || accessEvents.length) ? (
+        {usingLiveData && (liveSourceRegistry.length || accessEvents.length || accessCheckpoints.length) ? (
           <section className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
             <div className="glass rounded-[26px] p-6 sm:p-7">
               <div className="flex items-center justify-between gap-3">
@@ -2008,6 +2012,56 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            </div>
+          </section>
+        ) : null}
+
+        {usingLiveData && accessCheckpoints.length ? (
+          <section className="mt-6 glass rounded-[26px] p-6 sm:p-7">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-[.18em] text-[var(--warning)]">ACCESS ESCALATION</div>
+                <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
+                  {lang === "ru" ? "Требуется ручной доступ к отдельным источникам" : "Manual access is required for some sources"}
+                </h3>
+                <p className="mt-2 max-w-3xl text-[11px] leading-5 text-[var(--text-muted)]">
+                  {lang === "ru"
+                    ? "Агент не обходит CAPTCHA или защиту сайта. Он открывает безопасную точку ручной проверки и продолжает работу с разрешёнными альтернативными источниками."
+                    : "The agent does not bypass CAPTCHA or site access controls. It provides a safe manual checkpoint and continues with allowed alternate sources."}
+                </p>
+              </div>
+              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[10px] text-[var(--warning)]">
+                {accessCheckpoints.length} {lang === "ru" ? "точек" : "checkpoints"}
+              </div>
+            </div>
+            <div className="mt-5 grid gap-3">
+              {accessCheckpoints.slice(0, 12).map((checkpoint: any, index: number) => (
+                <div key={String(checkpoint.url || "") + "-" + index} className="rounded-2xl border border-[var(--line-soft)] bg-white/[.012] p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-[var(--warning)]/10 px-2 py-1 text-[9px] uppercase tracking-[.12em] text-[var(--warning)]">
+                          {checkpoint.kind}
+                        </span>
+                        <span className="text-[9px] text-[var(--text-faint)]">
+                          {lang === "ru" ? "действует" : "valid"} {checkpoint.expiresInMinutes} min
+                        </span>
+                      </div>
+                      <div className="mt-2 break-all text-[10px] text-[var(--text-soft)]">{checkpoint.url}</div>
+                      <div className="mt-2 text-[10px] leading-5 text-[var(--text-muted)]">{checkpoint.instructions}</div>
+                    </div>
+                    <a
+                      href={checkpoint.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[10px] text-[var(--gold-bright)] hover:border-[var(--gold)]/30"
+                    >
+                      <ExternalLink size={12} />
+                      {lang === "ru" ? "Открыть вручную" : "Open manually"}
+                    </a>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         ) : null}
