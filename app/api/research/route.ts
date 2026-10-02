@@ -5,6 +5,7 @@ import { getSearchProviderCatalog, runProviderDiscovery } from "@/lib/provider-s
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { accessEscalationSummary, buildAccessEscalationPlan, type AccessEscalationPlan } from "@/lib/access-escalation";
 import { runFreeResearch } from "@/lib/free-research";
+import { getResearchMemoryContext, recordResearchLearning } from "@/lib/memory";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -31,6 +32,7 @@ export async function POST(request:Request){
  const query=String(body.query||"").trim(); if(!query)return NextResponse.json({error:"Query is required."},{status:400});
  if((process.env.RESEARCH_AI_PROVIDER||"free").toLowerCase()==="free"){
    try{
+     const memoryContext=await getResearchMemoryContext(query,40);
      const result=await runFreeResearch({
        query,
        language:body.language==="en"?"en":"ru",
@@ -41,9 +43,19 @@ export async function POST(request:Request){
        multilingual:body.multilingual!==false,
        followRelatedLinks:body.followRelatedLinks!==false,
        testMode:body.depth==="Quick",
-       sourceMemory:[],
+       sourceMemory:memoryContext.sources,
      });
-     return NextResponse.json(result,{status:200,headers:{"Cache-Control":"no-store"}});
+     await Promise.race([
+       recordResearchLearning({
+         taskId:String(result?.task?.responseId || result?.task?.id || ""),
+         query,
+         sourceRegistry:result?.sourceRegistry||[],
+         results:result?.results||[],
+         stats:result?.stats||{},
+       }),
+       new Promise(resolve=>setTimeout(resolve,1800)),
+     ]);
+     return NextResponse.json({...result,memory:{persistent:memoryContext.persistent}},{status:200,headers:{"Cache-Control":"no-store"}});
    }catch(error){
      return NextResponse.json({error:error instanceof Error?error.message:"Free research failed."},{status:502});
    }
