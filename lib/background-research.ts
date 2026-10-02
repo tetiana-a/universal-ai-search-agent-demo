@@ -105,8 +105,8 @@ export function buildBackgroundResponseBody(input: BackgroundResearchRequest, sy
   const memory = Array.isArray(input.sourceMemory) ? input.sourceMemory.slice(0, 120) : [];
   const memoryBlock = memory.length > 0 ? JSON.stringify(memory) : "No prior source memory is available yet.";
   const instructions = input.language === "ru"
-    ? "Проведи глубокое исследование по запросу. Сначала пойми задачу, географию, критерии и обязательные поля. Создай широкую карту источников и исследуй их. Используй сохраненную память источников, но ищи новые источники. Не считай сниппет проверкой: для результата нужен прямой URL и evidence_quote. Отделяй discovered от checked. Если источник требует CAPTCHA, Cloudflare, auth или rate limit, классифицируй это честно и используй разрешенные альтернативы. Не обходи защиту, не используй чужие аккаунты или cookies и не spoof fingerprint. Возвращай только данные, которые можно подтвердить."
-    : "Perform deep research. Understand the task, geography, criteria and required fields first. Build a broad source map and research it. Use saved source memory but actively discover new sources. A search snippet is not verification: results need a direct URL and evidence_quote. Distinguish discovered from checked sources. If a source requires CAPTCHA, Cloudflare, auth or rate limit, classify it honestly and use allowed alternatives. Do not bypass access controls, use third-party accounts/cookies, or spoof fingerprints. Return only supportable data.";
+    ? "Проведи глубокое исследование по запросу. Сначала пойми задачу, географию, критерии и обязательные поля. Создай широкую карту источников и исследуй их. Используй сохраненную память источников, но ищи новые источники. Не считай сниппет проверкой: для результата нужен прямой URL и evidence_quote. Отделяй discovered от checked. Если источник требует CAPTCHA, Cloudflare, auth или rate limit, классифицируй это честно и используй разрешенные альтернативы. Не обходи защиту, не используй чужие аккаунты или cookies и не spoof fingerprint. Возвращай только данные, которые можно подтвердить. В финальном JSON держи source_registry не более 40 записей, access_events не более 30 записей, search_branches не более 20; выдавай максимум maxResults лучших подтвержденных результатов. Не повторяй большие тексты страниц."
+    : "Perform deep research. Understand the task, geography, criteria and required fields first. Build a broad source map and research it. Use saved source memory but actively discover new sources. A search snippet is not verification: results need a direct URL and evidence_quote. Distinguish discovered from checked sources. If a source requires CAPTCHA, Cloudflare, auth or rate limit, classify it honestly and use allowed alternatives. Do not bypass access controls, use third-party accounts/cookies, or spoof fingerprints. Return only supportable data. In the final JSON keep source_registry to 40 entries max, access_events to 30 entries max, search_branches to 20 entries max, and return at most maxResults best verified results. Do not repeat large page text.";
   return {
     model: process.env.OPENAI_MODEL || "gpt-5.5", background: true, store: true,
     input: [
@@ -120,7 +120,7 @@ export function buildBackgroundResponseBody(input: BackgroundResearchRequest, sy
     // Background mode is intentionally kept on plain text output. Structured Outputs have had
     // intermittent background-mode failures; the completed payload is validated locally instead.
 
-    max_output_tokens: input.depth === "Deep" ? 12000 : 8000,
+    max_output_tokens: input.depth === "Deep" ? 30000 : input.depth === "Balanced" ? 18000 : 12000,
   };
 }
 
