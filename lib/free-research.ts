@@ -185,7 +185,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     const memoryHits = await Promise.all(
       input.sourceMemory
         .slice(0, input.testMode ? 3 : 8)
-        .filter((source) => /^https?:\\/\\//i.test(String(source?.url || "")))
+        .filter((source) => /^https?:\/\//i.test(String(source?.url || "")))
         .map(async (source) => {
           const url = normalizeUrl(String(source.url));
           const content = await jinaRead(url);
