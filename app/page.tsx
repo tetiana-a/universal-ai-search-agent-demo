@@ -612,6 +612,103 @@ export default function Home() {
     return results;
   }, [filter, results]);
 
+  function buildShareText() {
+    const rows = shownResults.slice(0, 12).map((item, index) =>
+      [
+        (index + 1) + ". " + item.title,
+        item.organization ? "Организация: " + item.organization : "",
+        item.specialization ? "Профиль: " + item.specialization : "",
+        item.geography ? "География: " + item.geography : "Место: " + item.location,
+        item.investmentType ? "Тип: " + item.investmentType : "",
+        item.stage ? "Стадия: " + item.stage : "",
+        item.ticket ? "Ticket: " + item.ticket : "Цена/параметр: " + item.price,
+        "Источник: " + item.source,
+        "URL: " + item.url,
+        item.evidenceQuote ? "Evidence: " + item.evidenceQuote : item.evidence ? "Evidence: " + item.evidence : "",
+      ].filter(Boolean).join("\n")
+    );
+    return ["AURELIUS — Universal AI Research Engine", "Запрос: " + query, rows.join("\n\n")].join("\n\n");
+  }
+
+  function shareViaTelegram() {
+    const text = buildShareText();
+    const url = "https://t.me/share/url?url=" + encodeURIComponent(window.location.href) + "&text=" + encodeURIComponent(text);
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function shareViaEmail() {
+    const subject = "Aurelius research: " + query.slice(0, 80);
+    const body = buildShareText();
+    window.location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+  }
+
+  async function shareViaSystem() {
+    const text = buildShareText();
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Aurelius Research", text, url: window.location.href });
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      }
+    } catch {}
+  }
+
+  async function playRadioStation(station: RadioStation) {
+    const audio = radioAudioRef.current;
+    if (!audio) return;
+    setRadioError("");
+    try {
+      if (currentStation?.stationuuid === station.stationuuid) {
+        if (audio.paused) {
+          await audio.play();
+          setRadioPlaying(true);
+        } else {
+          audio.pause();
+          setRadioPlaying(false);
+        }
+        return;
+      }
+      audio.pause();
+      audio.src = station.streamUrl;
+      audio.volume = radioVolume;
+      audio.load();
+      setCurrentStation(station);
+      await audio.play();
+      setRadioPlaying(true);
+    } catch (error) {
+      setRadioPlaying(false);
+      setRadioError(error instanceof Error ? error.message : "Unable to start this station.");
+    }
+  }
+
+  function stopRadio() {
+    radioAudioRef.current?.pause();
+    setRadioPlaying(false);
+  }
+
+  function skipRadio() {
+    if (!radioStations.length) return;
+    const index = currentStation ? radioStations.findIndex((station) => station.stationuuid === currentStation.stationuuid) : -1;
+    const next = radioStations[(index + 1 + radioStations.length) % radioStations.length];
+    if (next) void playRadioStation(next);
+  }
+
+  function renderShareActions(compact = false) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button onClick={shareViaTelegram} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+          <Send size={12} /> {t.telegram}
+        </button>
+        <button onClick={shareViaEmail} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+          <Mail size={12} /> {t.email}
+        </button>
+        <button onClick={() => void shareViaSystem()} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+          <Share2 size={12} /> {compact ? t.systemShare : t.share}
+        </button>
+      </div>
+    );
+  }
+
   function detectScenarioFromQuery(text: string): Scenario {
     const q = text.toLowerCase();
     if (/(инвестор|инвести|investor|vc|angel|fund)/i.test(q)) return "investors";
