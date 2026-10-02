@@ -1,5 +1,6 @@
 import { accessEscalationSummary, buildAccessEscalationPlan, type AccessEscalationPlan } from "@/lib/access-escalation";
 import type { AccessEvent, LiveSourceRecord, ResearchQueryUnderstanding } from "@/lib/research-contract";
+import { filterResearchResults } from "@/lib/relevance-gate";
 
 export type BackgroundResearchRequest = {
   query: string;
@@ -280,6 +281,8 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
       }));
     }
   }
+  const relevance = filterResearchResults(rawResults, input.query);
+  rawResults = relevance.accepted;
   const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
   const deduped = dedupeResults(filtered); const now = new Date().toISOString();
   const results = deduped.out.slice(0, input.maxResults).map((item: any, i: number) => ({
@@ -335,6 +338,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
       confidence: result.confidence >= 70,
       sourceCaptured: sourceUrls.size === 0 || sourceUrls.has(result.url) || sourceRegistry.some((s) => s.url === result.url || s.domain === result.sourceDomain),
       statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),
+      relevance: true,
     };
     const passed = Object.values(checks).filter(Boolean).length; const total = Object.keys(checks).length; const gate = passed === total ? "PASS" : passed >= Math.ceil(total * 0.75) ? "REVIEW" : "FAIL";
     return { ...result, qualityGate: { gate, passed, total, checks, independentVerification: result.independentVerification } };
@@ -355,10 +359,10 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
     stats: { sourcesFound: sourceDomains.length, sourcesChecked: sourceRegistry.filter((s) => s.accessStatus === "checked").length,
       sourcesBlocked: sourceRegistry.filter((s) => ["blocked","policy_restricted","captcha_required"].includes(s.accessStatus)).length,
       sourcesManualReview: sourceRegistry.filter((s) => ["auth_required","partial","captcha_required","rate_limited"].includes(s.accessStatus)).length,
-      pagesProcessed: unique(results.map((r) => r.url).filter(Boolean)).length, recordsExtracted: rawResults.length, duplicatesRemoved: Math.max(Number(parsed?.duplicates_removed || 0), deduped.removed),
+      pagesProcessed: unique(results.map((r) => r.url).filter(Boolean)).length, recordsExtracted: rawResults.length, duplicatesRemoved: Math.max(Number(parsed?.duplicates_removed || 0), deduped.removed), relevanceRejected: relevance.rejected.length,
       qualified: pass + review, evidenceCoverage: gated.length ? Math.round((evidence / gated.length) * 100) : 0, averageConfidence: gated.length ? Math.round(gated.reduce((sum: number, r: any) => sum + r.confidence, 0) / gated.length) : 0 },
     accessEscalation: escalation, qualityGate: { total: gated.length, pass, review, fail, independentVerification: gated.some((r: any) => r.independentVerification),
-      ruleSet: ["source URL present","source name present","evidence summary present","evidence quote present","title present","location present","area or price present","confidence >= 70","source captured","allowed verification status"] },
+      ruleSet: ["source URL present","source name present","evidence summary present","evidence quote present","title present","location present","area or price present","confidence >= 70","source captured","allowed verification status","intent relevance"] },
     billing: { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.5", billable: true, webSearchCalls: Array.isArray(response?.output) ? response.output.filter((x: any) => x?.type === "web_search_call").length : 0, usage: response?.usage ?? null, background: true },
     task: { id: response?.id ? "AURE-" + String(response.id).replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase() : "", responseId: String(response?.id || ""), providerStatus: String(response?.status || "") },
   };
