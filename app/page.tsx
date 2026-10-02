@@ -663,7 +663,8 @@ export default function Home() {
     }
   }, []);
 
-  // NOSONAR - orchestration function intentionally coordinates task initialization, API start and polling.\n  async function startResearch() {
+  // NOSONAR - orchestration function intentionally coordinates task initialization, API start and polling.
+  async function startResearch() {
     const detected = detectScenarioFromQuery(query);
     setScenario(detected);
     setActiveNav("research");
