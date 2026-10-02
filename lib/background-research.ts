@@ -144,7 +144,8 @@ export function backgroundProgress(status: string) {
   return { progress: 55, stage: 4, label: "researching" };
 }
 
-// NOSONAR - this function is a deterministic normalization pipeline with several required validation stages.\nexport function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
+// NOSONAR - this function is a deterministic normalization pipeline with several required validation stages.
+export function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
   const text = outputText(response);
   if (!text) throw new Error("Background research completed without structured output.");
   let parsed: any; try { parsed = JSON.parse(text); } catch { throw new Error("Background research returned invalid structured JSON."); }
