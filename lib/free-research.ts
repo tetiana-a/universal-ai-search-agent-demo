@@ -2,6 +2,7 @@ import { BACKGROUND_RESEARCH_SCHEMA, type BackgroundResearchRequest, normalizeCo
 import { UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN, UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU } from "@/lib/research-prompts";
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { buildAccessEscalationPlan } from "@/lib/access-escalation";
+import { filterResearchResults } from "@/lib/relevance-gate";
 
 export type FreeSearchHit = {
   title: string;
@@ -110,7 +111,7 @@ function buildBranches(
       return domain ? [`site:${domain} ${query}`] : [];
     });
 
-  const limit = testMode ? 3 : 4;
+  const limit = testMode ? 3 : 6;
   return [...new Set([query, ...memoryBranches, ...branches])].slice(0, limit);
 }
 
@@ -204,7 +205,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     candidateHits = memoryHits.filter(Boolean) as FreeSearchHit[];
   }
 
-  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 5);
+  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 8);
 
   const readResults = await Promise.allSettled(
     candidateHits.slice(0, readerLimit).map(async (hit) => ({ hit, content: hit.content || await jinaRead(hit.url) })),
@@ -358,7 +359,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   }
 
   const allowedUrls = new Map(candidateHits.map((hit) => [hit.url, hit]));
-  const safeResults = Array.isArray(parsed?.results)
+  const groundedResults = Array.isArray(parsed?.results)
     ? parsed.results
         .filter((item: any) => allowedUrls.has(normalizeUrl(item?.url)))
         .map((item: any) => {
@@ -376,6 +377,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
         .slice(0, input.maxResults)
     : [];
 
+  const relevance = filterResearchResults(groundedResults, input.query);
+  const filteredFallback = filterResearchResults(
+    fallbackResults(researchedHits.length ? researchedHits : candidateHits, input),
+    input.query,
+  ).accepted;
+  const safeResults = relevance.accepted.length ? relevance.accepted.slice(0, input.maxResults) : filteredFallback.slice(0, input.maxResults);
+
   const finalParsed = {
     query_understanding: parsed?.query_understanding || { intent: "research", entity_type: "unknown", geography: [], languages: [input.language], criteria: [], exclusions: [], required_fields: [], source_classes: ["web"] },
     search_plan: String(parsed?.search_plan || "Live web search with free AI extraction."),
@@ -385,7 +393,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     duplicates_removed: Number(parsed?.duplicates_removed || Math.max(0, allHits.length - candidateHits.length)),
     access_events: Array.isArray(parsed?.access_events) ? parsed.access_events.slice(0, 30) : [],
     source_registry: sourceRegistry,
-    results: safeResults.length ? safeResults : fallbackResults(researchedHits.length ? researchedHits : candidateHits, input),
+    results: safeResults,
   };
 
   const synthetic = {
