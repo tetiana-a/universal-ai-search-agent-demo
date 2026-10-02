@@ -42,7 +42,7 @@ async function jinaSearch(query: string): Promise<FreeSearchHit[]> {
 
   const response = await fetch(url, {
     headers,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) return [];
 
@@ -69,7 +69,7 @@ async function jinaRead(url: string): Promise<string> {
 
   const response = await fetch("https://r.jina.ai/" + url, {
     headers,
-    signal: AbortSignal.timeout(18000),
+    signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) return "";
 
