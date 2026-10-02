@@ -2721,6 +2721,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
+      <div className={"music-atmosphere pointer-events-none fixed inset-0 -z-10 " + (radioPlaying ? "is-live" : "")} aria-hidden="true" />
       <div className="app-grid pointer-events-none fixed inset-0 -z-10 opacity-45" />
 
       <div className="mx-auto flex min-h-screen max-w-[1900px]">
@@ -2981,6 +2982,139 @@ export default function Home() {
           </aside>
         </div>
       )}
+
+      {radioOpen && (
+        <div className="radio-panel fixed right-4 top-[82px] z-[65] w-[calc(100vw-2rem)] max-w-[390px] overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent)] shadow-2xl backdrop-blur-2xl">
+          <div className="spectrum-line h-px opacity-80" />
+          <div className="p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
+                  <Music2 size={14} />
+                  {t.radio}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-[var(--text)]">
+                  {currentStation?.name || (lang === "ru" ? "Международное онлайн-радио" : "International online radio")}
+                </div>
+                {currentStation ? (
+                  <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                    {currentStation.country} · {currentStation.codec} {currentStation.bitrate ? currentStation.bitrate + " kbps" : ""}
+                  </div>
+                ) : null}
+              </div>
+              <button onClick={() => setRadioOpen(false)} className="rounded-xl border border-[var(--line-soft)] p-2 text-[var(--text-muted)]" aria-label="Close radio">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {[
+                ["chillout", lang === "ru" ? "Chill / Ambient" : "Chill / Ambient"],
+                ["jazz", "Jazz"],
+                ["classical", "Classical"],
+                ["electronic", "Electronic"],
+                ["pop", lang === "ru" ? "International Pop" : "International Pop"],
+              ].map(([tag, label]) => (
+                <button
+                  key={tag}
+                  onClick={() => setRadioGenre(tag)}
+                  className={"rounded-full border px-2.5 py-1.5 text-[9px] transition " + (radioGenre === tag ? "border-[var(--gold)]/40 bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "border-[var(--line-soft)] text-[var(--text-muted)]")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--line-soft)] bg-black/10 p-3">
+              <button
+                onClick={() => (currentStation ? void playRadioStation(currentStation) : radioStations[0] ? void playRadioStation(radioStations[0]) : undefined)}
+                disabled={!currentStation && radioStations.length === 0}
+                className={"grid h-10 w-10 shrink-0 place-items-center rounded-xl " + (radioPlaying ? "bg-[var(--success)]/12 text-[var(--success)]" : "bg-[var(--gold)]/12 text-[var(--gold-bright)]") + " disabled:opacity-30"}
+                aria-label={radioPlaying ? t.stopRadio : t.listen}
+              >
+                {radioPlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+              </button>
+              <button
+                onClick={skipRadio}
+                disabled={radioStations.length < 2}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[var(--line-soft)] text-[var(--text-muted)] disabled:opacity-30"
+                aria-label="Next station"
+              >
+                <SkipForward size={15} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between text-[9px] uppercase tracking-[.14em] text-[var(--text-faint)]">
+                  <span>{radioPlaying ? t.radioOn : t.radioOff}</span>
+                  <span>{Math.round(radioVolume * 100)}%</span>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Volume2 size={12} className="shrink-0 text-[var(--text-faint)]" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={radioVolume}
+                    onChange={(event) => setRadioVolume(Number(event.target.value))}
+                    className="w-full accent-[var(--gold)]"
+                    aria-label="Radio volume"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {radioError ? (
+              <div className="mt-3 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger)]/5 p-3 text-[10px] leading-4 text-[var(--danger)]">
+                {radioError}
+              </div>
+            ) : null}
+
+            <div className="mt-4 max-h-[290px] space-y-1.5 overflow-y-auto pr-1">
+              {radioLoading ? (
+                <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">{t.radioLoading}</div>
+              ) : radioStations.length === 0 ? (
+                <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">{t.radioEmpty}</div>
+              ) : (
+                radioStations.map((station) => (
+                  <button
+                    key={station.stationuuid}
+                    onClick={() => void playRadioStation(station)}
+                    className={"group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition " + (currentStation?.stationuuid === station.stationuuid ? "border-[var(--gold)]/25 bg-[var(--gold)]/7" : "border-[var(--line-soft)] bg-white/[.012] hover:bg-white/[.025]")}
+                  >
+                    {station.favicon ? (
+                      <img src={station.favicon} alt="" className="h-8 w-8 rounded-lg object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--gold)]/8 text-[var(--gold)]"><RadioIcon size={14} /></span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-medium text-[var(--text-soft)]">{station.name}</span>
+                      <span className="mt-0.5 block truncate text-[9px] text-[var(--text-faint)]">{station.country} · {station.tags || station.language || "international"}</span>
+                    </span>
+                    <PlayIcon size={12} className={currentStation?.stationuuid === station.stationuuid && radioPlaying ? "text-[var(--success)]" : "text-[var(--text-faint)]"} />
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="mt-3 text-[9px] leading-4 text-[var(--text-faint)]">
+              {lang === "ru"
+                ? "Открытое интернет-радио. Запуск только после клика — так браузеры не блокируют звук."
+                : "Open internet radio. Playback starts only after a click so browsers can allow audio."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <audio
+        ref={radioAudioRef}
+        onPlay={() => setRadioPlaying(true)}
+        onPause={() => setRadioPlaying(false)}
+        onError={() => {
+          setRadioPlaying(false);
+          setRadioError(lang === "ru" ? "Поток станции недоступен. Выберите другую станцию." : "This station stream is unavailable. Choose another station.");
+        }}
+        preload="none"
+      />
 
       <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
         <span className="inline-flex items-center gap-2">
