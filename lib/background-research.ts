@@ -40,12 +40,12 @@ export const BACKGROUND_RESEARCH_SCHEMA = {
       access_method: { type: "string" }, reason: { type: "string" }, evidence_available: { type: "boolean" }, quality: { type: "integer", minimum: 0, maximum: 100 }, last_checked: { type: "string" },
     }, required: ["name","url","domain","category","access_status","access_method","reason","evidence_available","quality","last_checked"] } },
     results: { type: "array", maxItems: 60, items: { type: "object", additionalProperties: false, properties: {
-      title: { type: "string" }, location: { type: "string" }, area: { type: "string" }, price: { type: "string" },
+      title: { type: "string" }, organization: { type: "string" }, specialization: { type: "string" }, geography: { type: "string" }, contact: { type: "string" }, investment_type: { type: "string" }, stage: { type: "string" }, ticket: { type: "string" }, location: { type: "string" }, area: { type: "string" }, price: { type: "string" },
       match: { type: "integer", minimum: 0, maximum: 100 }, confidence: { type: "integer", minimum: 0, maximum: 100 },
       evidence: { type: "string" }, evidence_quote: { type: "string" }, status: { type: "string", enum: ["Verified","Reviewed","Manual review"] },
       source: { type: "string" }, source_type: { type: "string" }, url: { type: "string" }, why: { type: "string" }, retrieved_at: { type: "string" },
       freshness_days: { type: "integer", minimum: 0 }, independent_verification: { type: "boolean" },
-    }, required: ["title","location","area","price","match","confidence","evidence","evidence_quote","status","source","source_type","url","why","retrieved_at","freshness_days","independent_verification"] } },
+    }, required: ["title","organization","specialization","geography","contact","investment_type","stage","ticket","location","area","price","match","confidence","evidence","evidence_quote","status","source","source_type","url","why","retrieved_at","freshness_days","independent_verification"] } },
   },
   required: ["query_understanding","search_plan","search_branches","search_summary","candidates_seen","duplicates_removed","access_events","source_registry","results"],
 } as const;
@@ -111,20 +111,53 @@ function dedupeResults(items: any[]) {
 // NOSONAR - source traversal intentionally handles multiple Responses output shapes.
 function collectWebSources(response: any) {
   const sources: Array<{ url: string; title: string; domain: string }> = []; const seen = new Set<string>();
-  const push = (source: any) => { const url = normalizeUrl(source?.url); if (!url || seen.has(url)) return; seen.add(url); sources.push({ url, title: String(source?.title ?? ""), domain: getDomain(url) }); };
+  const push = (source: any) => {
+    const url = normalizeUrl(source?.url);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    sources.push({ url, title: String(source?.title ?? source?.name ?? ""), domain: getDomain(url) });
+  };
   for (const item of Array.isArray(response?.output) ? response.output : []) {
-    if (item?.type === "web_search_call") for (const source of Array.isArray(item?.action?.sources) ? item.action.sources : []) push(source);
-    if (item?.type === "message") for (const part of Array.isArray(item?.content) ? item.content : []) for (const annotation of Array.isArray(part?.annotations) ? part.annotations : []) push(annotation);
+    if (item?.type === "web_search_call") {
+      for (const source of Array.isArray(item?.action?.sources) ? item.action.sources : []) push(source);
+      for (const source of Array.isArray(item?.results) ? item.results : []) push(source);
+    }
+    if (item?.type === "message") {
+      for (const part of Array.isArray(item?.content) ? item.content : []) {
+        for (const annotation of Array.isArray(part?.annotations) ? part.annotations : []) push(annotation);
+      }
+    }
   }
   return sources;
+}
+
+function collectWebSearchResults(response: any) {
+  const out: Array<{ url: string; title: string; snippet: string; domain: string }> = [];
+  const seen = new Set<string>();
+  for (const item of Array.isArray(response?.output) ? response.output : []) {
+    if (item?.type !== "web_search_call") continue;
+    const rows = Array.isArray(item?.results) ? item.results : [];
+    for (const row of rows) {
+      const url = normalizeUrl(row?.url);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      out.push({
+        url,
+        title: String(row?.title ?? row?.name ?? ""),
+        snippet: String(row?.snippet ?? row?.description ?? row?.text ?? ""),
+        domain: getDomain(url),
+      });
+    }
+  }
+  return out;
 }
 
 export function buildBackgroundResponseBody(input: BackgroundResearchRequest, systemPrompt: string, providerCatalog: unknown, searchMatrix: unknown) {
   const memory = Array.isArray(input.sourceMemory) ? input.sourceMemory.slice(0, 120) : [];
   const memoryBlock = memory.length > 0 ? JSON.stringify(memory) : "No prior source memory is available yet.";
   const instructions = input.language === "ru"
-    ? "Проведи глубокое исследование по запросу. Сначала пойми задачу, географию, критерии и обязательные поля. Создай широкую карту источников и исследуй их. Используй сохраненную память источников, но ищи новые источники. Не считай сниппет проверкой: для результата нужен прямой URL и evidence_quote. Отделяй discovered от checked. Если источник требует CAPTCHA, Cloudflare, auth или rate limit, классифицируй это честно и используй разрешенные альтернативы. Не обходи защиту, не используй чужие аккаунты или cookies и не spoof fingerprint. Возвращай только данные, которые можно подтвердить. В финальном JSON держи source_registry не более 40 записей, access_events не более 30 записей, search_branches не более 20; выдавай максимум maxResults лучших подтвержденных результатов. Не повторяй большие тексты страниц."
-    : "Perform deep research. Understand the task, geography, criteria and required fields first. Build a broad source map and research it. Use saved source memory but actively discover new sources. A search snippet is not verification: results need a direct URL and evidence_quote. Distinguish discovered from checked sources. If a source requires CAPTCHA, Cloudflare, auth or rate limit, classify it honestly and use allowed alternatives. Do not bypass access controls, use third-party accounts/cookies, or spoof fingerprints. Return only supportable data. In the final JSON keep source_registry to 40 entries max, access_events to 30 entries max, search_branches to 20 entries max, and return at most maxResults best verified results. Do not repeat large page text.";
+    ? "Проведи реальное web-исследование по запросу и ОБЯЗАТЕЛЬНО верни результаты, если после поиска найдены релевантные кандидаты. Сначала пойми задачу, географию, критерии и обязательные поля. Создай широкую карту источников и исследуй их. Используй сохраненную память источников, но ищи новые источники. Поля результата адаптируй под задачу: для недвижимости используй area/price/location; для инвесторов и людей используй organization/specialization/geography/contact/investment_type/stage/ticket; для компаний и поставщиков используй organization/specialization/geography/contact/profile/website. Не оставляй results пустым, если web search вернул релевантные записи. Для подтвержденного результата нужен прямой URL и evidence_quote из найденного источника. Отделяй discovered от checked. Если источник требует CAPTCHA, Cloudflare, auth или rate limit, классифицируй это честно и используй разрешенные альтернативы. Не обходи защиту, не используй чужие аккаунты или cookies и не spoof fingerprint. Возвращай только данные, которые можно подтвердить. В финальном JSON держи source_registry не более 40 записей, access_events не более 30 записей, search_branches не более 20; выдавай максимум maxResults лучших релевантных результатов. Не повторяй большие тексты страниц."
+    : "Perform real web research and ALWAYS return results when relevant candidates were found. Understand the task, geography, criteria and required fields first. Build a broad source map and research it. Use saved source memory but actively discover new sources. Adapt fields to the task: property uses area/price/location; investors/people use organization/specialization/geography/contact/investment_type/stage/ticket; companies/suppliers use organization/specialization/geography/contact/profile/website. Do not leave results empty if the web search returned relevant candidates. Confirmed results need a direct URL and evidence_quote from the source. Distinguish discovered from checked sources. If a source requires CAPTCHA, Cloudflare, auth or rate limit, classify it honestly and use allowed alternatives. Do not bypass access controls, use third-party accounts/cookies, or spoof fingerprints. Return only supportable data. In the final JSON keep source_registry to 40 entries max, access_events to 30 entries max, search_branches to 20 entries max, and return at most maxResults best relevant results. Do not repeat large page text.";
   return {
     model: process.env.OPENAI_MODEL || "gpt-5.5", background: true, store: true,
     input: [
@@ -133,11 +166,16 @@ export function buildBackgroundResponseBody(input: BackgroundResearchRequest, sy
     ],
     tools: [{ type: "web_search", search_context_size: input.depth === "Deep" ? "high" : "medium" }],
     tool_choice: "required",
-    include: ["web_search_call.action.sources"],
+    include: ["web_search_call.results", "web_search_call.action.sources"],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "research_contract",
+        strict: true,
+        schema: BACKGROUND_RESEARCH_SCHEMA,
+      },
+    },
     reasoning: { effort: input.depth === "Deep" ? "medium" : "low" },
-    // Background mode is intentionally kept on plain text output. Structured Outputs have had
-    // intermittent background-mode failures; the completed payload is validated locally instead.
-
     max_output_tokens: input.testMode ? 12000 : input.depth === "Deep" ? 30000 : input.depth === "Balanced" ? 18000 : 12000,
   };
 }
@@ -190,13 +228,56 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   }
   const parsed = parseResearchJson(text);
   const retrievedSources = collectWebSources(response);
+  const searchResults = collectWebSearchResults(response);
   const sourceUrls = new Set(retrievedSources.map((s) => s.url));
-  const rawResults = Array.isArray(parsed.results) ? parsed.results : [];
+  const searchPlanText =
+    typeof parsed.search_plan === "string"
+      ? parsed.search_plan
+      : JSON.stringify(parsed.search_plan ?? {});
+
+  let rawResults = Array.isArray(parsed.results) ? parsed.results : [];
+  if (rawResults.length === 0 && searchResults.length > 0) {
+    const geography = Array.isArray(parsed?.query_understanding?.geography) ? parsed.query_understanding.geography.join(", ") : "";
+    rawResults = searchResults.slice(0, input.maxResults).map((row, index) => ({
+      title: row.title || row.domain || ("Search result " + (index + 1)),
+      organization: "",
+      specialization: "",
+      geography,
+      contact: "",
+      investment_type: "",
+      stage: "",
+      ticket: "",
+      location: geography,
+      area: "",
+      price: "",
+      match: 60,
+      confidence: 55,
+      evidence: row.snippet || "Search result returned by live web search.",
+      evidence_quote: row.snippet || "",
+      status: "Manual review",
+      source: row.domain || "Web search",
+      source_type: "web_search_candidate",
+      url: row.url,
+      why: "Candidate discovered by live web search; manual verification is required.",
+      retrieved_at: new Date().toISOString(),
+      freshness_days: 0,
+      independent_verification: false,
+    }));
+  }
   const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
   const deduped = dedupeResults(filtered); const now = new Date().toISOString();
   const results = deduped.out.slice(0, input.maxResults).map((item: any, i: number) => ({
-    id: i + 1, title: String(item?.title || "Untitled result"), location: String(item?.location || "not specified"),
-    area: String(item?.area || "not specified"), price: String(item?.price || "not specified"),
+    id: i + 1, title: String(item?.title || "Untitled result"),
+    organization: String(item?.organization || ""),
+    specialization: String(item?.specialization || ""),
+    geography: String(item?.geography || item?.location || ""),
+    contact: String(item?.contact || ""),
+    investmentType: String(item?.investment_type || ""),
+    stage: String(item?.stage || ""),
+    ticket: String(item?.ticket || ""),
+    location: String(item?.location || item?.geography || "not specified"),
+    area: String(item?.area || item?.specialization || item?.profile || "not specified"),
+    price: String(item?.price || item?.ticket || item?.stage || "not specified"),
     match: Math.max(0, Math.min(100, Number(item?.match || 0))), confidence: Math.max(0, Math.min(100, Number(item?.confidence || 0))),
     evidence: String(item?.evidence || ""), evidenceQuote: String(item?.evidence_quote || ""),
     status: ["Verified","Reviewed","Manual review"].includes(item?.status) ? item.status : "Reviewed",
@@ -218,12 +299,27 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   const accessEvents: AccessEvent[] = (Array.isArray(parsed.access_events) ? parsed.access_events : []).slice(0, 120).map((e: any) => ({
     url: normalizeUrl(e?.url), status: String(e?.status || "partial"), method: String(e?.method || "web_search"), reason: String(e?.reason || ""), fallback: String(e?.fallback || "alternate_source"),
   }));
+  const queryText = normalize(input.query);
+  const isPropertyTask = /(land|plot|property|real estate|apartment|house|недвиж|участ|квартир|дом)/i.test(queryText);
   const gated = results.map((result: any) => {
-    const checks = { sourceUrl: Boolean(result.url), sourceName: Boolean(result.source), evidence: Boolean(result.evidence), evidenceQuote: Boolean(result.evidenceQuote),
-      title: Boolean(result.title && result.title !== "Untitled result"), location: Boolean(result.location && result.location !== "not specified"),
-      structuredValue: Boolean((result.area && result.area !== "not specified") || (result.price && result.price !== "not specified")), confidence: result.confidence >= 70,
+    const genericStructuredValue = [result.organization, result.specialization, result.geography, result.contact, result.investmentType, result.stage, result.ticket, result.area, result.price]
+      .some((value) => Boolean(value && value !== "not specified"));
+    const checks = {
+      sourceUrl: Boolean(result.url),
+      sourceName: Boolean(result.source),
+      evidence: Boolean(result.evidence),
+      evidenceQuote: Boolean(result.evidenceQuote),
+      title: Boolean(result.title && result.title !== "Untitled result"),
+      location: isPropertyTask
+        ? Boolean(result.location && result.location !== "not specified")
+        : Boolean(result.geography || result.location),
+      structuredValue: isPropertyTask
+        ? Boolean((result.area && result.area !== "not specified") || (result.price && result.price !== "not specified"))
+        : genericStructuredValue,
+      confidence: result.confidence >= 70,
       sourceCaptured: sourceUrls.size === 0 || sourceUrls.has(result.url) || sourceRegistry.some((s) => s.url === result.url || s.domain === result.sourceDomain),
-      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status) };
+      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),
+    };
     const passed = Object.values(checks).filter(Boolean).length; const total = Object.keys(checks).length; const gate = passed === total ? "PASS" : passed >= Math.ceil(total * 0.75) ? "REVIEW" : "FAIL";
     return { ...result, qualityGate: { gate, passed, total, checks, independentVerification: result.independentVerification } };
   });
