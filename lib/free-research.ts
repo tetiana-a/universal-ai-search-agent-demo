@@ -82,13 +82,14 @@ async function jinaRead(url: string): Promise<string> {
   return (await response.text()).slice(0, 8000);
 }
 
-function buildBranches(query: string, language: "ru" | "en") {
+function buildBranches(query: string, language: "ru" | "en", testMode = false) {
   const matrix = buildSearchMatrix(query, language);
   const branches = matrix
     .sort((a, b) => b.priority - a.priority)
     .flatMap((branch) => Array.isArray(branch.queries) ? branch.queries : [])
     .filter(Boolean);
-  return [...new Set([query, ...branches])].slice(0, 6);
+  const limit = testMode ? 3 : 4;
+  return [...new Set([query, ...branches])].slice(0, limit);
 }
 
 function extractJsonText(response: any) {
@@ -139,11 +140,7 @@ function fallbackResults(hits: FreeSearchHit[], input: BackgroundResearchRequest
 
 export async function runFreeResearch(input: BackgroundResearchRequest) {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
-  if (!openRouterKey) {
-    throw new Error("OPENROUTER_API_KEY is not configured. Create a free OpenRouter API key and add it to Vercel.");
-  }
-
-  const queries = buildBranches(input.query, input.language);
+  const queries = buildBranches(input.query, input.language, input.testMode === true);
   const batches = await Promise.allSettled(queries.map((query) => jinaSearch(query)));
   const allHits: FreeSearchHit[] = [];
   const seen = new Set<string>();
@@ -158,8 +155,8 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     }
   }
 
-  const candidateHits = allHits.slice(0, Math.min(input.maxSources, input.testMode ? 8 : 24));
-  const readerLimit = Math.min(candidateHits.length, input.testMode ? 5 : 8);
+  const candidateHits = allHits.slice(0, Math.min(input.maxSources, input.testMode ? 8 : 16));
+  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 5);
 
   const readResults = await Promise.allSettled(
     candidateHits.slice(0, readerLimit).map(async (hit) => ({ hit, content: await jinaRead(hit.url) })),
@@ -217,53 +214,95 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     "Return ONLY one JSON object matching the supplied schema. Do not add markdown fences.",
   ].join("\n");
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + openRouterKey,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://universal-ai-search-agent-demo.vercel.app",
-      "X-OpenRouter-Title": "Aurelius Universal AI Research Engine",
-    },
-    body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL || "openrouter/free",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0.1,
-      max_tokens: input.testMode ? 4500 : 7000,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "aurelius_research",
-          strict: true,
-          schema: BACKGROUND_RESEARCH_SCHEMA,
-        },
-      },
-    }),
-    signal: AbortSignal.timeout(Number(process.env.FREE_AI_TIMEOUT_MS || 45000)),
-  });
+  const freeModel = process.env.OPENROUTER_MODEL || "openrouter/free";
+  const aiTimeoutMs = Number(
+    process.env.FREE_AI_TIMEOUT_MS || (input.testMode ? 18000 : 24000),
+  );
 
-  const raw = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(String(raw?.error?.message || "OpenRouter free-model request failed."));
+  let raw: any = null;
+  let aiError = "";
+  if (openRouterKey) {
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + openRouterKey,
+          "Content-Type": "application/json",
+          "HTTP-Referer":
+            process.env.NEXT_PUBLIC_SITE_URL ||
+            "https://universal-ai-search-agent-demo.vercel.app",
+          "X-OpenRouter-Title": "Aurelius Universal AI Research Engine",
+        },
+        body: JSON.stringify({
+          model: freeModel,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          temperature: 0.1,
+          max_tokens: input.testMode ? 3000 : 4500,
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "aurelius_research",
+              strict: true,
+              schema: BACKGROUND_RESEARCH_SCHEMA,
+            },
+          },
+        }),
+        signal: AbortSignal.timeout(aiTimeoutMs),
+      });
+
+      raw = await response.json().catch(() => null);
+      if (!response.ok) {
+        aiError = String(
+          raw?.error?.message || "OpenRouter free-model request failed.",
+        );
+      }
+    } catch (error) {
+      aiError =
+        error instanceof Error ? error.message : "OpenRouter request failed.";
+    }
+  } else {
+    aiError = "OPENROUTER_API_KEY is not configured; using live-search fallback.";
   }
 
-  let parsed: any;
-  try {
-    parsed = cleanJsonText(extractJsonText(raw));
-  } catch {
+  let parsed: any = null;
+  if (raw && !aiError) {
+    try {
+      parsed = cleanJsonText(extractJsonText(raw));
+    } catch {
+      parsed = null;
+      aiError = "Free AI returned invalid structured output.";
+    }
+  }
+
+  if (!parsed) {
     parsed = {
-      query_understanding: { intent: "research", entity_type: "unknown", geography: [], languages: [input.language], criteria: [], exclusions: [], required_fields: [], source_classes: ["web"] },
-      search_plan: "Live search via Jina Search + Jina Reader; free AI structured extraction.",
+      query_understanding: {
+        intent: "research",
+        entity_type: "unknown",
+        geography: [],
+        languages: [input.language],
+        criteria: [],
+        exclusions: [],
+        required_fields: [],
+        source_classes: ["web"],
+      },
+      search_plan:
+        "Live public web search via Jina Search + Jina Reader; free AI enrichment when available.",
       search_branches: queries,
-      search_summary: "Free AI returned no valid structured extraction; candidates are preserved for manual review.",
+      search_summary: aiError
+        ? `Live search completed. Free AI enrichment unavailable: ${aiError}`
+        : "Live search completed; candidates are preserved for manual review.",
       candidates_seen: allHits.length,
       duplicates_removed: Math.max(0, allHits.length - candidateHits.length),
       access_events: [],
       source_registry: sourceRegistry,
-      results: fallbackResults(researchedHits.length ? researchedHits : candidateHits, input),
+      results: fallbackResults(
+        researchedHits.length ? researchedHits : candidateHits,
+        input,
+      ),
     };
   }
 
@@ -309,11 +348,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const normalized = normalizeCompletedResearch(synthetic, input);
   normalized.billing = {
     provider: "openrouter",
-    model: process.env.OPENROUTER_MODEL || "openrouter/free",
+    model: freeModel,
     billable: false,
     webSearchCalls: queries.length,
     usage: raw?.usage || null,
     background: false,
+    aiEnrichment: Boolean(openRouterKey) && !aiError,
+    fallbackUsed: Boolean(aiError) || !parsed?.results?.length,
   };
   normalized.task = {
     id: taskIdFrom(normalized.query),
