@@ -112,7 +112,7 @@ function buildBranches(
     });
 
   const limit = testMode ? 3 : 6;
-  return [...new Set([query, ...memoryBranches, ...branches])].slice(0, limit);
+  return [...new Set([query, ...branches, ...memoryBranches])].slice(0, limit);
 }
 
 function extractJsonText(response: any) {
@@ -243,7 +243,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   }));
 
   const basePrompt = input.language === "ru" ? UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU : UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN;
-  const system = basePrompt + "\n\nFREE-MODE RULES: Use only the supplied live web evidence. Do not invent URLs, organizations, people, figures, contact details or facts. Every result URL must exactly match one of the supplied evidence URLs. Prefer official pages, company pages, registries and primary sources when available. Return a result only when the supplied evidence supports it. If evidence is insufficient, use Manual review. Keep the response concise.";
+  const investorTask = /investor|investors|venture capital|vc fund|angel investor|инвестор|инвесторы|венчур|инвест|бизнес ангел|інвестор/i.test(input.query);
+  const taskSpecificRules = investorTask
+    ? (input.language === "ru"
+      ? "\n\nИНВЕСТОРСКИЙ ФИЛЬТР: В результат включай только реальные фонды, VC, angel investors или инвестиционные компании, для которых supplied evidence подтверждает инвестиционную деятельность. Для задачи про Кипр evidence должен подтверждать связь с Кипром или инвестиции в Кипре. Не считай инвестором мероприятие, networking program, вакансию, новость, IPO, акцию или страницу портфельной компании без доказательства, что сама организация является инвестором. Если доказательств недостаточно — не включай результат.\n"
+      : "\n\nINVESTOR FILTER: Return only real funds, VCs, angel investors or investment companies for which supplied evidence supports investment activity. For a Cyprus request, evidence must support a Cyprus connection or investing in Cyprus. Do not treat an event, networking program, job, news article, IPO, stock listing or portfolio-company page as an investor unless it proves the organization itself is an investor. If evidence is insufficient, exclude the result.\n")
+    : "";
+  const system = basePrompt + taskSpecificRules + "\n\nFREE-MODE RULES: Use only the supplied live web evidence. Do not invent URLs, organizations, people, figures, contact details or facts. Every result URL must exactly match one of the supplied evidence URLs. Prefer official pages, company pages, registries and primary sources when available. Return a result only when the supplied evidence supports it. If evidence is insufficient, use Manual review. Keep the response concise.";
   const user = [
     "USER QUERY:",
     input.query,
