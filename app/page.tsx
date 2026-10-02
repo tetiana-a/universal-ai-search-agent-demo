@@ -820,6 +820,46 @@ export default function Home() {
     setActiveTask(null);
   }
 
+  function applyResearchResult(data: any) {
+    setLiveResults(data.results);
+    setLiveStats({
+      sourcesFound: Number(data.stats?.sourcesFound || 0),
+      sourcesChecked: Number(data.stats?.sourcesChecked || 0),
+      pagesProcessed: Number(data.stats?.pagesProcessed || 0),
+      recordsExtracted: Number(data.stats?.recordsExtracted || 0),
+      duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
+      qualified: Number(data.stats?.qualified || 0),
+      evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
+      sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
+      sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
+      averageConfidence: Number(data.stats?.averageConfidence || 0),
+    });
+    setSearchPlan(String(data.searchPlan || ""));
+    setResearchSummary(String(data.summary || ""));
+    setLiveBilling(data.billing || undefined);
+    setQueryUnderstanding(data.queryUnderstanding || null);
+    setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
+    setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
+    setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+    setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
+    setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
+    setQualityGate({
+      total: Number(data.qualityGate?.total || 0),
+      pass: Number(data.qualityGate?.pass || 0),
+      review: Number(data.qualityGate?.review || 0),
+      fail: Number(data.qualityGate?.fail || 0),
+      independentVerification: Boolean(data.qualityGate?.independentVerification),
+      ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
+    });
+    saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+    setProgress(100);
+    setResearchStage(6);
+    setCompletedSearch(true);
+    setRunning(false);
+    clearActiveTask();
+    window.setTimeout(() => document.getElementById("results-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+  }
+
   // NOSONAR - stateful polling orchestrates several UI lifecycle transitions.
   async function pollResearchTask(task: any) {
     if (!task?.responseId || pollingTaskRef.current === task.responseId) return;
@@ -869,43 +909,7 @@ export default function Home() {
         }
 
         if (data?.live === true && Array.isArray(data.results)) {
-          setLiveResults(data.results);
-          setLiveStats({
-            sourcesFound: Number(data.stats?.sourcesFound || 0),
-            sourcesChecked: Number(data.stats?.sourcesChecked || 0),
-            pagesProcessed: Number(data.stats?.pagesProcessed || 0),
-            recordsExtracted: Number(data.stats?.recordsExtracted || 0),
-            duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
-            qualified: Number(data.stats?.qualified || 0),
-            evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
-            sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
-            sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
-            averageConfidence: Number(data.stats?.averageConfidence || 0),
-          });
-          setSearchPlan(String(data.searchPlan || ""));
-          setResearchSummary(String(data.summary || ""));
-          setLiveBilling(data.billing || undefined);
-          setQueryUnderstanding(data.queryUnderstanding || null);
-          setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
-          setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
-          setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-          setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
-          setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
-          setQualityGate({
-            total: Number(data.qualityGate?.total || 0),
-            pass: Number(data.qualityGate?.pass || 0),
-            review: Number(data.qualityGate?.review || 0),
-            fail: Number(data.qualityGate?.fail || 0),
-            independentVerification: Boolean(data.qualityGate?.independentVerification),
-            ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
-          });
-          saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-          setProgress(100);
-          setResearchStage(6);
-          setCompletedSearch(true);
-          setRunning(false);
-          clearActiveTask();
-          window.setTimeout(() => document.getElementById("results-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+          applyResearchResult(data);
           break;
         }
 
@@ -1022,43 +1026,7 @@ export default function Home() {
       };
 
       if (data?.live === true && Array.isArray(data.results)) {
-        setLiveResults(data.results);
-        setLiveStats({
-          sourcesFound: Number(data.stats?.sourcesFound || 0),
-          sourcesChecked: Number(data.stats?.sourcesChecked || 0),
-          pagesProcessed: Number(data.stats?.pagesProcessed || 0),
-          recordsExtracted: Number(data.stats?.recordsExtracted || 0),
-          duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
-          qualified: Number(data.stats?.qualified || 0),
-          evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
-          sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
-          sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
-          averageConfidence: Number(data.stats?.averageConfidence || 0),
-        });
-        setSearchPlan(String(data.searchPlan || ""));
-        setResearchSummary(String(data.summary || ""));
-        setLiveBilling(data.billing || undefined);
-        setQueryUnderstanding(data.queryUnderstanding || null);
-        setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
-        setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
-        setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-        setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
-        setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
-        setQualityGate({
-          total: Number(data.qualityGate?.total || 0),
-          pass: Number(data.qualityGate?.pass || 0),
-          review: Number(data.qualityGate?.review || 0),
-          fail: Number(data.qualityGate?.fail || 0),
-          independentVerification: Boolean(data.qualityGate?.independentVerification),
-          ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
-        });
-        saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-        setProgress(100);
-        setResearchStage(6);
-        setCompletedSearch(true);
-        setRunning(false);
-        clearActiveTask();
-        window.setTimeout(() => document.getElementById("results-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+        applyResearchResult(data);
         return;
       }
 
