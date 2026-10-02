@@ -26,7 +26,7 @@ type RadioBrowserStation = {
 };
 
 function isHttpsStream(value: unknown): value is string {
-  return typeof value === "string" && /^https:///i.test(value.trim());
+  return typeof value === "string" && /^https:\/\//i.test(value.trim());
 }
 
 export async function GET(request: Request) {
