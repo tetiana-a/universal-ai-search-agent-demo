@@ -4,6 +4,7 @@ import { getSearchProviderCatalog, runProviderDiscovery } from "@/lib/provider-s
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { startBackgroundResearch, retrieveBackgroundResponse, cancelBackgroundResponse, backgroundProgress, normalizeCompletedResearch, type BackgroundResearchRequest } from "@/lib/background-research";
 import { runFreeResearch } from "@/lib/free-research";
+import { getResearchMemoryContext, recordResearchLearning } from "@/lib/memory";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,7 +21,9 @@ export async function POST(request: Request) {
       if (!query) return NextResponse.json({ error: "Query is required." }, { status: 400 });
       const language = body?.language === "en" ? "en" : "ru";
       const testMode = body?.testMode === true;
-      const input: BackgroundResearchRequest = {
+      const memoryContext = await getResearchMemoryContext(query, 40);
+      const memoryContext = await getResearchMemoryContext(query, 40);
+  const input: BackgroundResearchRequest = {
         query,
         language,
         depth: testMode ? "Quick" : (body?.depth || "Balanced"),
@@ -30,10 +33,23 @@ export async function POST(request: Request) {
         multilingual: testMode ? false : body?.multilingual !== false,
         followRelatedLinks: testMode ? false : body?.followRelatedLinks !== false,
         testMode,
-        sourceMemory: Array.isArray(body?.sourceMemory) ? body.sourceMemory.slice(0, 40) : [],
+        sourceMemory: [
+          ...(Array.isArray(body?.sourceMemory) ? body.sourceMemory.slice(0, 40) : []),
+          ...memoryContext.sources,
+        ].slice(0, 60),
       };
       const result = await runFreeResearch(input);
-      return NextResponse.json(result, { status: 200, headers: { "Cache-Control": "no-store" } });
+      await Promise.race([
+        recordResearchLearning({
+          taskId: String(result?.task?.responseId || result?.task?.id || ""),
+          query,
+          sourceRegistry: result?.sourceRegistry || [],
+          results: result?.results || [],
+          stats: result?.stats || {},
+        }),
+        new Promise((resolve) => setTimeout(resolve, 1800)),
+      ]);
+      return NextResponse.json({ ...result, memory: { persistent: memoryContext.persistent } }, { status: 200, headers: { "Cache-Control": "no-store" } });
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Free research failed." }, { status: 502 });
     }
@@ -55,7 +71,10 @@ export async function POST(request: Request) {
     multilingual: testMode ? false : body.multilingual !== false,
     followRelatedLinks: testMode ? false : body.followRelatedLinks !== false,
     testMode,
-    sourceMemory: Array.isArray(body.sourceMemory) ? body.sourceMemory.slice(0, 40) : [],
+    sourceMemory: [
+      ...(Array.isArray(body.sourceMemory) ? body.sourceMemory.slice(0, 40) : []),
+      ...memoryContext.sources,
+    ].slice(0, 60),
   };
   const providerCatalog = getSearchProviderCatalog();
   const searchMatrix = buildSearchMatrix(query, language);
@@ -92,10 +111,22 @@ export async function GET(request: Request) {
     const response = await retrieveBackgroundResponse(apiKey, responseId);
     const status = String(response?.status || "queued"); const p = backgroundProgress(status);
     if (status === "completed") {
-      const query = url.searchParams.get("query") || ""; const language = url.searchParams.get("language") === "en" ? "en" : "ru";
+      const query = url.searchParams.get("query") || "";
+      const memoryContext = await getResearchMemoryContext(query, 40); const language = url.searchParams.get("language") === "en" ? "en" : "ru";
       const depthParam = url.searchParams.get("depth"); const depth = depthParam === "Quick" || depthParam === "Balanced" ? depthParam : "Deep";
       const input: BackgroundResearchRequest = { query, language, depth, maxResults: Math.min(Math.max(Number(url.searchParams.get("maxResults") || 12), 4), 30), maxSources: Math.min(Math.max(Number(url.searchParams.get("maxSources") || 50), 5), 120), maxPages: Math.min(Math.max(Number(url.searchParams.get("maxPages") || 150), 20), 1500), multilingual: true, followRelatedLinks: true };
-      return NextResponse.json(normalizeCompletedResearch(response, input), { headers: { "Cache-Control": "no-store" } });
+      const result = normalizeCompletedResearch(response, input);
+      await Promise.race([
+        recordResearchLearning({
+          taskId: String(responseId),
+          query,
+          sourceRegistry: result?.sourceRegistry || [],
+          results: result?.results || [],
+          stats: result?.stats || {},
+        }),
+        new Promise((resolve) => setTimeout(resolve, 1800)),
+      ]);
+      return NextResponse.json({ ...result, memory: { persistent: memoryContext.persistent } }, { headers: { "Cache-Control": "no-store" } });
     }
     if ([ "failed", "cancelled", "incomplete" ].includes(status)) {
       const reason = String(response?.incomplete_details?.reason || response?.error?.message || ("Background research ended with status: " + status));
