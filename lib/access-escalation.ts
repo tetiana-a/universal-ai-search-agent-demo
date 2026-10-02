@@ -48,7 +48,14 @@ const ORDER: AccessEscalationStep[] = [
 ];
 
 function normalizeText(value: unknown) {
-  return String(value ?? "").toLowerCase();
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.toLowerCase();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).toLowerCase();
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 export function buildAccessEscalationPlan(input: {
