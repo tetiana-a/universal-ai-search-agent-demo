@@ -53,7 +53,7 @@ async function sendDocument(token: string, chatId: string, buffer: Buffer, filen
   if (buffer.length > 45 * 1024 * 1024) throw new Error("Telegram attachment is too large.");
   const form = new FormData();
   form.append("chat_id", chatId);
-  form.append("document", new Blob([buffer], { type: contentType }), filename);
+  form.append("document", new Blob([buffer as unknown as BlobPart], { type: contentType }), filename);
   const response = await fetch("https://api.telegram.org/bot" + token + "/sendDocument", {
     method: "POST",
     body: form,
