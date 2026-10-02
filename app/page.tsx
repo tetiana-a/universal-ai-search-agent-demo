@@ -38,6 +38,15 @@ import {
   Target,
   Upload,
   X,
+  Radio as RadioIcon,
+  Music2,
+  Play as PlayIcon,
+  Pause as PauseIcon,
+  Share2,
+  Send,
+  Mail,
+  Volume2,
+  SkipForward,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
@@ -55,6 +64,20 @@ import { resultsByScenario, scenarios, sourceRegistry, tasks } from "@/lib/data"
 type Theme = "dark" | "light";
 type ResultFilter = "All" | "Verified" | "High match";
 type AudioState = "idle" | "listening" | "transcribing";
+
+type RadioStation = {
+  stationuuid: string;
+  name: string;
+  country: string;
+  language: string;
+  tags: string;
+  favicon: string;
+  homepage: string;
+  streamUrl: string;
+  codec: string;
+  bitrate: number;
+  votes: number;
+};
 
 const nav: Array<{ key: NavKey; icon: typeof Sparkles; ru: string; en: string }> = [
   { key: "research", icon: Sparkles, ru: "Исследование", en: "Research" },
@@ -218,6 +241,18 @@ const labels = {
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
     testMode: "TEST MODE • экономия",
+    share: "Поделиться",
+    telegram: "Telegram",
+    email: "Почта",
+    systemShare: "Поделиться",
+    radio: "Радио",
+    radioOn: "Радио играет",
+    radioOff: "Открыть радио",
+    radioLoading: "Ищем станции…",
+    radioEmpty: "Подходящих станций нет",
+    radioError: "Не удалось загрузить радио",
+    listen: "Слушать",
+    stopRadio: "Выключить",
   },
   en: {
     product: "Universal AI Research Engine",
@@ -372,6 +407,18 @@ const labels = {
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
     testMode: "TEST MODE • low cost",
+    share: "Share",
+    telegram: "Telegram",
+    email: "Email",
+    systemShare: "Share",
+    radio: "Radio",
+    radioOn: "Radio playing",
+    radioOff: "Open radio",
+    radioLoading: "Finding stations…",
+    radioEmpty: "No matching stations",
+    radioError: "Radio unavailable",
+    listen: "Listen",
+    stopRadio: "Stop",
   },
 } as const;
 
@@ -434,6 +481,15 @@ export default function Home() {
   const [filter, setFilter] = useState<ResultFilter>("All");
   const [audioState, setAudioState] = useState<AudioState>("idle");
   const [transcript, setTranscript] = useState("");
+  const [radioOpen, setRadioOpen] = useState(false);
+  const [radioGenre, setRadioGenre] = useState("chillout");
+  const [radioStations, setRadioStations] = useState<RadioStation[]>([]);
+  const [radioLoading, setRadioLoading] = useState(false);
+  const [radioPlaying, setRadioPlaying] = useState(false);
+  const [radioError, setRadioError] = useState("");
+  const [radioVolume, setRadioVolume] = useState(0.55);
+  const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
+  const radioAudioRef = useRef<HTMLAudioElement | null>(null);
   const [voiceError, setVoiceError] = useState("");
   const recognitionRef = useRef<any>(null);
   const t = labels[lang];
@@ -448,6 +504,63 @@ export default function Home() {
     ? (liveResults ?? [])
     : resultsByScenario[scenario];
   const usingLiveData = liveAttempted && liveResults !== null;
+
+  useEffect(() => {
+    return () => {
+      radioAudioRef.current?.pause();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!radioOpen) return;
+    let cancelled = false;
+    setRadioLoading(true);
+    setRadioError("");
+    fetch("/api/radio?tag=" + encodeURIComponent(radioGenre) + "&limit=12", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data?.ok) throw new Error(String(data?.error || "Radio unavailable"));
+        return Array.isArray(data.stations) ? data.stations : [];
+      })
+      .then((stations: RadioStation[]) => {
+        if (!cancelled) setRadioStations(stations);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRadioStations([]);
+          setRadioError(error instanceof Error ? error.message : t.radioError);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRadioLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [radioOpen, radioGenre, t.radioError]);
+
+  useEffect(() => {
+    const audio = radioAudioRef.current;
+    if (audio) audio.volume = radioVolume;
+  }, [radioVolume]);
+
+  useEffect(() => {
+    if (!radioPlaying || !currentStation || typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    try {
+      const ctor = (window as typeof window & { MediaMetadata?: typeof MediaMetadata }).MediaMetadata;
+      if (ctor) {
+        navigator.mediaSession.metadata = new ctor({
+          title: currentStation.name,
+          artist: currentStation.country || "Internet Radio",
+          album: currentStation.tags || "Aurelius Radio",
+          artwork: currentStation.favicon ? [{ src: currentStation.favicon, sizes: "96x96", type: "image/png" }] : [],
+        });
+      }
+      navigator.mediaSession.playbackState = "playing";
+      navigator.mediaSession.setActionHandler("play", () => void radioAudioRef.current?.play());
+      navigator.mediaSession.setActionHandler("pause", () => radioAudioRef.current?.pause());
+    } catch {}
+  }, [radioPlaying, currentStation]);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("aurelius-theme") as Theme | null;
