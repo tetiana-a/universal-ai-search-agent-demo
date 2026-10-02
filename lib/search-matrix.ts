@@ -64,7 +64,28 @@ export function buildSearchMatrix(query: string, language = "en", geographyHint?
   const regional = inferRegionKeys(`${q} ${geographyHint || ""}`).flatMap((key) => REGIONAL_ENGINES[key] || []);
   const engines = [...new Set(regional)];
 
+  const isInvestorQuery = /investor|investors|venture capital|vc fund|angel investor|investment fund|инвестор|инвесторы|венчур|инвестицион|бизнес ангел|інвестор|венчур/i.test(q);
+
+  const investorBranches: SearchBranch[] = isInvestorQuery
+    ? [{
+        id: "investor-specific",
+        label: "Investors / VC / angels / portfolio evidence",
+        className: "investors",
+        priority: 99,
+        queries: [
+          `${q} venture capital VC fund angel investor Cyprus SaaS B2B`,
+          `${q} investor portfolio Cyprus software technology`,
+          `${q} investment fund Cyprus B2B SaaS enterprise technology`,
+          `${q} site:crunchbase.com Cyprus SaaS investor venture capital`,
+          `${q} site:linkedin.com/company Cyprus venture capital investment`,
+          `${q} Cyprus startup investor portfolio SaaS B2B`,
+          `${q} Cyprus angel investor technology startup portfolio`,
+        ],
+      }]
+    : [];
+
   const base: SearchBranch[] = [
+    ...investorBranches,
     {
       id: "primary-web",
       label: "General web discovery",

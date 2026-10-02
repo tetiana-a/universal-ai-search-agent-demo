@@ -2,6 +2,7 @@ import { BACKGROUND_RESEARCH_SCHEMA, type BackgroundResearchRequest, normalizeCo
 import { UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN, UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU } from "@/lib/research-prompts";
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { buildAccessEscalationPlan } from "@/lib/access-escalation";
+import { filterResearchResults } from "@/lib/relevance-gate";
 
 export type FreeSearchHit = {
   title: string;
@@ -110,8 +111,8 @@ function buildBranches(
       return domain ? [`site:${domain} ${query}`] : [];
     });
 
-  const limit = testMode ? 3 : 4;
-  return [...new Set([query, ...memoryBranches, ...branches])].slice(0, limit);
+  const limit = testMode ? 3 : 6;
+  return [...new Set([query, ...branches, ...memoryBranches])].slice(0, limit);
 }
 
 function extractJsonText(response: any) {
@@ -204,7 +205,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     candidateHits = memoryHits.filter(Boolean) as FreeSearchHit[];
   }
 
-  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 5);
+  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 8);
 
   const readResults = await Promise.allSettled(
     candidateHits.slice(0, readerLimit).map(async (hit) => ({ hit, content: hit.content || await jinaRead(hit.url) })),
@@ -242,7 +243,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   }));
 
   const basePrompt = input.language === "ru" ? UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU : UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN;
-  const system = basePrompt + "\n\nFREE-MODE RULES: Use only the supplied live web evidence. Do not invent URLs, organizations, people, figures, contact details or facts. Every result URL must exactly match one of the supplied evidence URLs. Prefer official pages, company pages, registries and primary sources when available. Return a result only when the supplied evidence supports it. If evidence is insufficient, use Manual review. Keep the response concise.";
+  const investorTask = /investor|investors|venture capital|vc fund|angel investor|инвестор|инвесторы|венчур|инвест|бизнес ангел|інвестор/i.test(input.query);
+  const taskSpecificRules = investorTask
+    ? (input.language === "ru"
+      ? "\n\nИНВЕСТОРСКИЙ ФИЛЬТР: В результат включай только реальные фонды, VC, angel investors или инвестиционные компании, для которых supplied evidence подтверждает инвестиционную деятельность. Для задачи про Кипр evidence должен подтверждать связь с Кипром или инвестиции в Кипре. Не считай инвестором мероприятие, networking program, вакансию, новость, IPO, акцию или страницу портфельной компании без доказательства, что сама организация является инвестором. Если доказательств недостаточно — не включай результат.\n"
+      : "\n\nINVESTOR FILTER: Return only real funds, VCs, angel investors or investment companies for which supplied evidence supports investment activity. For a Cyprus request, evidence must support a Cyprus connection or investing in Cyprus. Do not treat an event, networking program, job, news article, IPO, stock listing or portfolio-company page as an investor unless it proves the organization itself is an investor. If evidence is insufficient, exclude the result.\n")
+    : "";
+  const system = basePrompt + taskSpecificRules + "\n\nFREE-MODE RULES: Use only the supplied live web evidence. Do not invent URLs, organizations, people, figures, contact details or facts. Every result URL must exactly match one of the supplied evidence URLs. Prefer official pages, company pages, registries and primary sources when available. Return a result only when the supplied evidence supports it. If evidence is insufficient, use Manual review. Keep the response concise.";
   const user = [
     "USER QUERY:",
     input.query,
@@ -358,7 +365,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   }
 
   const allowedUrls = new Map(candidateHits.map((hit) => [hit.url, hit]));
-  const safeResults = Array.isArray(parsed?.results)
+  const groundedResults = Array.isArray(parsed?.results)
     ? parsed.results
         .filter((item: any) => allowedUrls.has(normalizeUrl(item?.url)))
         .map((item: any) => {
@@ -376,6 +383,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
         .slice(0, input.maxResults)
     : [];
 
+  const relevance = filterResearchResults(groundedResults, input.query);
+  const filteredFallback = filterResearchResults(
+    fallbackResults(researchedHits.length ? researchedHits : candidateHits, input),
+    input.query,
+  ).accepted;
+  const safeResults = relevance.accepted.length ? relevance.accepted.slice(0, input.maxResults) : filteredFallback.slice(0, input.maxResults);
+
   const finalParsed = {
     query_understanding: parsed?.query_understanding || { intent: "research", entity_type: "unknown", geography: [], languages: [input.language], criteria: [], exclusions: [], required_fields: [], source_classes: ["web"] },
     search_plan: String(parsed?.search_plan || "Live web search with free AI extraction."),
@@ -385,7 +399,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     duplicates_removed: Number(parsed?.duplicates_removed || Math.max(0, allHits.length - candidateHits.length)),
     access_events: Array.isArray(parsed?.access_events) ? parsed.access_events.slice(0, 30) : [],
     source_registry: sourceRegistry,
-    results: safeResults.length ? safeResults : fallbackResults(researchedHits.length ? researchedHits : candidateHits, input),
+    results: safeResults,
   };
 
   const synthetic = {

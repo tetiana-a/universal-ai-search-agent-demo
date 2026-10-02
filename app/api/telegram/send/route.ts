@@ -178,11 +178,33 @@ export async function POST(request: Request) {
   const attachFiles = body?.attachFiles !== false;
   let xlsx: Buffer | null = null;
   let pdf: Buffer | null = null;
+
   if (attachFiles && payload && Array.isArray(payload.results)) {
-    [xlsx, pdf] = await Promise.all([
-      createXlsxBuffer(payload as ResearchExportPayload),
-      createPdfBuffer(payload as ResearchExportPayload),
-    ]);
+    try {
+      xlsx = await createXlsxBuffer(payload as ResearchExportPayload);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "XLSX generation failed before Telegram delivery.",
+          stage: "xlsx_generation",
+          details: error instanceof Error ? error.message : "Unknown XLSX generation error.",
+        },
+        { status: 500 },
+      );
+    }
+
+    try {
+      pdf = await createPdfBuffer(payload as ResearchExportPayload);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "PDF generation failed before Telegram delivery.",
+          stage: "pdf_generation",
+          details: error instanceof Error ? error.message : "Unknown PDF generation error.",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   const delivered: any[] = [];
