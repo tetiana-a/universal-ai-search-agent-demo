@@ -353,8 +353,6 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     webSearchCalls: queries.length,
     usage: raw?.usage || null,
     background: false,
-    aiEnrichment: Boolean(openRouterKey) && !aiError,
-    fallbackUsed: Boolean(aiError) || !parsed?.results?.length,
   };
   normalized.task = {
     id: taskIdFrom(normalized.query),
