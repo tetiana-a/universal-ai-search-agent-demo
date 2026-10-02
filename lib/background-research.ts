@@ -111,7 +111,7 @@ export function buildBackgroundResponseBody(input: BackgroundResearchRequest, sy
     model: process.env.OPENAI_MODEL || "gpt-5.5", background: true, store: true,
     input: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: instructions + "\n\nUSER QUERY:\n" + input.query + "\n\nMODE: " + input.depth + "\nLIMITS: sources=" + input.maxSources + ", urls=" + input.maxPages + ", results=" + input.maxResults + "\nMULTILINGUAL=" + input.multilingual + "\nFOLLOW_RELATED_LINKS=" + input.followRelatedLinks + "\n\nSEARCH PROVIDER CATALOG:\n" + JSON.stringify(providerCatalog) + "\n\nSEARCH MATRIX:\n" + JSON.stringify(searchMatrix) + "\n\nSOURCE MEMORY:\n" + memoryBlock + "\n\nReturn only schema-valid JSON matching the research contract." },
+      { role: "user", content: instructions + "\n\nUSER QUERY:\n" + input.query + "\n\nMODE: " + input.depth + "\nLIMITS: sources=" + input.maxSources + ", urls=" + input.maxPages + ", results=" + input.maxResults + "\nMULTILINGUAL=" + input.multilingual + "\nFOLLOW_RELATED_LINKS=" + input.followRelatedLinks + "\n\nSEARCH PROVIDER CATALOG:\n" + JSON.stringify(providerCatalog) + "\n\nSEARCH MATRIX:\n" + JSON.stringify(searchMatrix) + "\n\nSOURCE MEMORY:\n" + memoryBlock + "\n\nReturn ONLY a single JSON object matching the research contract. Do not use Markdown fences, commentary, or prose outside JSON. Every result must contain a real URL and evidence_quote." },
     ],
     tools: [{ type: "web_search", search_context_size: input.depth === "Deep" ? "high" : "medium" }],
     tool_choice: "required",
