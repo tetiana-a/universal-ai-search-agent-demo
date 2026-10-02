@@ -12,6 +12,8 @@ const SOCIAL_TARGETS = [
   { id: "linkedin-groups", label: "LinkedIn public pages/groups", sites: ["linkedin.com/groups", "linkedin.com/company", "linkedin.com/in"] },
   { id: "reddit", label: "Reddit communities", sites: ["reddit.com/r"] },
   { id: "youtube", label: "YouTube channels/videos", sites: ["youtube.com"] },
+  { id: "instagram", label: "Instagram public profiles/pages", sites: ["instagram.com"] },
+  { id: "x", label: "X public profiles/posts", sites: ["x.com", "twitter.com"] },
   { id: "meetup", label: "Meetup communities/events", sites: ["meetup.com"] },
   { id: "discord", label: "Discord public discovery pages", sites: ["discord.com/invite", "discord.gg"] },
   { id: "quora", label: "Quora public Q&A", sites: ["quora.com"] },

@@ -1,378 +1,174 @@
 "use client";
 
-import type { Result } from "@/lib/data";
-
-export type ExportContext = {
-  query: string;
-  searchPlan: string;
-  summary?: string;
-  generatedAt?: string;
-  sourceUrls?: string[];
-  stats?: Record<string, number>;
-  queryUnderstanding?: any;
-  searchBranches?: string[];
-  sourceRegistry?: any[];
-  accessEvents?: any[];
+export type ExportResult = {
+  id?: number; title?: string; location?: string; area?: string; price?: string;
+  match?: number; confidence?: number; evidence?: string; evidenceQuote?: string;
+  source?: string; sourceType?: string; sourceDomain?: string; url?: string;
+  status?: string; why?: string; retrievedAt?: string; freshnessDays?: number;
+  independentVerification?: boolean;
+  qualityGate?: { gate?: string; passed?: number; total?: number };
 };
 
-function escHtml(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;");
+export type ExportSource = {
+  name?: string; url?: string; domain?: string; category?: string;
+  accessStatus?: string; access_status?: string; accessMethod?: string;
+  access_method?: string; reason?: string; evidenceAvailable?: boolean;
+  evidence_available?: boolean; quality?: number;
+};
+
+export type ResearchExportPayload = {
+  query?: string; generatedAt?: string; searchPlan?: string; searchSummary?: string;
+  stats?: Record<string, number | string>; billing?: Record<string, unknown>;
+  results: ExportResult[]; sourceRegistry?: ExportSource[];
+};
+
+function safePart(value: string) {
+  const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const result = normalized.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
+  return result || "research";
 }
 
-function filenameBase(query: string) {
-  const safe = query
-    .toLowerCase()
-    .replace(/[^a-z0-9а-яёіїєґ]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 70);
-  return `aurelius-research-${safe || "results"}`;
-}
-
-function downloadBlob(blob: Blob, filename: string) {
+function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const anchor = document.createElement("a");
+  anchor.href = url; anchor.download = name; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-function rowsFor(results: Result[]) {
-  return results.map((item) => [
-    item.title,
-    item.location,
-    item.area,
-    item.price,
-    `${item.match}%`,
-    item.status,
-    item.qualityGate?.gate || "",
-    item.source,
-    item.url,
-    item.evidence,
-    item.why,
-  ]);
+function pct(value: unknown) {
+  const numeric = Number(value || 0);
+  return `${Math.max(0, Math.min(100, numeric))}%`;
+}
+function sourceStatus(source: ExportSource) { return source.accessStatus !== undefined ? source.accessStatus : source.access_status || ""; }
+function sourceMethod(source: ExportSource) { return source.accessMethod !== undefined ? source.accessMethod : source.access_method || ""; }
+function sourceEvidence(source: ExportSource) { return source.evidenceAvailable !== undefined ? source.evidenceAvailable : Boolean(source.evidence_available); }
+function gateColor(gate: string) {
+  if (gate === "PASS") return "FF15803D";
+  if (gate === "REVIEW") return "FFB45309";
+  return "FFDC2626";
+}
+function rowFillColor(row: number) {
+  if (row === 0) return "#374151";
+  return row % 2 === 0 ? "#F3F4F6" : null;
+}
+function compact(value: unknown, limit = 170) {
+  let text = "";
+  if (value === null || value === undefined) text = "";
+  else if (typeof value === "string") text = value;
+  else if (typeof value === "number" || typeof value === "boolean") text = String(value);
+  else { try { text = JSON.stringify(value); } catch { text = ""; } }
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > limit ? normalized.slice(0, limit - 1) + "…" : normalized;
 }
 
-const headers = [
-  "Title",
-  "Location",
-  "Area / Profile",
-  "Price / Round",
-  "Match",
-  "Status",
-  "Quality Gate",
-  "Source",
-  "URL",
-  "Evidence",
-  "Why it matches",
-];
+const resultHeaders = ["#","Title","Location","Area / Profile","Price / Round","Match","Confidence","Status","Quality Gate","Source","Domain","URL","Evidence","Evidence Quote","Why it matches","Retrieved At","Freshness (days)","Independent Verification"];
 
-export function exportCsv(results: Result[], ctx: ExportContext) {
-  const escapeCell = (value: unknown) => {
-    const text = String(value ?? "");
-    return `"${text.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+function resultRow(item: ExportResult, index: number) {
+  return [index + 1, item.title || "", item.location || "", item.area || "", item.price || "", pct(item.match), pct(item.confidence), item.status || "", item.qualityGate?.gate || "", item.source || "", item.sourceDomain || "", item.url || "", item.evidence || "", item.evidenceQuote || "", item.why || "", item.retrievedAt || "", item.freshnessDays ?? "", item.independentVerification ? "Yes" : "No"];
+}
+
+export function exportCsvFile(payload: ResearchExportPayload) {
+  const rows = [resultHeaders, ...payload.results.map((item, index) => resultRow(item, index))];
+  const csvEscape = (value: unknown) => {
+    const text = value === null || value === undefined ? "" : String(value);
+    return '"' + text.replace(/"/g, '""').replace(/\r?\n/g, " ") + '"';
   };
-
-  const csv =
-    "\uFEFF" +
-    [headers.map(escapeCell).join(";"), ...rowsFor(results).map((row) => row.map(escapeCell).join(";"))].join("\r\n");
-
-  downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${filenameBase(ctx.query)}.csv`);
+  const csv = "\uFEFF" + rows.map((row) => row.map(csvEscape).join(";")).join("\r\n");
+  downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `aurelius-${safePart(payload.query || "research")}.csv`);
 }
 
-function columnLetter(index: number) {
-  let n = index + 1;
-  let out = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
+export async function exportExcelFile(payload: ResearchExportPayload) {
+  const mod: any = await import("exceljs");
+  const ExcelJS: any = mod.default || mod;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "AURELIUS Universal AI Research Engine";
+  workbook.created = new Date(); workbook.modified = new Date();
+  const ws = workbook.addWorksheet("Results", { views: [{ state: "frozen", ySplit: 6 }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.mergeCells("A1:R1"); ws.getCell("A1").value = "AURELIUS • RESEARCH RESULTS";
+  ws.getCell("A1").font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
+  ws.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+  ws.getCell("A1").alignment = { horizontal: "center" }; ws.getRow(1).height = 26;
+  ws.mergeCells("A2:R2"); ws.getCell("A2").value = `Query: ${payload.query || "—"}`; ws.getCell("A2").alignment = { wrapText: true };
+  ws.mergeCells("A3:R3"); ws.getCell("A3").value = `Generated: ${payload.generatedAt || new Date().toISOString()}`;
+  const statEntries = Object.entries(payload.stats || {});
+  let statColumn = 1;
+  for (const [key, value] of statEntries.slice(0, 8)) {
+    ws.getCell(4, statColumn).value = key; ws.getCell(4, statColumn).font = { bold: true, size: 9 };
+    ws.getCell(4, statColumn + 1).value = value; statColumn += 2;
   }
-  return out;
-}
-
-function xmlEscape(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function crc32(data: Uint8Array) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < data.length; i += 1) {
-    crc ^= data[i];
-    for (let j = 0; j < 8; j += 1) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
+  resultHeaders.forEach((header, index) => {
+    const cell = ws.getCell(6, index + 1); cell.value = header;
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF374151" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  });
+  ws.getRow(6).height = 32;
+  payload.results.forEach((item, index) => {
+    const row = ws.addRow(resultRow(item, index)); row.height = 70;
+    row.eachCell((cell: any, column: number) => {
+      cell.alignment = { vertical: "top", wrapText: true }; cell.font = { size: 9 };
+      cell.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
+      if (column === 6 || column === 7) cell.alignment = { horizontal: "center", vertical: "top" };
+    });
+    const gate = String(item.qualityGate?.gate || "");
+    row.getCell(9).font = { bold: true, size: 9, color: { argb: gateColor(gate) } };
+    if (item.url) { row.getCell(12).value = { text: item.url, hyperlink: item.url }; row.getCell(12).font = { color: { argb: "FF2563EB" }, underline: true, size: 9 }; }
+  });
+  [6,34,24,18,18,11,12,16,14,26,22,48,44,50,42,22,16,22].forEach((width, index) => { ws.getColumn(index + 1).width = width; });
+  ws.autoFilter = { from: "A6", to: `R${Math.max(6, ws.rowCount)}` };
+  if (ws.rowCount >= 6) ws.addTable({ name: "AureliusResults", ref: `A6:R${Math.max(6, ws.rowCount)}`, headerRow: true, style: { theme: "TableStyleMedium2", showRowStripes: true } });
+  const summary = workbook.addWorksheet("Search Summary");
+  summary.columns = [{ header: "Field", key: "field", width: 32 }, { header: "Value", key: "value", width: 120 }];
+  summary.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } }; summary.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF374151" } };
+  summary.addRow({ field: "Query", value: payload.query || "" }); summary.addRow({ field: "Generated", value: payload.generatedAt || new Date().toISOString() });
+  summary.addRow({ field: "Search plan", value: payload.searchPlan || "" }); summary.addRow({ field: "Search summary", value: payload.searchSummary || "" });
+  for (const [key, value] of Object.entries(payload.stats || {})) summary.addRow({ field: key, value: String(value) });
+  for (const [key, value] of Object.entries(payload.billing || {})) {
+    let billingValue = "";
+    if (value !== null && typeof value === "object") billingValue = JSON.stringify(value); else billingValue = String(value);
+    summary.addRow({ field: `billing.${key}`, value: billingValue });
   }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function u16(value: number) {
-  return new Uint8Array([value & 0xff, (value >>> 8) & 0xff]);
-}
-
-function u32(value: number) {
-  return new Uint8Array([
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff,
-  ]);
-}
-
-function concatBytes(parts: Uint8Array[]) {
-  const size = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
+  summary.eachRow((row: any) => { row.alignment = { vertical: "top", wrapText: true }; });
+  const source = workbook.addWorksheet("Source Registry");
+  source.columns = [{header:"Source",key:"name",width:34},{header:"Domain",key:"domain",width:28},{header:"Category",key:"category",width:24},{header:"Access",key:"access",width:18},{header:"Method",key:"method",width:22},{header:"Quality",key:"quality",width:10},{header:"Evidence",key:"evidence",width:12},{header:"URL",key:"url",width:60},{header:"Reason",key:"reason",width:65}];
+  source.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } }; source.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF374151" } };
+  for (const item of payload.sourceRegistry || []) {
+    const row = source.addRow({ name: item.name || "", domain: item.domain || "", category: item.category || "", access: sourceStatus(item), method: sourceMethod(item), quality: Number(item.quality ?? 0), evidence: sourceEvidence(item) ? "Yes" : "No", url: item.url || "", reason: item.reason || "" });
+    row.alignment = { vertical: "top", wrapText: true };
+    if (item.url) { row.getCell(8).value = { text: item.url, hyperlink: item.url }; row.getCell(8).font = { color: { argb: "FF2563EB" }, underline: true }; }
   }
-  return out;
+  source.autoFilter = { from: "A1", to: `I${Math.max(1, source.rowCount)}` };
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `aurelius-${safePart(payload.query || "research")}.xlsx`);
 }
 
-function zipStore(files: Array<{ name: string; content: string }>) {
-  const encoder = new TextEncoder();
-  const local: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
-  let offset = 0;
-
-  for (const file of files) {
-    const name = encoder.encode(file.name);
-    const data = encoder.encode(file.content);
-    const crc = crc32(data);
-
-    const localHeader = concatBytes([
-      new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
-      u16(20),
-      u16(0x800),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(crc),
-      u32(data.length),
-      u32(data.length),
-      u16(name.length),
-      u16(0),
-      name,
-      data,
-    ]);
-    local.push(localHeader);
-
-    const centralHeader = concatBytes([
-      new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
-      u16(20),
-      u16(20),
-      u16(0x800),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(crc),
-      u32(data.length),
-      u32(data.length),
-      u16(name.length),
-      u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(0),
-      u32(offset),
-      name,
-    ]);
-    central.push(centralHeader);
-    offset += localHeader.length;
-  }
-
-  const localBytes = concatBytes(local);
-  const centralBytes = concatBytes(central);
-  const end = concatBytes([
-    new Uint8Array([0x50, 0x4b, 0x05, 0x06]),
-    u16(0),
-    u16(0),
-    u16(files.length),
-    u16(files.length),
-    u32(centralBytes.length),
-    u32(localBytes.length),
-    u16(0),
-  ]);
-
-  return concatBytes([localBytes, centralBytes, end]);
-}
-
-function makeSheetXml(headers: string[], rows: unknown[][], filterLastCol?: string) {
-  const allRows = [headers, ...rows];
-  const widths = headers.map((header) => Math.min(65, Math.max(14, Math.min(42, header.length + 8))));
-  const cols = widths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
-  const sheetRows = allRows
-    .map((row, rowIndex) => {
-      const cells = row
-        .map((value, colIndex) => {
-          const ref = `${columnLetter(colIndex)}${rowIndex + 1}`;
-          const style = rowIndex === 0 ? ' s="1"' : '';
-          return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
-        })
-        .join("");
-      return `<row r="${rowIndex + 1}">${cells}</row>`;
-    })
-    .join("");
-
-  const lastCol = filterLastCol || columnLetter(headers.length - 1);
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-    <sheetViews><sheetView workbookViewId="0" showGridLines="1"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-    <cols>${cols}</cols>
-    <sheetData>${sheetRows}</sheetData>
-    <autoFilter ref="A1:${lastCol}${allRows.length}"/>
-  </worksheet>`;
-}
-
-export function exportXlsx(results: Result[], ctx: ExportContext) {
-  const resultRows = rowsFor(results);
-  const sourceRows = (ctx.sourceRegistry || []).map((source: any) => [
-    source.name, source.domain, source.category, source.accessStatus, source.accessMethod, source.evidenceAvailable ? "YES" : "NO", `${source.quality ?? 0}%`, source.reason, source.url,
-  ]);
-  const accessRows = (ctx.accessEvents || []).map((event: any) => [event.status, event.method, event.url, event.reason, event.fallback]);
-  const statsRows = Object.entries(ctx.stats || {}).map(([key, value]) => [key, value]);
-  const understandingRows = [
-    ["Intent", ctx.queryUnderstanding?.intent || ""],
-    ["Entity type", ctx.queryUnderstanding?.entityType || ""],
-    ["Geography", Array.isArray(ctx.queryUnderstanding?.geography) ? ctx.queryUnderstanding.geography.join("; ") : ""],
-    ["Languages", Array.isArray(ctx.queryUnderstanding?.languages) ? ctx.queryUnderstanding.languages.join("; ") : ""],
-    ["Criteria", Array.isArray(ctx.queryUnderstanding?.criteria) ? ctx.queryUnderstanding.criteria.join("; ") : ""],
-    ["Exclusions", Array.isArray(ctx.queryUnderstanding?.exclusions) ? ctx.queryUnderstanding.exclusions.join("; ") : ""],
-    ["Required fields", Array.isArray(ctx.queryUnderstanding?.requiredFields) ? ctx.queryUnderstanding.requiredFields.join("; ") : ""],
-    ["Source classes", Array.isArray(ctx.queryUnderstanding?.sourceClasses) ? ctx.queryUnderstanding.sourceClasses.join("; ") : ""],
+export async function exportPdfFile(payload: ResearchExportPayload) {
+  const pdfmakeModule: any = await import("pdfmake/build/pdfmake");
+  const fontsModule: any = await import("pdfmake/build/vfs_fonts");
+  const pdf: any = pdfmakeModule.default || pdfmakeModule;
+  const fonts: any = fontsModule.default || fontsModule;
+  const vfs = fonts?.pdfMake?.vfs || fonts?.vfs;
+  if (!vfs) throw new Error("PDF fonts are unavailable.");
+  pdf.vfs = vfs;
+  const body = [resultHeaders.slice(0, 12).map(text => ({ text, bold: true, color: "#FFFFFF" })), ...payload.results.map((item, index) => resultRow(item, index).slice(0, 12).map(value => compact(value, 90)))];
+  const sourceBody = [[{ text: "Source", bold: true, color: "#FFFFFF" }, { text: "Domain", bold: true, color: "#FFFFFF" }, { text: "Access", bold: true, color: "#FFFFFF" }, { text: "Quality", bold: true, color: "#FFFFFF" }, { text: "URL", bold: true, color: "#FFFFFF" }]];
+  for (const item of payload.sourceRegistry || []) sourceBody.push([compact(item.name || item.domain, 35), compact(item.domain, 28), sourceStatus(item), String(item.quality ?? ""), item.url || ""] as any);
+  const statBody = Object.entries(payload.stats || {}).map(([key, value]) => [{ text: key, bold: true }, String(value)]);
+  const content: any[] = [
+    { text: "AURELIUS • RESEARCH EXPORT", fontSize: 16, bold: true, margin: [0,0,0,5] },
+    { text: `Query: ${payload.query || "—"}`, fontSize: 9, margin: [0,0,0,3] },
+    { text: `Generated: ${payload.generatedAt || new Date().toISOString()}`, fontSize: 8, color: "#666666", margin: [0,0,0,8] },
   ];
-
-  const workbookSheets = [
-    { name: "Results", xml: makeSheetXml(headers, resultRows, "K") },
-    { name: "Sources", xml: makeSheetXml(["Source","Domain","Category","Access","Method","Evidence","Quality","Reason","URL"], sourceRows, "I") },
-    { name: "Run Summary", xml: makeSheetXml(["Metric","Value"], [["Generated at", ctx.generatedAt || new Date().toISOString()], ["Query", ctx.query], ["Summary", ctx.summary || ""], ["Search Plan", ctx.searchPlan || ""], ...statsRows, ...understandingRows], "B") },
-    { name: "Search Branches", xml: makeSheetXml(["Branch"], (ctx.searchBranches || []).map((item) => [item]), "A") },
-    { name: "Access Events", xml: makeSheetXml(["Status","Method","URL","Reason","Fallback"], accessRows, "E") },
-  ];
-
-  const sheetEntries = workbookSheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
-  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-    <sheets>${sheetEntries}</sheets>
-  </workbook>`;
-
-  const rels = workbookSheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
-  const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}<Relationship Id="rId${workbookSheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
-
-  const contentSheetOverrides = workbookSheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
-  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-    <Default Extension="xml" ContentType="application/xml"/>
-    ${contentSheetOverrides}
-    <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-    <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  </Types>`;
-
-  const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
-  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-    <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
-    <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
-    <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-    <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyFont="1"/></cellXfs>
-  </styleSheet>`;
-  const coreProps = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(ctx.query)}</dc:title><dc:creator>Aurelius Universal AI Search Agent</dc:creator></cp:coreProperties>`;
-  const appProps = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-  <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Aurelius Universal AI Search Agent</Application><Sheets>${workbookSheets.length}</Sheets></Properties>`;
-
-  const files = [
-    { name: "[Content_Types].xml", content: contentTypes },
-    { name: "_rels/.rels", content: rootRels },
-    { name: "docProps/app.xml", content: appProps },
-    { name: "docProps/core.xml", content: coreProps },
-    { name: "xl/workbook.xml", content: workbook },
-    { name: "xl/_rels/workbook.xml.rels", content: workbookRels },
-    { name: "xl/styles.xml", content: styles },
-    ...workbookSheets.map((sheet, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, content: sheet.xml })),
-  ];
-
-  const bytes = zipStore(files);
-  downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${filenameBase(ctx.query)}.xlsx`);
+  if (payload.searchSummary) content.push({ text: compact(payload.searchSummary, 600), fontSize: 8, margin: [0,0,0,8] });
+  if (statBody.length > 0) content.push({ table: { widths: [90,70], body: statBody }, layout: "lightHorizontalLines", margin: [0,0,0,8] });
+  content.push({ table: { headerRows: 1, widths: [16,70,55,40,48,30,34,45,28,60,58,130], body }, layout: { fillColor: rowFillColor, hLineColor: () => "#D1D5DB", vLineColor: () => "#D1D5DB", paddingLeft: () => 2, paddingRight: () => 2, paddingTop: () => 2, paddingBottom: () => 2 } });
+  if (sourceBody.length > 1) {
+    content.push({ text: "Source Registry", pageBreak: "before", fontSize: 12, bold: true, margin: [0,0,0,7] });
+    content.push({ table: { headerRows: 1, widths: [125,85,60,45,330], body: sourceBody }, layout: { fillColor: (row: number) => row === 0 ? "#374151" : null, hLineColor: () => "#D1D5DB", vLineColor: () => "#D1D5DB", fontSize: 7 } });
+  }
+  const docDefinition: any = { pageSize: "A4", pageOrientation: "landscape", pageMargins: [18,24,18,24], defaultStyle: { font: "Roboto", fontSize: 7 }, footer: (page: number, count: number) => ({ text: `AURELIUS • ${page}/${count}`, alignment: "right", fontSize: 7, margin: [18,6,18,0] }), content };
+  pdf.createPdf(docDefinition).download(`aurelius-${safePart(payload.query || "research")}.pdf`);
 }
 
-function reportHtml(results: Result[], ctx: ExportContext) {
-  const stats = ctx.stats
-    ? Object.entries(ctx.stats)
-        .map(([key, value]) => `<tr><td>${escHtml(key)}</td><td>${escHtml(value)}</td></tr>`)
-        .join("")
-    : "";
-  const resultRows = rowsFor(results)
-    .map(
-      (row) =>
-        `<tr>${row.map((cell) => `<td>${escHtml(cell)}</td>`).join("")}</tr>`,
-    )
-    .join("");
-  const sources = (ctx.sourceUrls || [])
-    .map((url) => `<li><a href="${escHtml(url)}">${escHtml(url)}</a></li>`)
-    .join("");
-  const accessEvents = (ctx.accessEvents || [])
-    .map((event: any) => `<tr><td>${escHtml(event.status)}</td><td>${escHtml(event.method)}</td><td>${escHtml(event.url)}</td><td>${escHtml(event.reason)}</td><td>${escHtml(event.fallback)}</td></tr>`)
-    .join("");
-
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Aurelius Research</title>
-  <style>
-    body{font-family:Arial,sans-serif;color:#161616;padding:32px;line-height:1.45}h1{margin:0 0 6px;font-size:26px}h2{margin-top:26px;font-size:16px}p{font-size:12px;color:#444}.meta{border:1px solid #ddd;padding:12px;border-radius:8px}table{border-collapse:collapse;width:100%;font-size:10px;margin-top:12px}th{background:#162b26;color:#fff;text-align:left}th,td{border:1px solid #ddd;padding:7px;vertical-align:top}ul{font-size:11px}.muted{color:#666}@media print{body{padding:10px}}
-  </style></head><body>
-  <h1>AURELIUS — Universal AI Research Report</h1>
-  <p class="muted">Generated ${escHtml(ctx.generatedAt || new Date().toISOString())}</p>
-  <div class="meta"><strong>Query</strong><br>${escHtml(ctx.query)}<br><br><strong>Search Plan</strong><br>${escHtml(ctx.searchPlan || "—")}<br><br><strong>Summary</strong><br>${escHtml(ctx.summary || "—")}</div>
-  <h2>Run statistics</h2><table><tbody>${stats}</tbody></table>
-  <h2>Qualified results (${results.length})</h2><table><thead><tr>${headers.map((h) => `<th>${escHtml(h)}</th>`).join("")}</tr></thead><tbody>${resultRows}</tbody></table>
-  <h2>Sources</h2><ul>${sources || "<li>No sources captured</li>"}</ul>
-  <h2>Access events</h2><table><thead><tr><th>Status</th><th>Method</th><th>URL</th><th>Reason</th><th>Fallback</th></tr></thead><tbody>${accessEvents || "<tr><td colspan=\"5\">No access events</td></tr>"}</tbody></table>
-  </body></html>`;
-}
-
-export function exportDoc(results: Result[], ctx: ExportContext) {
-  downloadBlob(
-    new Blob([reportHtml(results, ctx)], { type: "application/msword;charset=utf-8" }),
-    `${filenameBase(ctx.query)}.doc`,
-  );
-}
-
-export function exportJson(results: Result[], ctx: ExportContext) {
-  const payload = {
-    generatedAt: ctx.generatedAt || new Date().toISOString(),
-    query: ctx.query,
-    searchPlan: ctx.searchPlan,
-    summary: ctx.summary || "",
-    stats: ctx.stats || {},
-    sourceUrls: ctx.sourceUrls || [],
-    results,
-  };
-  downloadBlob(
-    new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }),
-    `${filenameBase(ctx.query)}.json`,
-  );
-}
-
-export function printPdf(results: Result[], ctx: ExportContext) {
-  const popup = window.open("", "_blank", "noopener,noreferrer,width=1280,height=900");
-  if (!popup) return;
-  popup.document.open();
-  popup.document.write(reportHtml(results, ctx));
-  popup.document.close();
-  popup.focus();
-  window.setTimeout(() => popup.print(), 350);
-}
+export const exportXlsxFile = exportExcelFile;
+export const exportJsonFile = (payload: ResearchExportPayload) => downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), `aurelius-${safePart(payload.query || "research")}.json`);

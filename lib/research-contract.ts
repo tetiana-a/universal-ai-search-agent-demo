@@ -20,11 +20,15 @@ export type LiveSourceRecord = {
     | "unavailable"
     | "blocked"
     | "auth_required"
-    | "policy_restricted";
+    | "policy_restricted"
+    | "captcha_required"
+    | "rate_limited"
+    | "not_automatable";
   accessMethod: string;
   reason: string;
   evidenceAvailable: boolean;
   quality: number;
+  lastChecked?: string;
 };
 
 export type AccessEvent = {
@@ -33,6 +37,8 @@ export type AccessEvent = {
   method: string;
   reason: string;
   fallback?: string;
+  nextStep?: string;
+  checkpointRequired?: boolean;
 };
 
 export type ResearchResultEnvelope = {
@@ -70,4 +76,23 @@ export type ResearchResultEnvelope = {
     independentVerification: boolean;
     ruleSet: string[];
   };
+  accessEscalation?: {
+    total: number;
+    checked: number;
+    captchaRequired: number;
+    authRequired: number;
+    rateLimited: number;
+    blocked: number;
+    policyRestricted: number;
+    alternateSource: number;
+    manualCheckpoints: number;
+  };
+  accessCheckpoints?: Array<{
+    required: boolean;
+    kind: "captcha" | "auth" | "policy" | "rate_limit" | "blocked";
+    url: string;
+    instructions: string;
+    safeAction: "open_normal_browser" | "sign_in_as_customer" | "wait_and_retry" | "use_alternate_source";
+    expiresInMinutes: number;
+  }>;
 };

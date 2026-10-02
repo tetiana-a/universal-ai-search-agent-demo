@@ -43,7 +43,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
 import type { AppSettings, SettingsTab } from "@/lib/settings";
 import { defaultSettings } from "@/lib/settings";
-import { exportCsv as exportCsvFile, exportXlsx, exportDoc, exportJson, printPdf } from "@/lib/exporters";
+import {
+  exportCsvFile,
+  exportExcelFile,
+  exportPdfFile,
+  exportJsonFile,
+  type ResearchExportPayload,
+} from "@/lib/exporters";
 import { resultsByScenario, scenarios, sourceRegistry, tasks } from "@/lib/data";
 
 type Theme = "dark" | "light";
@@ -367,6 +373,16 @@ const labels = {
   },
 } as const;
 
+function readSourceMemoryFromStorage() {
+  try {
+    const raw = window.localStorage.getItem("aurelius-source-memory-v1");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, 120) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ru");
   const [theme, setTheme] = useState<Theme>("dark");
@@ -395,9 +411,13 @@ export default function Home() {
   const [liveSources, setLiveSources] = useState<string[]>([]);
   const [liveSourceRegistry, setLiveSourceRegistry] = useState<any[]>([]);
   const [accessEvents, setAccessEvents] = useState<any[]>([]);
+  const [accessCheckpoints, setAccessCheckpoints] = useState<any[]>([]);
   const [searchBranches, setSearchBranches] = useState<string[]>([]);
   const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
   const [researchSummary, setResearchSummary] = useState("");
+  const [liveBilling, setLiveBilling] = useState<Record<string, unknown> | undefined>(undefined);
+  const [activeTask, setActiveTask] = useState<{ id: string; responseId: string; query: string; language: Lang; depth: "Quick" | "Balanced" | "Deep"; maxResults: number; maxSources: number; maxPages: number } | null>(null);
+  const pollingTaskRef = useRef<string | null>(null);
   const [qualityGate, setQualityGate] = useState({
     total: 0,
     pass: 0,
@@ -458,27 +478,6 @@ export default function Home() {
   }, [current.query, current.queryEn, lang]);
 
   useEffect(() => {
-    if (!running || progress >= 94 || completedSearch) return;
-
-    const timer = window.setInterval(() => {
-      setProgress((value) => {
-        const next = Math.min(94, value + (value < 55 ? 3 : value < 88 ? 2 : 1));
-        const stage =
-          next < 12 ? 0 :
-          next < 27 ? 1 :
-          next < 48 ? 2 :
-          next < 70 ? 3 :
-          next < 84 ? 4 :
-          next < 94 ? 5 : 6;
-        setResearchStage(stage);
-        return next;
-      });
-    }, 520);
-
-    return () => window.clearInterval(timer);
-  }, [running, progress, completedSearch]);
-
-  useEffect(() => {
     if (progress >= 100 && running) {
       setRunning(false);
       setCompletedSearch(true);
@@ -504,6 +503,167 @@ export default function Home() {
     return "realEstate";
   }
 
+  function saveSourceMemory(registry: any[]) {
+    try {
+      const existing = readSourceMemoryFromStorage();
+      const merged = new Map<string, any>();
+      [...existing, ...(Array.isArray(registry) ? registry : [])].forEach((item: any) => {
+        const key = String(item?.url || item?.domain || item?.name || "").trim().toLowerCase();
+        if (key) merged.set(key, { ...item, lastChecked: item?.lastChecked || new Date().toISOString() });
+      });
+      window.localStorage.setItem("aurelius-source-memory-v1", JSON.stringify(Array.from(merged.values()).slice(-500)));
+    } catch { return; }
+  }
+
+  function saveActiveTask(task: any) {
+    window.localStorage.setItem("aurelius-active-task-v1", JSON.stringify(task));
+    setActiveTask(task);
+  }
+
+  function clearActiveTask() {
+    window.localStorage.removeItem("aurelius-active-task-v1");
+    setActiveTask(null);
+  }
+
+  // NOSONAR - stateful polling orchestrates several UI lifecycle transitions.
+  async function pollResearchTask(task: any) {
+    if (!task?.responseId || pollingTaskRef.current === task.responseId) return;
+    pollingTaskRef.current = task.responseId;
+    setRunning(true);
+
+    try {
+      for (;;) {
+        const params = new URLSearchParams({
+          responseId: task.responseId,
+          query: task.query,
+          language: task.language === "en" ? "en" : "ru",
+          depth: task.depth,
+          maxResults: String(task.maxResults),
+          maxSources: String(task.maxSources),
+          maxPages: String(task.maxPages),
+        });
+        const response = await fetch("/api/research/task?" + params.toString(), {
+          cache: "no-store",
+        });
+        const raw = await response.text();
+        let data: any = null;
+        try {
+          data = raw ? JSON.parse(raw) : null;
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          throw new Error(data?.error || ("Research task polling failed (HTTP " + response.status + ")."));
+        }
+
+        if (data?.task?.progress !== undefined) {
+          const nextProgress = Math.max(0, Math.min(100, Number(data.task.progress)));
+          setProgress(nextProgress);
+          setResearchStage(Math.max(0, Math.min(6, Number(data.task.stage || 0))));
+        }
+
+        const status = String(data?.task?.status || "");
+        if (status === "queued" || status === "in_progress") {
+          await new Promise((resolve) => window.setTimeout(resolve, status === "queued" ? 2200 : 4200));
+          continue;
+        }
+
+        if (data?.partial === true || data?.error) {
+          throw new Error(String(data?.error || "Background research did not complete."));
+        }
+
+        if (data?.live === true && Array.isArray(data.results)) {
+          setLiveResults(data.results);
+          setLiveStats({
+            sourcesFound: Number(data.stats?.sourcesFound || 0),
+            sourcesChecked: Number(data.stats?.sourcesChecked || 0),
+            pagesProcessed: Number(data.stats?.pagesProcessed || 0),
+            recordsExtracted: Number(data.stats?.recordsExtracted || 0),
+            duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
+            qualified: Number(data.stats?.qualified || 0),
+            evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
+            sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
+            sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
+            averageConfidence: Number(data.stats?.averageConfidence || 0),
+          });
+          setSearchPlan(String(data.searchPlan || ""));
+          setResearchSummary(String(data.summary || ""));
+          setLiveBilling(data.billing || undefined);
+          setQueryUnderstanding(data.queryUnderstanding || null);
+          setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
+          setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
+          setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+          setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
+          setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
+          setQualityGate({
+            total: Number(data.qualityGate?.total || 0),
+            pass: Number(data.qualityGate?.pass || 0),
+            review: Number(data.qualityGate?.review || 0),
+            fail: Number(data.qualityGate?.fail || 0),
+            independentVerification: Boolean(data.qualityGate?.independentVerification),
+            ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
+          });
+          saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+          setProgress(100);
+          setResearchStage(6);
+          setCompletedSearch(true);
+          setRunning(false);
+          clearActiveTask();
+          window.setTimeout(() => document.getElementById("results-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+          break;
+        }
+
+        throw new Error("Research task returned an unexpected status.");
+      }
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : "Live research failed.");
+      setRunning(false);
+      setCompletedSearch(false);
+      setLiveResults([]);
+      clearActiveTask();
+    } finally {
+      if (pollingTaskRef.current === task.responseId) pollingTaskRef.current = null;
+    }
+  }
+
+  async function cancelResearch() {
+    const task = activeTask;
+    if (!task?.responseId) {
+      setRunning(false);
+      return;
+    }
+
+    try {
+      await fetch("/api/research/task?responseId=" + encodeURIComponent(task.responseId), {
+        method: "DELETE",
+        cache: "no-store",
+      });
+    } catch {}
+    setRunning(false);
+    setCompletedSearch(false);
+    setProgress(0);
+    setResearchStage(0);
+    setLiveError(lang === "ru" ? "Исследование остановлено пользователем." : "Research stopped by the user.");
+    clearActiveTask();
+  }
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("aurelius-active-task-v1");
+    if (!stored) return;
+    try {
+      const task = JSON.parse(stored);
+      if (task?.responseId) {
+        setActiveTask(task);
+        setLiveAttempted(true);
+        void pollResearchTask(task);
+      }
+    } catch {
+      window.localStorage.removeItem("aurelius-active-task-v1");
+    }
+  }, []);
+
+  // NOSONAR - orchestration function intentionally coordinates task initialization, API start and polling.
   async function startResearch() {
     const detected = detectScenarioFromQuery(query);
     setScenario(detected);
@@ -512,193 +672,107 @@ export default function Home() {
     setResearchStage(0);
     setCompletedSearch(false);
     setSelectedResult(null);
-    setLiveResults(null);
     setLiveAttempted(true);
-    setLiveStats({
-      sourcesFound: 0,
-      sourcesChecked: 0,
-      pagesProcessed: 0,
-      recordsExtracted: 0,
-      duplicatesRemoved: 0,
-      qualified: 0,
-      evidenceCoverage: 0,
-      sourcesBlocked: 0,
-      sourcesManualReview: 0,
-      averageConfidence: 0,
-    });
+    setLiveResults(null);
+    setLiveStats({ sourcesFound: 0, sourcesChecked: 0, pagesProcessed: 0, recordsExtracted: 0, duplicatesRemoved: 0, qualified: 0, evidenceCoverage: 0, sourcesBlocked: 0, sourcesManualReview: 0, averageConfidence: 0 });
     setLiveSources([]);
     setLiveSourceRegistry([]);
     setAccessEvents([]);
+    setAccessCheckpoints([]);
     setSearchBranches([]);
     setQueryUnderstanding(null);
     setResearchSummary("");
-    setQualityGate({
-      total: 0,
-      pass: 0,
-      review: 0,
-      fail: 0,
-      independentVerification: false,
-      ruleSet: [],
-    });
+    setLiveBilling(undefined);
+    setQualityGate({ total: 0, pass: 0, review: 0, fail: 0, independentVerification: false, ruleSet: [] });
     setSearchPlan("");
     setLiveError("");
     setRunning(true);
 
-    window.setTimeout(() => {
-      document.getElementById("engine-progress")?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 120);
-
     try {
-      const response = await fetch("/api/research", {
+      const sourceMemory = readSourceMemoryFromStorage();
+      const payload = {
+        query,
+        language: lang,
+        depth: settings.defaultDepth as "Quick" | "Balanced" | "Deep",
+        maxResults: Math.min(20, Math.max(8, Math.floor(settings.maxSources / 5))),
+        maxSources: Math.min(120, Math.max(20, settings.maxSources)),
+        maxPages: Math.min(1500, Math.max(50, settings.maxPages)),
+        multilingual: settings.multilingualSearch,
+        followRelatedLinks: settings.followRelatedLinks,
+        sourceMemory,
+      };
+
+      const response = await fetch("/api/research/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query,
-          language: lang,
-          scenario: detected,
-          maxResults: Math.min(12, Math.max(8, Math.floor(settings.maxSources / 5))),
-          depth: settings.defaultDepth,
-          maxSources: settings.maxSources,
-          maxPages: settings.maxPages,
-          multilingual: settings.multilingualSearch,
-          followRelatedLinks: settings.followRelatedLinks,
-        }),
+        body: JSON.stringify(payload),
       });
-
       const raw = await response.text();
       let data: any = null;
-
-      try {
-        data = raw ? JSON.parse(raw) : null;
-      } catch {
-        data = null;
-      }
+      try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
 
       if (!response.ok) {
-        const message =
-          data?.error ||
-          (response.status === 504
-            ? "Live research exceeded the Vercel function time limit. Try again with a narrower query."
-            : `Live research failed (HTTP ${response.status}).`);
-        throw new Error(message);
+        throw new Error(data?.error || ("Unable to start research task (HTTP " + response.status + ")."));
       }
 
-      if (!data || data.live !== true) {
-        throw new Error("Live research returned an unexpected response.");
-      }
+      const task = {
+        ...(data?.task ?? null),
+        query,
+        language: lang,
+        depth: payload.depth,
+        maxResults: payload.maxResults,
+        maxSources: payload.maxSources,
+        maxPages: payload.maxPages,
+      };
 
-      setLiveResults(Array.isArray(data.results) ? data.results : []);
-      setLiveStats({
-        sourcesFound: Number(data.stats?.sourcesFound || 0),
-        sourcesChecked: Number(data.stats?.sourcesChecked || 0),
-        pagesProcessed: Number(data.stats?.pagesProcessed || 0),
-        recordsExtracted: Number(data.stats?.recordsExtracted || 0),
-        duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
-        qualified: Number(data.stats?.qualified || 0),
-        evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
-        sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
-        sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
-        averageConfidence: Number(data.stats?.averageConfidence || 0),
-      });
-      setSearchPlan(String(data.searchPlan || ""));
-      setResearchSummary(String(data.summary || ""));
-      setQueryUnderstanding(data.queryUnderstanding || null);
-      setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
-      setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
-      setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-      setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
-      setQualityGate({
-        total: Number(data.qualityGate?.total || 0),
-        pass: Number(data.qualityGate?.pass || 0),
-        review: Number(data.qualityGate?.review || 0),
-        fail: Number(data.qualityGate?.fail || 0),
-        independentVerification: Boolean(data.qualityGate?.independentVerification),
-        ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
-      });
-      setProgress(100);
-      setResearchStage(6);
-      setCompletedSearch(true);
-      setRunning(false);
+      if (!task?.responseId) throw new Error("The research task did not return a background response ID.");
 
-      window.setTimeout(() => {
-        document.getElementById("results-preview")?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }, 500);
+      saveActiveTask(task);
+      await pollResearchTask(task);
     } catch (error) {
-      setLiveError(
-        error instanceof Error ? error.message : "Live research failed.",
-      );
-      setProgress(94);
-      setResearchStage(5);
-      setCompletedSearch(false);
+      setLiveError(error instanceof Error ? error.message : "Live research failed.");
       setRunning(false);
+      setCompletedSearch(false);
       setLiveResults([]);
-      setLiveSources([]);
-      setLiveSourceRegistry([]);
-      setAccessEvents([]);
-      setSearchBranches([]);
-      setQueryUnderstanding(null);
-      setResearchSummary("");
-      setQualityGate({
-        total: 0,
-        pass: 0,
-        review: 0,
-        fail: 0,
-        independentVerification: false,
-        ruleSet: [],
-      });
-      setLiveStats({
-        sourcesFound: 0,
-        sourcesChecked: 0,
-        pagesProcessed: 0,
-        recordsExtracted: 0,
-        duplicatesRemoved: 0,
-        qualified: 0,
-        evidenceCoverage: 0,
-        sourcesBlocked: 0,
-        sourcesManualReview: 0,
-        averageConfidence: 0,
-      });
+      clearActiveTask();
     }
   }
 
-  function getExportContext() {
+  function buildExportPayload(): ResearchExportPayload {
     return {
       query,
+      generatedAt: new Date().toISOString(),
       searchPlan,
-      summary: researchSummary,
-      sourceUrls: liveSources,
-      stats: liveStats as Record<string, number>,
-      queryUnderstanding,
-      searchBranches,
+      searchSummary: researchSummary,
+      stats: { ...(liveStats as Record<string, number | string>) },
+      billing: liveBilling,
+      results: shownResults,
       sourceRegistry: liveSourceRegistry,
-      accessEvents,
     };
   }
 
   function exportCsv() {
-    exportCsvFile(shownResults, getExportContext());
+    exportCsvFile(buildExportPayload());
   }
 
-  function exportExcelFile() {
-    exportXlsx(shownResults, getExportContext());
+  async function exportExcel() {
+    try {
+      await exportExcelFile(buildExportPayload());
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : "Excel export failed.");
+    }
   }
 
-  function exportPdfFile() {
-    printPdf(shownResults, getExportContext());
+  async function exportPdf() {
+    try {
+      await exportPdfFile(buildExportPayload());
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : "PDF export failed.");
+    }
   }
 
-  function exportGoogleDocsFile() {
-    exportDoc(shownResults, getExportContext());
-  }
-
-  function exportJsonFile() {
-    exportJson(shownResults, getExportContext());
+  function exportJson() {
+    exportJsonFile(buildExportPayload());
   }
 
   /* legacy CSV implementation moved to lib/exporters.ts */
@@ -1306,11 +1380,15 @@ export default function Home() {
     { ru: "Quality Gate + Evidence", en: "Quality Gate + Evidence", icon: ShieldCheck, from: 94, to: 100 },
   ];
 
-  const liveResultCount = completedSearch
-    ? results.length
-    : running
-      ? Math.max(0, Math.min(results.length, Math.ceil((progress / 100) * results.length)))
-      : 0;
+  let liveResultCount = 0;
+  if (completedSearch) {
+    liveResultCount = results.length;
+  } else if (running) {
+    liveResultCount = Math.max(0, Math.min(results.length, Math.ceil((progress / 100) * results.length)));
+  }
+
+  const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
+  const taskStateLabel = running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY";
 
   function renderResearchProcess() {
     const stage = researchStages[researchStage] ?? researchStages[0];
@@ -1327,7 +1405,7 @@ export default function Home() {
               {running ? t.engineRunning : completedSearch ? t.engineComplete : t.liveFeed}
             </div>
             <div className="mt-1 text-xs text-[var(--text-muted)]">
-              {current.label} · AURE-0427 · {t.simulated}
+              {current.label} · {activeTask?.id || "—"} · {taskStateLabel}
             </div>
           </div>
           <div className="text-left lg:text-right">
@@ -1606,11 +1684,21 @@ export default function Home() {
 
                     <button
                       onClick={startResearch}
-                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold text-black shadow-[0_12px_38px_rgba(212,175,55,.18)] transition hover:scale-[1.01]"
+                      disabled={running}
+                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold text-black shadow-[0_12px_38px_rgba(212,175,55,.18)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Search size={14} />
-                      {t.start}
+                      {running ? startButtonLabel : t.start}
                     </button>
+                    {running ? (
+                      <button
+                        onClick={() => void cancelResearch()}
+                        className="inline-flex items-center gap-2 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger)]/5 px-3.5 py-2.5 text-xs text-[var(--danger)]"
+                      >
+                        <CirclePause size={14} />
+                        {lang === "ru" ? "Остановить" : "Stop"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -1745,7 +1833,28 @@ export default function Home() {
                 className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
               >
                 <Download size={12} />
-                {t.export}
+                CSV
+              </button>
+              <button
+                onClick={() => void exportExcel()}
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                XLSX
+              </button>
+              <button
+                onClick={() => void exportPdf()}
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                PDF
+              </button>
+              <button
+                onClick={exportJson}
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                JSON
               </button>
             </div>
           </div>
@@ -1934,7 +2043,7 @@ export default function Home() {
           </section>
         ) : null}
 
-        {usingLiveData && (liveSourceRegistry.length || accessEvents.length) ? (
+        {usingLiveData && (liveSourceRegistry.length || accessEvents.length || accessCheckpoints.length) ? (
           <section className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
             <div className="glass rounded-[26px] p-6 sm:p-7">
               <div className="flex items-center justify-between gap-3">
@@ -1971,6 +2080,56 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            </div>
+          </section>
+        ) : null}
+
+        {usingLiveData && accessCheckpoints.length ? (
+          <section className="mt-6 glass rounded-[26px] p-6 sm:p-7">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-[.18em] text-[var(--warning)]">ACCESS ESCALATION</div>
+                <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
+                  {lang === "ru" ? "Требуется ручной доступ к отдельным источникам" : "Manual access is required for some sources"}
+                </h3>
+                <p className="mt-2 max-w-3xl text-[11px] leading-5 text-[var(--text-muted)]">
+                  {lang === "ru"
+                    ? "Агент не обходит CAPTCHA или защиту сайта. Он открывает безопасную точку ручной проверки и продолжает работу с разрешёнными альтернативными источниками."
+                    : "The agent does not bypass CAPTCHA or site access controls. It provides a safe manual checkpoint and continues with allowed alternate sources."}
+                </p>
+              </div>
+              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[10px] text-[var(--warning)]">
+                {accessCheckpoints.length} {lang === "ru" ? "точек" : "checkpoints"}
+              </div>
+            </div>
+            <div className="mt-5 grid gap-3">
+              {accessCheckpoints.slice(0, 12).map((checkpoint: any, index: number) => (
+                <div key={String(checkpoint.url || "") + "-" + index} className="rounded-2xl border border-[var(--line-soft)] bg-white/[.012] p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-[var(--warning)]/10 px-2 py-1 text-[9px] uppercase tracking-[.12em] text-[var(--warning)]">
+                          {checkpoint.kind}
+                        </span>
+                        <span className="text-[9px] text-[var(--text-faint)]">
+                          {lang === "ru" ? "действует" : "valid"} {checkpoint.expiresInMinutes} min
+                        </span>
+                      </div>
+                      <div className="mt-2 break-all text-[10px] text-[var(--text-soft)]">{checkpoint.url}</div>
+                      <div className="mt-2 text-[10px] leading-5 text-[var(--text-muted)]">{checkpoint.instructions}</div>
+                    </div>
+                    <a
+                      href={checkpoint.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[10px] text-[var(--gold-bright)] hover:border-[var(--gold)]/30"
+                    >
+                      <ExternalLink size={12} />
+                      {lang === "ru" ? "Открыть вручную" : "Open manually"}
+                    </a>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         ) : null}
@@ -2268,10 +2427,9 @@ export default function Home() {
               <button onClick={exportCsv} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
                 <Download size={12} /> CSV
               </button>
-              <button onClick={exportExcelFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Excel</button>
-              <button onClick={exportPdfFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">PDF</button>
-              <button onClick={exportGoogleDocsFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Google Docs</button>
-              <button onClick={exportJsonFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">JSON</button>
+              <button onClick={() => void exportExcel()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Excel</button>
+              <button onClick={() => void exportPdf()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">PDF</button>
+              <button onClick={exportJson} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">JSON</button>
             </div>
           </div>
 
