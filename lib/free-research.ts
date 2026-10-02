@@ -16,7 +16,7 @@ function host(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
 }
 
-const useJinaKey = process.env.FREE_MODE_USE_JINA_KEY === "true";
+const useJinaKey = Boolean(process.env.JINA_API_KEY) && process.env.FREE_MODE_USE_JINA_KEY !== "false";
 
 function normalizeUrl(url: unknown) {
   const raw = String(url ?? "").trim();
