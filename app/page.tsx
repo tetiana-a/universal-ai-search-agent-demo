@@ -127,6 +127,10 @@ const labels = {
     verified: "Проверено",
     reviewed: "Проверено",
     manual: "Ручная проверка",
+    telegramSending: "Отправка…",
+    telegramSent: "Telegram ✓",
+    telegramFailed: "Telegram !",
+    telegramNotConfigured: "Telegram не настроен",
     resultsTitle: "Подходящие результаты",
     all: "Все",
     high: "Высокое совпадение",
@@ -287,6 +291,10 @@ const labels = {
     verified: "Verified",
     reviewed: "Reviewed",
     manual: "Manual review",
+    telegramSending: "Sending…",
+    telegramSent: "Telegram ✓",
+    telegramFailed: "Telegram !",
+    telegramNotConfigured: "Telegram not configured",
     resultsTitle: "Qualified results",
     all: "All",
     high: "High match",
@@ -494,6 +502,7 @@ export default function Home() {
   const [radioError, setRadioError] = useState("");
   const [radioVolume, setRadioVolume] = useState(0.55);
   const [shareEmailFallback, setShareEmailFallback] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
   const radioAudioRef = useRef<HTMLAudioElement | null>(null);
   const radioPanelRef = useRef<HTMLDivElement | null>(null);
@@ -678,16 +687,30 @@ export default function Home() {
     return ["AURELIUS — Universal AI Research Engine", "Запрос: " + query, rows.join("\n\n")].join("\n\n");
   }
 
-  function shareViaTelegram() {
-    const fullText = buildShareText();
-    const text = fullText.length > 3800 ? fullText.slice(0, 3797) + "..." : fullText;
-    const shareUrl =
-      "https://t.me/share/url?url=" +
-      encodeURIComponent(window.location.href) +
-      "&text=" +
-      encodeURIComponent(text);
-    const popup = window.open(shareUrl, "_blank", "noopener,noreferrer");
-    if (!popup) window.location.href = shareUrl;
+  async function shareViaTelegram() {
+    setTelegramStatus("sending");
+
+    try {
+      const response = await fetch("/api/telegram/send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "AURELIUS — " + query.slice(0, 100),
+          text: buildShareText(),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(String(data?.error || t.telegramNotConfigured));
+      }
+
+      setTelegramStatus("sent");
+      window.setTimeout(() => setTelegramStatus("idle"), 3000);
+    } catch {
+      setTelegramStatus("error");
+      window.setTimeout(() => setTelegramStatus("idle"), 5000);
+    }
   }
 
   function shareViaEmail() {
@@ -805,10 +828,31 @@ export default function Home() {
   }
 
   function renderShareActions(compact = false) {
+    const telegramLabel =
+      telegramStatus === "sending"
+        ? t.telegramSending
+        : telegramStatus === "sent"
+          ? t.telegramSent
+          : telegramStatus === "error"
+            ? t.telegramFailed
+            : radioText("telegram");
+
     const actions = [
-      { label: radioText("telegram"), icon: Send, run: shareViaTelegram },
-      { label: radioText("email"), icon: Mail, run: shareViaEmail },
-      { label: compact ? radioText("systemShare") : radioText("share"), icon: Share2, run: () => void shareViaSystem() },
+      {
+        label: telegramLabel,
+        icon: Send,
+        run: () => void shareViaTelegram(),
+        disabled: telegramStatus === "sending" || shownResults.length === 0,
+        accent: telegramStatus === "sent",
+      },
+      { label: radioText("email"), icon: Mail, run: shareViaEmail, disabled: false, accent: false },
+      {
+        label: compact ? radioText("systemShare") : radioText("share"),
+        icon: Share2,
+        run: () => void shareViaSystem(),
+        disabled: false,
+        accent: false,
+      },
     ];
 
     return (
@@ -819,7 +863,16 @@ export default function Home() {
             <button
               key={action.label}
               onClick={action.run}
-              className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
+              disabled={action.disabled}
+              title={action.label}
+              className={
+                "panel-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] transition " +
+                (action.disabled
+                  ? "cursor-not-allowed border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-faint)] opacity-60"
+                  : action.accent
+                    ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]"
+                    : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")
+              }
             >
               <Icon size={12} /> {action.label}
             </button>
