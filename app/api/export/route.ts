@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     const base = "aurelius-" + safeFilenamePart(payload.query || "research");
     if (format === "csv") {
       const buffer = createCsvBuffer(payload);
-      return new Response(buffer, {
+      return new Response(buffer as unknown as BodyInit, {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
