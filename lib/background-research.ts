@@ -64,7 +64,24 @@ function normalizeUrl(value: unknown) { const raw = String(value ?? "").trim(); 
 function getDomain(value: unknown) { try { return new URL(String(value ?? "")).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
 function unique<T>(items: T[]) { return Array.from(new Set(items)); }
 function outputText(response: any) {
-  return typeof response?.output_text === "string" ? response.output_text.trim() : "";
+  // Raw REST responses expose generated text under response.output[].content[].
+  // The SDK's response.output_text convenience field is not guaranteed to be present
+  // when using fetch(), so we reconstruct the text from the raw response shape.
+  if (typeof response?.output_text === "string" && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+
+  const chunks: string[] = [];
+  for (const item of Array.isArray(response?.output) ? response.output : []) {
+    if (item?.type !== "message") continue;
+    for (const part of Array.isArray(item?.content) ? item.content : []) {
+      if ((part?.type === "output_text" || part?.type === "text") && typeof part?.text === "string") {
+        chunks.push(part.text);
+      }
+    }
+  }
+
+  return chunks.join("\n").trim();
 }
 
 function parseResearchJson(text: string) {
@@ -164,7 +181,13 @@ export function backgroundProgress(status: string) {
 // NOSONAR - this function is a deterministic normalization pipeline with several required validation stages.
 export function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
   const text = outputText(response);
-  if (!text) throw new Error("Background research completed without structured output.");
+  if (!text) {
+    const outputTypes = Array.isArray(response?.output)
+      ? response.output.map((item: any) => String(item?.type || "unknown")).join(", ")
+      : "none";
+    const status = String(response?.status || "unknown");
+    throw new Error("Background research completed without final text output. status=" + status + "; output_types=" + outputTypes);
+  }
   const parsed = parseResearchJson(text);
   const retrievedSources = collectWebSources(response);
   const sourceUrls = new Set(retrievedSources.map((s) => s.url));
