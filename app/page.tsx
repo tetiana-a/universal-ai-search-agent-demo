@@ -839,9 +839,9 @@ export default function Home() {
             <RadioIcon size={14} />
           </span>
         )}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[11px] font-medium text-[var(--text-soft)]">{station.name}</span>
-          <span className="mt-0.5 block truncate text-[9px] text-[var(--text-faint)]">
+        <span className="min-w-0 max-w-[calc(100%-2.5rem)] flex-1 overflow-hidden">
+          <span className="block min-w-0 truncate whitespace-nowrap text-[11px] font-medium text-[var(--text-soft)]">{station.name}</span>
+          <span className="mt-0.5 block min-w-0 truncate whitespace-nowrap text-[9px] text-[var(--text-faint)]" title={station.country + " · " + (station.tags || station.language || "international")}>
             {station.country} · {station.tags || station.language || "international"}
           </span>
         </span>
@@ -3159,12 +3159,12 @@ export default function Home() {
 
               <button
                 onClick={() => setRadioOpen((value) => !value)}
-                className={"panel-hover inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-[10px] " + (radioPlaying ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]" : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")}
+                className={"panel-hover inline-flex h-9 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-xl border px-3 text-[10px] " + (radioPlaying ? "border-[var(--success)]/30 bg-[var(--success)]/8 text-[var(--success)]" : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")}
                 aria-label={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
                 title={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
               >
-                <RadioIcon size={15} />
-                <span className="hidden md:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
+                <RadioIcon size={15} className="shrink-0" />
+                <span className="hidden max-w-[86px] truncate md:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
               </button>
 
               <button
@@ -3472,7 +3472,7 @@ export default function Home() {
       )}
 
       {radioOpen && (
-        <div ref={radioPanelRef} className="radio-panel fixed right-4 top-[82px] z-[65] w-[calc(100vw-2rem)] max-w-[390px] overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent)] shadow-2xl backdrop-blur-2xl">
+        <div ref={radioPanelRef} className="radio-panel fixed right-4 top-[82px] z-[65] w-[min(390px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-strong)_97%,transparent)] shadow-2xl backdrop-blur-2xl">
           <div className="spectrum-line h-px opacity-80" />
           <div className="p-4 sm:p-5">
             <div className="flex items-start justify-between gap-3">
