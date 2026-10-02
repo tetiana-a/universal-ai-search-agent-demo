@@ -1216,7 +1216,9 @@ export default function Home() {
   }
 
   function exportCsv() {
-    exportCsvFile(buildExportPayload());
+    void exportCsvFile(buildExportPayload()).catch((error) => {
+      setLiveError(error instanceof Error ? error.message : "CSV export failed.");
+    });
   }
 
   async function exportExcel() {
@@ -1236,7 +1238,9 @@ export default function Home() {
   }
 
   function exportJson() {
-    exportJsonFile(buildExportPayload());
+    void exportJsonFile(buildExportPayload()).catch((error) => {
+      setLiveError(error instanceof Error ? error.message : "JSON export failed.");
+    });
   }
 
   /* legacy CSV implementation moved to lib/exporters.ts */
