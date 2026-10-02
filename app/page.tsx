@@ -43,7 +43,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
 import type { AppSettings, SettingsTab } from "@/lib/settings";
 import { defaultSettings } from "@/lib/settings";
-import { exportCsv as exportCsvFile, exportXlsx, exportDoc, exportJson, printPdf } from "@/lib/exporters";
+import {
+  exportCsvFile,
+  exportExcelFile,
+  exportPdfFile,
+  exportJsonFile,
+  type ResearchExportPayload,
+} from "@/lib/exporters";
 import { resultsByScenario, scenarios, sourceRegistry, tasks } from "@/lib/data";
 
 type Theme = "dark" | "light";
@@ -398,6 +404,7 @@ export default function Home() {
   const [searchBranches, setSearchBranches] = useState<string[]>([]);
   const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
   const [researchSummary, setResearchSummary] = useState("");
+  const [liveBilling, setLiveBilling] = useState<Record<string, unknown> | undefined>(undefined);
   const [qualityGate, setQualityGate] = useState({
     total: 0,
     pass: 0,
@@ -532,6 +539,7 @@ export default function Home() {
     setSearchBranches([]);
     setQueryUnderstanding(null);
     setResearchSummary("");
+    setLiveBilling(undefined);
     setQualityGate({
       total: 0,
       pass: 0,
@@ -589,6 +597,9 @@ export default function Home() {
       if (!data || data.live !== true) {
         throw new Error("Live research returned an unexpected response.");
       }
+      if (data.partial === true) {
+        throw new Error(String(data.error || "Live research returned only a partial result."));
+      }
 
       setLiveResults(Array.isArray(data.results) ? data.results : []);
       setLiveStats({
@@ -605,6 +616,7 @@ export default function Home() {
       });
       setSearchPlan(String(data.searchPlan || ""));
       setResearchSummary(String(data.summary || ""));
+      setLiveBilling(data.billing || undefined);
       setQueryUnderstanding(data.queryUnderstanding || null);
       setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
       setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
@@ -644,6 +656,7 @@ export default function Home() {
       setSearchBranches([]);
       setQueryUnderstanding(null);
       setResearchSummary("");
+      setLiveBilling(undefined);
       setQualityGate({
         total: 0,
         pass: 0,
@@ -667,38 +680,41 @@ export default function Home() {
     }
   }
 
-  function getExportContext() {
+  function buildExportPayload(): ResearchExportPayload {
     return {
       query,
+      generatedAt: new Date().toISOString(),
       searchPlan,
-      summary: researchSummary,
-      sourceUrls: liveSources,
-      stats: liveStats as Record<string, number>,
-      queryUnderstanding,
-      searchBranches,
+      searchSummary: researchSummary,
+      stats: { ...(liveStats as Record<string, number | string>) },
+      billing: liveBilling,
+      results: shownResults,
       sourceRegistry: liveSourceRegistry,
-      accessEvents,
     };
   }
 
   function exportCsv() {
-    exportCsvFile(shownResults, getExportContext());
+    exportCsvFile(buildExportPayload());
   }
 
-  function exportExcelFile() {
-    exportXlsx(shownResults, getExportContext());
+  async function exportExcel() {
+    try {
+      await exportExcelFile(buildExportPayload());
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : "Excel export failed.");
+    }
   }
 
-  function exportPdfFile() {
-    printPdf(shownResults, getExportContext());
+  async function exportPdf() {
+    try {
+      await exportPdfFile(buildExportPayload());
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : "PDF export failed.");
+    }
   }
 
-  function exportGoogleDocsFile() {
-    exportDoc(shownResults, getExportContext());
-  }
-
-  function exportJsonFile() {
-    exportJson(shownResults, getExportContext());
+  function exportJson() {
+    exportJsonFile(buildExportPayload());
   }
 
   /* legacy CSV implementation moved to lib/exporters.ts */
@@ -1745,7 +1761,28 @@ export default function Home() {
                 className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
               >
                 <Download size={12} />
-                {t.export}
+                CSV
+              </button>
+              <button
+                onClick={() => void exportExcel()}
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                XLSX
+              </button>
+              <button
+                onClick={() => void exportPdf()}
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                PDF
+              </button>
+              <button
+                onClick={exportJson}
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                JSON
               </button>
             </div>
           </div>
