@@ -29,6 +29,12 @@ function isHttpsStream(value: unknown): value is string {
   return typeof value === "string" && /^https:\/\//i.test(value.trim());
 }
 
+function getSecureStreamUrl(station: RadioBrowserStation): string {
+  if (isHttpsStream(station.url_resolved)) return station.url_resolved;
+  if (isHttpsStream(station.url)) return station.url;
+  return "";
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const tag = String(url.searchParams.get("tag") || "chillout").trim().slice(0, 40);
@@ -75,11 +81,7 @@ export async function GET(request: Request) {
           tags: String(station.tags || ""),
           favicon: String(station.favicon || ""),
           homepage: String(station.homepage || ""),
-          streamUrl: isHttpsStream(station.url_resolved)
-            ? station.url_resolved
-            : isHttpsStream(station.url)
-              ? station.url
-              : "",
+          streamUrl: getSecureStreamUrl(station),
           codec: String(station.codec || ""),
           bitrate: Number(station.bitrate || 0),
           votes: Number(station.votes || 0),
