@@ -76,7 +76,8 @@ function dedupeResults(items: any[]) {
   return { out, removed };
 }
 
-// NOSONAR - source traversal intentionally handles multiple Responses output shapes.\nfunction collectWebSources(response: any) {
+// NOSONAR - source traversal intentionally handles multiple Responses output shapes.
+function collectWebSources(response: any) {
   const sources: Array<{ url: string; title: string; domain: string }> = []; const seen = new Set<string>();
   const push = (source: any) => { const url = normalizeUrl(source?.url); if (!url || seen.has(url)) return; seen.add(url); sources.push({ url, title: String(source?.title ?? ""), domain: getDomain(url) }); };
   for (const item of Array.isArray(response?.output) ? response.output : []) {
