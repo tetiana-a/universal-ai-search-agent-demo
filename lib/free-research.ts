@@ -16,6 +16,8 @@ function host(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
 }
 
+const useJinaKey = process.env.FREE_MODE_USE_JINA_KEY === "true";
+
 function normalizeUrl(url: unknown) {
   const raw = String(url ?? "").trim();
   try {
@@ -38,7 +40,9 @@ function extractSearchRows(payload: any): any[] {
 async function jinaSearch(query: string): Promise<FreeSearchHit[]> {
   const url = "https://s.jina.ai/" + encodeURIComponent(query);
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (process.env.JINA_API_KEY) headers.Authorization = "Bearer " + process.env.JINA_API_KEY;
+  if (useJinaKey && process.env.JINA_API_KEY) {
+    headers.Authorization = "Bearer " + process.env.JINA_API_KEY;
+  }
 
   const response = await fetch(url, {
     headers,
