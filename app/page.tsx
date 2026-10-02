@@ -483,6 +483,7 @@ export default function Home() {
   const [radioVolume, setRadioVolume] = useState(0.55);
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
   const radioAudioRef = useRef<HTMLAudioElement | null>(null);
+  const radioPanelRef = useRef<HTMLDivElement | null>(null);
   const [voiceError, setVoiceError] = useState("");
   const recognitionRef = useRef<any>(null);
   const t = labels[lang];
@@ -498,6 +499,29 @@ export default function Home() {
     ? (liveResults ?? [])
     : resultsByScenario[scenario];
   const usingLiveData = liveAttempted && liveResults !== null;
+
+  useEffect(() => {
+    if (!radioOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !radioPanelRef.current?.contains(target)) {
+        setRadioOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRadioOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [radioOpen]);
 
   useEffect(() => {
     return () => {
@@ -2765,11 +2789,11 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
-      <div className={"music-atmosphere pointer-events-none fixed inset-0 -z-10 " + (radioPlaying ? "is-live" : "")} aria-hidden="true" />
-      <div className="app-grid pointer-events-none fixed inset-0 -z-10 opacity-45" />
+    <main className={"relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell " + (radioPlaying ? "radio-live" : "")}>
+      <div className={"music-atmosphere pointer-events-none fixed inset-0 z-0 " + (radioPlaying ? "is-live" : "")} aria-hidden="true" />
+      <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
 
-      <div className="mx-auto flex min-h-screen max-w-[1900px]">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
         <aside
           className={`fixed inset-y-0 left-0 z-50 w-[280px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 ${
             mobileOpen ? "translate-x-0" : "-translate-x-full"
@@ -3029,7 +3053,7 @@ export default function Home() {
       )}
 
       {radioOpen && (
-        <div className="radio-panel fixed right-4 top-[82px] z-[65] w-[calc(100vw-2rem)] max-w-[390px] overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent)] shadow-2xl backdrop-blur-2xl">
+        <div ref={radioPanelRef} className="radio-panel fixed right-4 top-[82px] z-[65] w-[calc(100vw-2rem)] max-w-[390px] overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent)] shadow-2xl backdrop-blur-2xl">
           <div className="spectrum-line h-px opacity-80" />
           <div className="p-4 sm:p-5">
             <div className="flex items-start justify-between gap-3">
