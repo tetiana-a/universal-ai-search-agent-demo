@@ -257,7 +257,13 @@ const labels = {
     exportPdf: "PDF",
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
-    testMode: "TEST MODE • экономия",
+    testMode: "Эконом режим",
+    aiFree: "Бесплатный AI",
+    aiPaid: "Платный AI",
+    aiModeLoading: "AI режим…",
+    economyOn: "Экономия включена",
+    economyOff: "Обычный режим",
+    economyDetails: "Quick • 3 результата • 8 источников • 20 страниц",
   },
   en: {
     product: "Universal AI Research Engine",
@@ -411,7 +417,13 @@ const labels = {
     exportPdf: "PDF",
     exportGoogleDocs: "Google Docs",
     exportJson: "JSON",
-    testMode: "TEST MODE • low cost",
+    testMode: "Economy mode",
+    aiFree: "Free AI",
+    aiPaid: "Paid AI",
+    aiModeLoading: "AI mode…",
+    economyOn: "Economy enabled",
+    economyOff: "Standard mode",
+    economyDetails: "Quick • 3 results • 8 sources • 20 pages",
   },
 } as const;
 
@@ -491,6 +503,8 @@ export default function Home() {
   const radioText = (key: RadioCopyKey) => radioCopy[key][lang === "ru" ? 0 : 1];
 
   const [testMode, setTestMode] = useState(true);
+  const [aiMode, setAiMode] = useState<"free" | "paid" | "unknown">("unknown");
+  const [aiModel, setAiModel] = useState("");
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -500,6 +514,30 @@ export default function Home() {
     ? (liveResults ?? [])
     : resultsByScenario[scenario];
   const usingLiveData = liveAttempted && liveResults !== null;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/research/mode", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(String(data?.error || "AI mode unavailable"));
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAiMode(data?.provider === "free" ? "free" : data?.provider === "paid" ? "paid" : "unknown");
+        setAiModel(String(data?.model || ""));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAiMode("unknown");
+          setAiModel("");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!radioOpen) return;
@@ -1992,15 +2030,19 @@ export default function Home() {
                       type="button"
                       onClick={() => setTestMode((value) => !value)}
                       disabled={running}
-                      title={lang === "ru" ? "Дешёвый контрольный запуск: Quick, 3 результата, 8 источников, 20 страниц. Дополнительные провайдеры отключены." : "Low-cost control run: Quick, 3 results, 8 sources, 20 pages. Supplemental providers are disabled."}
-                      className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs transition ${
+                      title={lang === "ru" ? "Контрольный запуск без лишних расходов: Quick, 3 результата, 8 источников, 20 страниц." : "Controlled low-cost run: Quick, 3 results, 8 sources, 20 pages."}
+                      aria-pressed={testMode}
+                      className={`group inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs transition ${
                         testMode
                           ? "border-[var(--success)]/35 bg-[var(--success)]/8 text-[var(--success)]"
                           : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
                       }`}
                     >
-                      <Gauge size={14} />
-                      {t.testMode}
+                      <Gauge size={14} className={testMode ? "text-[var(--success)]" : ""} />
+                      <span>{testMode ? t.economyOn : t.economyOff}</span>
+                      <span className="hidden max-w-[420px] text-[10px] text-[var(--text-faint)] xl:inline">
+                        {t.economyDetails}
+                      </span>
                     </button>
 
                     <button
@@ -2938,6 +2980,22 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] md:flex">
                 <Command size={13} /> K
+              </div>
+
+              <div
+                className={`group relative hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex ${
+                  aiMode === "free"
+                    ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
+                    : aiMode === "paid"
+                      ? "border-[var(--gold)]/30 bg-[var(--gold)]/8 text-[var(--gold-bright)]"
+                      : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
+                }`}
+                title={aiModel ? `Model: ${aiModel}` : t.aiModeLoading}
+              >
+                <Bot size={13} />
+                <span>{aiMode === "free" ? t.aiFree : aiMode === "paid" ? t.aiPaid : t.aiModeLoading}</span>
+                <span className="h-1 w-1 rounded-full bg-current opacity-70" />
+                <span className="font-medium">{testMode ? t.economyOn : t.economyOff}</span>
               </div>
 
               <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-3 py-1.5 text-[11px] text-[var(--gold-bright)]">
