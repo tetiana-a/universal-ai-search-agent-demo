@@ -8,6 +8,13 @@ export type ResultStatus = "Verified" | "Reviewed" | "Manual review";
 export type Result = {
   id: number;
   title: string;
+  organization?: string;
+  specialization?: string;
+  geography?: string;
+  contact?: string;
+  investmentType?: string;
+  stage?: string;
+  ticket?: string;
   location: string;
   area: string;
   price: string;
