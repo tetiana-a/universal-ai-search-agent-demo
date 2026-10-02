@@ -10,6 +10,7 @@ export type BackgroundResearchRequest = {
   maxPages: number;
   multilingual: boolean;
   followRelatedLinks: boolean;
+  testMode?: boolean;
   sourceMemory?: Array<{ name?: string; url?: string; domain?: string; category?: string; quality?: number; lastChecked?: string }>;
 };
 
@@ -120,7 +121,7 @@ export function buildBackgroundResponseBody(input: BackgroundResearchRequest, sy
     // Background mode is intentionally kept on plain text output. Structured Outputs have had
     // intermittent background-mode failures; the completed payload is validated locally instead.
 
-    max_output_tokens: input.depth === "Deep" ? 30000 : input.depth === "Balanced" ? 18000 : 12000,
+    max_output_tokens: input.testMode ? 12000 : input.depth === "Deep" ? 30000 : input.depth === "Balanced" ? 18000 : 12000,
   };
 }
 
