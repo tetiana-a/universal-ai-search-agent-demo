@@ -525,7 +525,8 @@ export default function Home() {
     setActiveTask(null);
   }
 
-  // NOSONAR - stateful polling orchestrates several UI lifecycle transitions.\n  async function pollResearchTask(task: any) {
+  // NOSONAR - stateful polling orchestrates several UI lifecycle transitions.
+  async function pollResearchTask(task: any) {
     if (!task?.responseId || pollingTaskRef.current === task.responseId) return;
     pollingTaskRef.current = task.responseId;
     setRunning(true);
