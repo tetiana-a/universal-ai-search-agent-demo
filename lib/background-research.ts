@@ -236,33 +236,49 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
       : JSON.stringify(parsed.search_plan ?? {});
 
   let rawResults = Array.isArray(parsed.results) ? parsed.results : [];
-  if (rawResults.length === 0 && searchResults.length > 0) {
-    const geography = Array.isArray(parsed?.query_understanding?.geography) ? parsed.query_understanding.geography.join(", ") : "";
-    rawResults = searchResults.slice(0, input.maxResults).map((row, index) => ({
-      title: row.title || row.domain || ("Search result " + (index + 1)),
-      organization: "",
-      specialization: "",
-      geography,
-      contact: "",
-      investment_type: "",
-      stage: "",
-      ticket: "",
-      location: geography,
-      area: "",
-      price: "",
-      match: 60,
-      confidence: 55,
-      evidence: row.snippet || "Search result returned by live web search.",
-      evidence_quote: row.snippet || "",
-      status: "Manual review",
-      source: row.domain || "Web search",
-      source_type: "web_search_candidate",
-      url: row.url,
-      why: "Candidate discovered by live web search; manual verification is required.",
-      retrieved_at: new Date().toISOString(),
-      freshness_days: 0,
-      independent_verification: false,
-    }));
+  if (rawResults.length === 0) {
+    const fallbackRows = searchResults.length
+      ? searchResults
+      : retrievedSources.map((source) => ({
+          url: source.url,
+          title: source.title,
+          domain: source.domain,
+          snippet: "",
+        }));
+
+    if (fallbackRows.length > 0) {
+      const geography = Array.isArray(parsed?.query_understanding?.geography)
+        ? parsed.query_understanding.geography.join(", ")
+        : "";
+
+      rawResults = fallbackRows.slice(0, input.maxResults).map((row, index) => ({
+        title: row.title || row.domain || ("Search candidate " + (index + 1)),
+        organization: "",
+        specialization: "",
+        geography,
+        contact: "",
+        investment_type: "",
+        stage: "",
+        ticket: "",
+        location: geography,
+        area: "",
+        price: "",
+        match: row.snippet ? 60 : 40,
+        confidence: row.snippet ? 55 : 35,
+        evidence: row.snippet || "Source discovered by live search; page-level evidence was not returned in the structured response.",
+        evidence_quote: row.snippet || "",
+        status: "Manual review",
+        source: row.domain || "Web search",
+        source_type: row.snippet ? "web_search_candidate" : "web_search_source",
+        url: row.url,
+        why: row.snippet
+          ? "Candidate discovered by live web search; manual verification is required."
+          : "Source discovered by live research, but structured extraction was incomplete; manual review is required.",
+        retrieved_at: new Date().toISOString(),
+        freshness_days: 0,
+        independent_verification: false,
+      }));
+    }
   }
   const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
   const deduped = dedupeResults(filtered); const now = new Date().toISOString();
