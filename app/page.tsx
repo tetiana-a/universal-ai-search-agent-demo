@@ -650,18 +650,11 @@ export default function Home() {
   }
 
   function renderRadioStations() {
-    if (radioLoading) {
+    if (radioLoading || radioStations.length === 0) {
+      const message = radioLoading ? t.radioLoading : t.radioEmpty;
       return (
         <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">
-          {t.radioLoading}
-        </div>
-      );
-    }
-
-    if (radioStations.length === 0) {
-      return (
-        <div className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-4 text-xs text-[var(--text-muted)]">
-          {t.radioEmpty}
+          {message}
         </div>
       );
     }
@@ -743,17 +736,26 @@ export default function Home() {
   }
 
   function renderShareActions(compact = false) {
+    const actions = [
+      { label: t.telegram, icon: Send, run: shareViaTelegram },
+      { label: t.email, icon: Mail, run: shareViaEmail },
+      { label: compact ? t.systemShare : t.share, icon: Share2, run: () => void shareViaSystem() },
+    ];
+
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <button onClick={shareViaTelegram} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
-          <Send size={12} /> {t.telegram}
-        </button>
-        <button onClick={shareViaEmail} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
-          <Mail size={12} /> {t.email}
-        </button>
-        <button onClick={() => void shareViaSystem()} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
-          <Share2 size={12} /> {compact ? t.systemShare : t.share}
-        </button>
+        {actions.map((action) => {
+          const Icon = action.icon;
+          return (
+            <button
+              key={action.label}
+              onClick={action.run}
+              className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
+            >
+              <Icon size={12} /> {action.label}
+            </button>
+          );
+        })}
       </div>
     );
   }
