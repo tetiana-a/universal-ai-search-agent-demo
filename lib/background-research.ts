@@ -136,7 +136,7 @@ export async function startBackgroundResearch(apiKey: string, input: BackgroundR
 }
 
 export async function retrieveBackgroundResponse(apiKey: string, responseId: string) {
-  const response = await fetch("https://api.openai.com/v1/responses/" + encodeURIComponent(responseId) + "?include=web_search_call.action.sources", {
+  const response = await fetch("https://api.openai.com/v1/responses/" + encodeURIComponent(responseId), {
     headers: { Authorization: "Bearer " + apiKey }, signal: AbortSignal.timeout(15000),
   });
   const data = await response.json();
