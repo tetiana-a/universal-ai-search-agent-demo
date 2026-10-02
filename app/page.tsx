@@ -514,6 +514,7 @@ export default function Home() {
   const [testMode, setTestMode] = useState(true);
   const [aiMode, setAiMode] = useState<"free" | "paid" | "unknown">("unknown");
   const [aiModel, setAiModel] = useState("");
+  const [memoryStatus, setMemoryStatus] = useState<"persistent" | "local" | "unknown">("unknown");
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -542,6 +543,26 @@ export default function Home() {
           setAiMode("unknown");
           setAiModel("");
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/memory", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(String(data?.error || "Memory unavailable"));
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setMemoryStatus(data?.persistent ? "persistent" : "local");
+      })
+      .catch(() => {
+        if (!cancelled) setMemoryStatus("unknown");
       });
     return () => {
       cancelled = true;
@@ -3051,6 +3072,32 @@ export default function Home() {
                 <span className="font-medium">{testMode ? t.economyOn : t.economyOff}</span>
               </div>
 
+              <div
+                className={
+                  "hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex " +
+                  (memoryStatus === "persistent"
+                    ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
+                    : memoryStatus === "local"
+                      ? "border-[var(--gold)]/30 bg-[var(--gold)]/8 text-[var(--gold-bright)]"
+                      : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")
+                }
+                title={
+                  memoryStatus === "persistent"
+                    ? "Persistent source memory and learning enabled"
+                    : memoryStatus === "local"
+                      ? "Temporary process memory only; configure Redis for persistent memory"
+                      : "Memory status unavailable"
+                }
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                <span>
+                  {memoryStatus === "persistent"
+                    ? "Memory • persistent"
+                    : memoryStatus === "local"
+                      ? "Memory • local"
+                      : "Memory • checking"}
+                </span>
+              </div>
               <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-3 py-1.5 text-[11px] text-[var(--gold-bright)]">
                 <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
                 {t.live}
