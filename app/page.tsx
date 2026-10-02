@@ -2146,7 +2146,7 @@ export default function Home() {
         <section className="grid gap-4 sm:grid-cols-3">
           {[
             ["AI Models", settings.planningModel, Bot],
-            ["Search", settings.braveEnabled && settings.exaEnabled ? "Brave + Exa" : "Configured providers", Search],
+            ["Search", isFreeAI ? "Jina Search + Reader" : (settings.braveEnabled && settings.exaEnabled ? "Brave + Exa" : "Configured providers"), Search],
             ["Acquisition", settings.playwrightEnabled ? "HTTP → Browser" : "HTTP only", Globe2],
           ].map(([label, value, Icon]) => (
             <div key={String(label)} className="glass-soft panel-hover rounded-2xl p-4">
