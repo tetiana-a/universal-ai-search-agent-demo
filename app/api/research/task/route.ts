@@ -30,7 +30,8 @@ export async function POST(request: Request) {
     const p = backgroundProgress(String(response?.status || "queued"));
     return NextResponse.json({ live: true, task: { id: taskId(id), responseId: id, status: String(response?.status || "queued"), progress: p.progress, stage: p.stage, createdAt: new Date().toISOString() }, pollAfterMs: 2500 }, { status: 202, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to start background research." }, { status: 502 });
+    const message = error instanceof Error ? error.message : "Unable to start background research.";
+    return NextResponse.json({ error: message, stage: "background_start", live: false }, { status: 502 });
   }
 }
 
@@ -52,7 +53,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ live: true, partial: true, task: { id: taskId(responseId), responseId, status, progress: 100, stage: 5 }, error: String(response?.incomplete_details?.reason || response?.error?.message || ("Background research ended with status: " + status)) }, { headers: { "Cache-Control": "no-store" } });
     }
     return NextResponse.json({ live: true, task: { id: taskId(responseId), responseId, status, progress: p.progress, stage: p.stage } }, { headers: { "Cache-Control": "no-store" } });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to retrieve background research." }, { status: 502 }); }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to retrieve background research.";
+    return NextResponse.json({ error: message, stage: "background_poll", live: false, responseId }, { status: 502 });
+  }
 }
 
 export async function DELETE(request: Request) {
