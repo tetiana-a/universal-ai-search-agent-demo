@@ -372,16 +372,16 @@ export async function runProviderDiscovery(query: string, language: string, geog
 
 export function getSearchProviderCatalog() {
   return [
-    { id: "brave", type: "web", env: "BRAVE_SEARCH_API_KEY", status: Boolean(process.env.BRAVE_SEARCH_API_KEY) ? "configured" : "optional" },
-    { id: "exa", type: "semantic", env: "EXA_API_KEY", status: Boolean(process.env.EXA_API_KEY) ? "configured" : "optional" },
-    { id: "tavily", type: "ai_web", env: "TAVILY_API_KEY", status: Boolean(process.env.TAVILY_API_KEY) ? "configured" : "optional" },
-    { id: "mojeek", type: "independent_web", env: "MOJEEK_API_KEY", status: Boolean(process.env.MOJEEK_API_KEY) ? "configured" : "optional" },
-    { id: "yandex", type: "regional_web", env: "YANDEX_SEARCH_API_KEY", status: Boolean(process.env.YANDEX_SEARCH_API_KEY) ? "configured" : "optional" },
-    { id: "naver", type: "regional_web", env: "NAVER_CLIENT_ID + NAVER_CLIENT_SECRET", status: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET) ? "configured" : "optional" },
-    { id: "dataforseo", type: "serp_aggregator", env: "DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD", status: Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD) ? "configured" : "optional" },
-    { id: "serper", type: "serp_api", env: "SERPER_API_KEY", status: Boolean(process.env.SERPER_API_KEY) ? "configured" : "optional" },
-    { id: "jina", type: "public_reader", env: "JINA_API_KEY", status: Boolean(process.env.JINA_API_KEY) ? "configured" : "optional" },
-    { id: "firecrawl", type: "public_reader", env: "FIRECRAWL_API_KEY", status: Boolean(process.env.FIRECRAWL_API_KEY) ? "configured" : "optional" },
-    { id: "openai_web_search", type: "live_web", env: "OPENAI_API_KEY", status: Boolean(process.env.OPENAI_API_KEY) ? "configured" : "required" },
+    { id: "brave", type: "web", env: "BRAVE_SEARCH_API_KEY", status: process.env.BRAVE_SEARCH_API_KEY ? "configured" : "optional" },
+    { id: "exa", type: "semantic", env: "EXA_API_KEY", status: process.env.EXA_API_KEY ? "configured" : "optional" },
+    { id: "tavily", type: "ai_web", env: "TAVILY_API_KEY", status: process.env.TAVILY_API_KEY ? "configured" : "optional" },
+    { id: "mojeek", type: "independent_web", env: "MOJEEK_API_KEY", status: process.env.MOJEEK_API_KEY ? "configured" : "optional" },
+    { id: "yandex", type: "regional_web", env: "YANDEX_SEARCH_API_KEY", status: process.env.YANDEX_SEARCH_API_KEY ? "configured" : "optional" },
+    { id: "naver", type: "regional_web", env: "NAVER_CLIENT_ID + NAVER_CLIENT_SECRET", status: process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET ? "configured" : "optional" },
+    { id: "dataforseo", type: "serp_aggregator", env: "DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD", status: process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD ? "configured" : "optional" },
+    { id: "serper", type: "serp_api", env: "SERPER_API_KEY", status: process.env.SERPER_API_KEY ? "configured" : "optional" },
+    { id: "jina", type: "public_reader", env: "JINA_API_KEY", status: process.env.JINA_API_KEY ? "configured" : "optional" },
+    { id: "firecrawl", type: "public_reader", env: "FIRECRAWL_API_KEY", status: process.env.FIRECRAWL_API_KEY ? "configured" : "optional" },
+    { id: "openai_web_search", type: "live_web", env: "OPENAI_API_KEY", status: process.env.OPENAI_API_KEY ? "configured" : "required" },
   ];
 }
