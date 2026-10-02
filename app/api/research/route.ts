@@ -31,11 +31,15 @@ export async function POST(request:Request){
  let body:ResearchRequest; try{body=await request.json();}catch{return NextResponse.json({error:"Invalid JSON request body."},{status:400});}
  const query=String(body.query||"").trim(); if(!query)return NextResponse.json({error:"Query is required."},{status:400});
  const language = body.language === "en" ? "en" : "ru"; const depth = body.depth || "Deep"; const maxResults = Math.min(Math.max(Number(body.maxResults || 12), 4), 20); const maxSources=Math.min(Math.max(Number(body.maxSources||50),5),100); const maxPages=Math.min(Math.max(Number(body.maxPages||120),20),1200); const multilingual=body.multilingual!==false; const followRelatedLinks=body.followRelatedLinks!==false;
- const supplementalEnabled=process.env.SUPPLEMENTAL_SEARCH_ENABLED!=="false"; const searchMatrix=buildSearchMatrix(query,language); let providerHints:any[]=[]; if(supplementalEnabled){try{providerHints=await Promise.race([runProviderDiscovery(query,language),new Promise<any[]>(resolve=>setTimeout(()=>resolve([]),Number(process.env.SUPPLEMENTAL_SEARCH_TIMEOUT_MS||7000)))])}catch{providerHints=[];}} const providerCatalog=getSearchProviderCatalog();
+ const supplementalEnabled = process.env.SUPPLEMENTAL_SEARCH_ENABLED !== "false";
+ const multilingualLabelRu = multilingual ? "включена" : "выключена";
+ const relatedLinksLabelRu = followRelatedLinks ? "включены" : "выключены";
+ const multilingualLabelEn = multilingual ? "on" : "off";
+ const relatedLinksLabelEn = followRelatedLinks ? "on" : "off"; const searchMatrix=buildSearchMatrix(query,language); let providerHints:any[]=[]; if(supplementalEnabled){try{providerHints=await Promise.race([runProviderDiscovery(query,language),new Promise<any[]>(resolve=>setTimeout(()=>resolve([]),Number(process.env.SUPPLEMENTAL_SEARCH_TIMEOUT_MS||7000)))])}catch{providerHints=[];}} const providerCatalog=getSearchProviderCatalog();
  const providerHintBlock = providerHints.slice(0, 40).map((h: any) => ({ provider: h.provider, engine: h.engine, query: h.query, title: h.title, url: h.url, domain: h.domain, snippet: String(h.snippet || "").slice(0, 700) }));
  const readerHints:any[] = [];
  const systemPrompt=language==="ru"?UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU:UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN;
- const userPrompt=language==="ru"?`Исходный запрос пользователя:\n${query}\n\nРежим: ${depth}. Лимиты: ${maxSources} источников, ${maxPages} URL, ${maxResults} результатов. Мультиязычность: ${multilingual?"включена":"выключена"}. Связанные страницы: ${followRelatedLinks?"включены":"выключены"}.\n\nКАТАЛОГ ПОИСКА:\n${JSON.stringify(providerCatalog)}\n\nМАТРИЦА ВЕТОК:\n${JSON.stringify(searchMatrix)}\n\nДОПОЛНИТЕЛЬНЫЕ КАНДИДАТЫ:\n${JSON.stringify(providerHintBlock)}\n\nВыполни реальный глубокий web search несколькими независимыми ветками; используй локальные языки, официальные/государственные источники, каталоги, компании, документы, новости и публичные сообщества. Не используй закрытые аккаунты и обход авторизации. Для каждого результата нужны реальный URL и evidence_quote. Не выдумывай данные. Дубли удаляй.`:`User request:\n${query}\n\nMode: ${depth}. Limits: ${maxSources} sources, ${maxPages} URLs, ${maxResults} results. Multilingual: ${multilingual?"on":"off"}. Related pages: ${followRelatedLinks?"on":"off"}.\n\nSEARCH PROVIDER CATALOG:\n${JSON.stringify(providerCatalog)}\n\nSEARCH MATRIX:\n${JSON.stringify(searchMatrix)}\n\nSUPPLEMENTAL CANDIDATES:\n${JSON.stringify(providerHintBlock)}\n\nPUBLIC READER EXTRACTS (only from configured public-reader services):\n${JSON.stringify(readerHints)}\n\nPerform real deep web search across independent branches; use regional languages, official/government sources, directories, companies, documents, news and public communities. Do not use closed accounts or auth bypass. Every result needs a real URL and evidence_quote. Never invent data. Remove duplicates.
+ const userPrompt=language==="ru"?`Исходный запрос пользователя:\n${query}\n\nРежим: ${depth}. Лимиты: ${maxSources} источников, ${maxPages} URL, ${maxResults} результатов. Мультиязычность: ${multilingualLabelRu}. Связанные страницы: ${relatedLinksLabelRu}.\n\nКАТАЛОГ ПОИСКА:\n${JSON.stringify(providerCatalog)}\n\nМАТРИЦА ВЕТОК:\n${JSON.stringify(searchMatrix)}\n\nДОПОЛНИТЕЛЬНЫЕ КАНДИДАТЫ:\n${JSON.stringify(providerHintBlock)}\n\nВыполни реальный глубокий web search несколькими независимыми ветками; используй локальные языки, официальные/государственные источники, каталоги, компании, документы, новости и публичные сообщества. Не используй закрытые аккаунты и обход авторизации. Для каждого результата нужны реальный URL и evidence_quote. Не выдумывай данные. Дубли удаляй.`:`User request:\n${query}\n\nMode: ${depth}. Limits: ${maxSources} sources, ${maxPages} URLs, ${maxResults} results. Multilingual: ${multilingualLabelEn}. Related pages: ${relatedLinksLabelEn}.\n\nSEARCH PROVIDER CATALOG:\n${JSON.stringify(providerCatalog)}\n\nSEARCH MATRIX:\n${JSON.stringify(searchMatrix)}\n\nSUPPLEMENTAL CANDIDATES:\n${JSON.stringify(providerHintBlock)}\n\nPUBLIC READER EXTRACTS (only from configured public-reader services):\n${JSON.stringify(readerHints)}\n\nPerform real deep web search across independent branches; use regional languages, official/government sources, directories, companies, documents, news and public communities. Do not use closed accounts or auth bypass. Every result needs a real URL and evidence_quote. Never invent data. Remove duplicates.
 
 ACCESS ESCALATION PROTOCOL:
 1) official API;
@@ -57,7 +61,20 @@ If a source presents CAPTCHA, Cloudflare challenge, bot protection or an access 
  let parsed:any=null;try{parsed=JSON.parse(outputText(r.body));}catch{const retryMs=Number(process.env.OPENAI_RETRY_TIMEOUT_MS||25000);try{r=await call(true,retryMs);if(r.res.ok)parsed=JSON.parse(outputText(r.body));}catch{parsed=null;}}
  if(!parsed)return NextResponse.json({live:true,partial:true,error:"The live web search completed, but the structured research payload could not be validated within the bounded request window.",stats:{sourcesFound:0,sourcesChecked:0,pagesProcessed:0,recordsExtracted:0,duplicatesRemoved:0,qualified:0,evidenceCoverage:0},results:[],sourceRegistry:[],accessEvents:[],billing:{provider:"openai",model,billable:true,usage:r.body?.usage??null}},{status:200});
  const retrievedSources:Array<{url:string;title:string;domain:string}>=[]; const seen=new Set<string>(); const collect=(s:any)=>{const url=normalizeUrl(String(s?.url||""));if(!url||seen.has(url))return;seen.add(url);retrievedSources.push({url,title:String(s?.title||""),domain:getDomain(url)});};
- for(const item of Array.isArray(r.body?.output)?r.body.output:[]){if(item?.type==="web_search_call"){for(const s of Array.isArray(item?.action?.sources)?item.action.sources:[])collect(s);} if(item?.type==="message"){for(const part of Array.isArray(item?.content)?item.content:[]){for(const a of Array.isArray(part?.annotations)?part.annotations:[])collect(a);}}}
+ const outputItems = Array.isArray(r.body?.output) ? r.body.output : [];
+ for (const item of outputItems) {
+   if (item?.type === "web_search_call") {
+     const sources = Array.isArray(item?.action?.sources) ? item.action.sources : [];
+     for (const source of sources) collect(source);
+   }
+   if (item?.type === "message") {
+     const parts = Array.isArray(item?.content) ? item.content : [];
+     for (const part of parts) {
+       const annotations = Array.isArray(part?.annotations) ? part.annotations : [];
+       for (const annotation of annotations) collect(annotation);
+     }
+   }
+ }
  const sourceSet=new Set(retrievedSources.map(s=>s.url)); const raw=Array.isArray(parsed.results)?parsed.results:[]; const filtered=raw.filter((item:any)=>{const u=normalizeUrl(String(item?.url||"")); return u&&(sourceSet.size===0||sourceSet.has(u)||retrievedSources.some(s=>s.domain===getDomain(u)));}); const deduped=dedupeResults(filtered); const now=new Date().toISOString();
  const results:ResearchResult[]=deduped.out.slice(0,maxResults).map((item:any,i:number)=>({id:i+1,title:String(item?.title||"Untitled result"),location:String(item?.location||"not specified"),area:String(item?.area||"not specified"),price:String(item?.price||"not specified"),match:Number(item?.match||0),confidence:Number(item?.confidence||0),evidence:String(item?.evidence||""),evidenceQuote:String(item?.evidence_quote||""),status:["Verified","Reviewed","Manual review"].includes(item?.status)?item.status:"Reviewed",source:String(item?.source||"Web source"),sourceType:String(item?.source_type||"web"),sourceDomain:getDomain(String(item?.url||"")),url:normalizeUrl(String(item?.url||"")),why:String(item?.why||""),retrievedAt:String(item?.retrieved_at||now),freshnessDays:Math.max(0,Number(item?.freshness_days||0)),independentVerification:Boolean(item?.independent_verification)}));
  const sourcePlans: AccessEscalationPlan[] = [];
@@ -104,9 +121,12 @@ If a source presents CAPTCHA, Cloudflare challenge, bot protection or an access 
      checkpointRequired:Boolean(plan.checkpoint?.required),
    };
  });
- const checkpointPlans = sourcePlans.filter((plan)=>Boolean(plan.checkpoint?.required));
  for (const event of accessEvents) {
-   const plan=buildAccessEscalationPlan({url:event.url,status:event.status,reason:event.reason});
+   const plan = buildAccessEscalationPlan({
+     url: event.url,
+     status: event.status,
+     reason: event.reason,
+   });
    sourcePlans.push(plan);
  }
  const escalation=accessEscalationSummary(sourcePlans);
