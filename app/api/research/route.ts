@@ -4,6 +4,7 @@ import type { ResearchQueryUnderstanding, LiveSourceRecord, AccessEvent } from "
 import { getSearchProviderCatalog, runProviderDiscovery } from "@/lib/provider-search";
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { accessEscalationSummary, buildAccessEscalationPlan, type AccessEscalationPlan } from "@/lib/access-escalation";
+import { runFreeResearch } from "@/lib/free-research";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -26,10 +27,29 @@ function normalizeUrl(url:string){try{const u=new URL(url);u.hash="";u.searchPar
 function dedupeResults(items:any[]){const groups=new Map<string,any[]>();for(const item of items){const identity=[normalize(String(item?.title||"")),normalize(String(item?.location||"")),normalize(String(item?.area||""))].join("|");const key=identity.replace(/\|+/g,"|")||normalizeUrl(String(item?.url||""));const b=groups.get(key)||[];b.push(item);groups.set(key,b);}const out:any[]=[];let removed=0;for(const bucket of groups.values()){bucket.sort((a,b)=>Number(b?.confidence||0)-Number(a?.confidence||0));out.push(bucket[0]);removed+=Math.max(0,bucket.length-1);}return {out,removed};}
 
 export async function POST(request:Request){
- const apiKey=process.env.OPENAI_API_KEY; const model=process.env.OPENAI_MODEL||"gpt-5.5";
- if(!apiKey)return NextResponse.json({error:"OPENAI_API_KEY is not configured."},{status:503});
  let body:ResearchRequest; try{body=await request.json();}catch{return NextResponse.json({error:"Invalid JSON request body."},{status:400});}
  const query=String(body.query||"").trim(); if(!query)return NextResponse.json({error:"Query is required."},{status:400});
+ if((process.env.RESEARCH_AI_PROVIDER||"free").toLowerCase()==="free"){
+   try{
+     const result=await runFreeResearch({
+       query,
+       language:body.language==="en"?"en":"ru",
+       depth:body.depth||"Balanced",
+       maxResults:Math.min(Math.max(Number(body.maxResults||8),3),15),
+       maxSources:Math.min(Math.max(Number(body.maxSources||20),5),30),
+       maxPages:Math.min(Math.max(Number(body.maxPages||100),20),200),
+       multilingual:body.multilingual!==false,
+       followRelatedLinks:body.followRelatedLinks!==false,
+       testMode:body.depth==="Quick",
+       sourceMemory:[],
+     });
+     return NextResponse.json(result,{status:200,headers:{"Cache-Control":"no-store"}});
+   }catch(error){
+     return NextResponse.json({error:error instanceof Error?error.message:"Free research failed."},{status:502});
+   }
+ }
+ const apiKey=process.env.OPENAI_API_KEY; const model=process.env.OPENAI_MODEL||"gpt-5.5";
+ if(!apiKey)return NextResponse.json({error:"OPENAI_API_KEY is not configured."},{status:503});
  const language = body.language === "en" ? "en" : "ru"; const depth = body.depth || "Deep"; const maxResults = Math.min(Math.max(Number(body.maxResults || 12), 4), 20); const maxSources=Math.min(Math.max(Number(body.maxSources||50),5),100); const maxPages=Math.min(Math.max(Number(body.maxPages||120),20),1200); const multilingual=body.multilingual!==false; const followRelatedLinks=body.followRelatedLinks!==false;
  const supplementalEnabled = process.env.SUPPLEMENTAL_SEARCH_ENABLED !== "false";
  const multilingualLabelRu = multilingual ? "включена" : "выключена";
