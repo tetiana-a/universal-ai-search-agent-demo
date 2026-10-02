@@ -1,6 +1,7 @@
 import { buildSearchMatrix } from "@/lib/search-matrix";
 export type ProviderName =
-  | "brave" | "exa" | "tavily" | "mojeek" | "yandex" | "naver" | "dataforseo";
+  | "brave" | "exa" | "tavily" | "mojeek" | "yandex" | "naver" | "dataforseo"
+  | "serper" | "jina" | "firecrawl";
 
 export type ProviderSearchHit = {
   provider: ProviderName;
@@ -232,6 +233,80 @@ async function dataForSeoSearch(query: string, engine: string, locationCode?: nu
   } catch { return []; }
 }
 
+
+
+async function serperSearch(query: string): Promise<ProviderSearchHit[]> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return [];
+  try {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "content-type": "application/json", "X-API-KEY": key },
+      body: JSON.stringify({ q: query, num: 20 }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    return (json?.organic || []).map((item: any) => {
+      const url = cleanUrl(item?.link);
+      return {
+        provider: "serper" as const,
+        engine: "google-serper",
+        title: String(item?.title || ""),
+        url,
+        snippet: String(item?.snippet || ""),
+        domain: hostname(url),
+        query,
+      };
+    }).filter((x: ProviderSearchHit) => x.url);
+  } catch { return []; }
+}
+
+async function publicReader(url: string, provider: "jina" | "firecrawl"): Promise<ProviderSearchHit[]> {
+  if (!url) return [];
+  try {
+    if (provider === "jina") {
+      const key = process.env.JINA_API_KEY;
+      if (!key) return [];
+      const res = await fetch(`https://r.jina.ai/${url}`, {
+        headers: { Authorization: `Bearer ${key}`, Accept: "text/plain" },
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!res.ok) return [];
+      const text = await res.text();
+      return [{
+        provider: "jina",
+        engine: "jina-reader",
+        title: url,
+        url,
+        snippet: text.slice(0, 1800),
+        domain: hostname(url),
+      }];
+    }
+
+    const key = process.env.FIRECRAWL_API_KEY;
+    if (!key) return [];
+    const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    const markdown = String(json?.data?.markdown || json?.markdown || "");
+    return [{
+      provider: "firecrawl",
+      engine: "firecrawl",
+      title: String(json?.data?.metadata?.title || url),
+      url,
+      snippet: markdown.slice(0, 1800),
+      domain: hostname(url),
+    }];
+  } catch { return []; }
+}
+
+
 function extractCountryHint(geographyHint?: string) {
   const iso = geographyHint?.match(/\b[A-Z]{2}\b/);
   return iso?.[0]?.toLowerCase();
@@ -245,6 +320,7 @@ async function runProviderQuery(q: string, languageCode: string, country?: strin
     mojeekSearch(q, country, languageCode),
     yandexSearch(q, languageCode),
     naverSearch(q),
+    serperSearch(q),
     dataForSeoSearch(q, "google", Number(process.env.DATAFORSEO_LOCATION_CODE || 0) || undefined, languageCode),
     dataForSeoSearch(q, "bing", Number(process.env.DATAFORSEO_LOCATION_CODE || 0) || undefined, languageCode),
     dataForSeoSearch(q, "yahoo", Number(process.env.DATAFORSEO_LOCATION_CODE || 0) || undefined, languageCode),
@@ -252,7 +328,12 @@ async function runProviderQuery(q: string, languageCode: string, country?: strin
     dataForSeoSearch(q, "naver", undefined, languageCode),
     dataForSeoSearch(q, "seznam", Number(process.env.DATAFORSEO_LOCATION_CODE || 0) || undefined, "cs"),
   ];
-  const batches = await Promise.all(tasks);
+  const batches = await Promise.allSettled(tasks);
+  const results: ProviderSearchHit[] = [];
+  for (const batch of batches) {
+    if (batch.status === "fulfilled") results.push(...batch.value);
+  }
+  return results;
   return batches.flat();
 }
 
@@ -276,9 +357,9 @@ export async function runProviderDiscovery(query: string, language: string, geog
     .slice(0, maxQueries);
 
   const all: ProviderSearchHit[] = [];
-  for (const branchQuery of queryList) {
-    const batch = await runProviderQuery(branchQuery, languageCode, country);
-    all.push(...batch);
+  const batches = await Promise.allSettled(queryList.map((branchQuery) => runProviderQuery(branchQuery, languageCode, country)));
+  for (const batch of batches) {
+    if (batch.status === "fulfilled") all.push(...batch.value);
   }
 
   const seen = new Set<string>();
@@ -299,6 +380,9 @@ export function getSearchProviderCatalog() {
     { id: "yandex", type: "regional_web", env: "YANDEX_SEARCH_API_KEY", status: Boolean(process.env.YANDEX_SEARCH_API_KEY) ? "configured" : "optional" },
     { id: "naver", type: "regional_web", env: "NAVER_CLIENT_ID + NAVER_CLIENT_SECRET", status: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET) ? "configured" : "optional" },
     { id: "dataforseo", type: "serp_aggregator", env: "DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD", status: Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD) ? "configured" : "optional" },
+    { id: "serper", type: "serp_api", env: "SERPER_API_KEY", status: Boolean(process.env.SERPER_API_KEY) ? "configured" : "optional" },
+    { id: "jina", type: "public_reader", env: "JINA_API_KEY", status: Boolean(process.env.JINA_API_KEY) ? "configured" : "optional" },
+    { id: "firecrawl", type: "public_reader", env: "FIRECRAWL_API_KEY", status: Boolean(process.env.FIRECRAWL_API_KEY) ? "configured" : "optional" },
     { id: "openai_web_search", type: "live_web", env: "OPENAI_API_KEY", status: Boolean(process.env.OPENAI_API_KEY) ? "configured" : "required" },
   ];
 }
