@@ -481,6 +481,7 @@ export default function Home() {
   const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioError, setRadioError] = useState("");
   const [radioVolume, setRadioVolume] = useState(0.55);
+  const [shareEmailFallback, setShareEmailFallback] = useState(false);
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
   const radioAudioRef = useRef<HTMLAudioElement | null>(null);
   const radioPanelRef = useRef<HTMLDivElement | null>(null);
@@ -640,15 +641,27 @@ export default function Home() {
   }
 
   function shareViaTelegram() {
-    const text = buildShareText();
-    const url = "https://t.me/share/url?url=" + encodeURIComponent(window.location.href) + "&text=" + encodeURIComponent(text);
-    window.open(url, "_blank", "noopener,noreferrer");
+    const fullText = buildShareText();
+    const text = fullText.length > 3800 ? fullText.slice(0, 3797) + "..." : fullText;
+    const shareUrl =
+      "https://t.me/share/url?url=" +
+      encodeURIComponent(window.location.href) +
+      "&text=" +
+      encodeURIComponent(text);
+    const popup = window.open(shareUrl, "_blank", "noopener,noreferrer");
+    if (!popup) window.location.href = shareUrl;
   }
 
   function shareViaEmail() {
     const subject = "Aurelius research: " + query.slice(0, 80);
     const body = buildShareText();
-    window.location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+    const mailto = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+    setShareEmailFallback(false);
+    window.location.href = mailto;
+
+    window.setTimeout(() => {
+      setShareEmailFallback(true);
+    }, 1200);
   }
 
   async function shareViaSystem() {
@@ -3049,6 +3062,78 @@ export default function Home() {
               {t.open}
             </a>
           </aside>
+        </div>
+      )}
+
+      {shareEmailFallback && (
+        <div
+          className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-md"
+          onMouseDown={() => setShareEmailFallback(false)}
+        >
+          <div
+            className="glass w-full max-w-[520px] rounded-[26px] p-5 sm:p-6"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
+                  <Mail size={14} />
+                  {lang === "ru" ? "Открыть письмо" : "Open email"}
+                </div>
+                <h3 className="mt-2 text-lg font-semibold text-[var(--text)]">
+                  {lang === "ru"
+                    ? "Письмо с результатами подготовлено"
+                    : "Your research email is prepared"}
+                </h3>
+                <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                  {lang === "ru"
+                    ? "Если системная почта не открылась автоматически, выберите почтовый сервис ниже."
+                    : "If your default mail app did not open, choose a mail service below."}
+                </p>
+              </div>
+              <button
+                onClick={() => setShareEmailFallback(false)}
+                className="rounded-xl border border-[var(--line-soft)] p-2 text-[var(--text-muted)]"
+                aria-label="Close email options"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+              <a
+                href={"https://mail.google.com/mail/?view=cm&fs=1&su=" + encodeURIComponent("Aurelius research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
+                target="_blank"
+                rel="noreferrer"
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+              >
+                Gmail
+              </a>
+              <a
+                href={"https://outlook.live.com/mail/0/deeplink/compose?subject=" + encodeURIComponent("Aurelius research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
+                target="_blank"
+                rel="noreferrer"
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+              >
+                Outlook
+              </a>
+              <button
+                onClick={() => {
+                  void navigator.clipboard?.writeText(buildShareText());
+                  setShareEmailFallback(false);
+                }}
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+              >
+                {lang === "ru" ? "Скопировать" : "Copy"}
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-3 text-[10px] leading-4 text-[var(--text-faint)]">
+              {lang === "ru"
+                ? "В письмо попадут запрос, найденные результаты, источники и evidence."
+                : "The email contains the query, results, sources and evidence."}
+            </div>
+          </div>
         </div>
       )}
 
