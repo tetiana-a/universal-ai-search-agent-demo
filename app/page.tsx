@@ -502,6 +502,11 @@ export default function Home() {
   const [radioError, setRadioError] = useState("");
   const [radioVolume, setRadioVolume] = useState(0.55);
   const [shareEmailFallback, setShareEmailFallback] = useState(false);
+  const [emailRecipient, setEmailRecipient] = useState("");
+  const [emailSendStatus, setEmailSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [telegramModalOpen, setTelegramModalOpen] = useState(false);
+  const [telegramRecipients, setTelegramRecipients] = useState("");
+  const [telegramDiagnostics, setTelegramDiagnostics] = useState<any>(null);
   const [telegramStatus, setTelegramStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
   const radioAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -708,7 +713,19 @@ export default function Home() {
     return ["AURELIUS — Universal AI Research Engine", "Запрос: " + query, rows.join("\n\n")].join("\n\n");
   }
 
-  async function shareViaTelegram() {
+  async function openTelegramShare() {
+    setTelegramModalOpen(true);
+    setTelegramStatus("idle");
+    try {
+      const response = await fetch("/api/telegram/send", { cache: "no-store" });
+      const data = await response.json().catch(() => null);
+      setTelegramDiagnostics(data);
+    } catch {
+      setTelegramDiagnostics(null);
+    }
+  }
+
+  async function sendTelegramReport() {
     setTelegramStatus("sending");
 
     try {
@@ -717,7 +734,11 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: "AURELIUS — " + query.slice(0, 100),
-          text: buildShareText(),
+          payload: buildExportPayload(),
+          chatIds: telegramRecipients.trim()
+            ? telegramRecipients.split(",").map((value) => value.trim()).filter(Boolean)
+            : undefined,
+          attachFiles: true,
         }),
       });
 
@@ -727,23 +748,49 @@ export default function Home() {
       }
 
       setTelegramStatus("sent");
-      window.setTimeout(() => setTelegramStatus("idle"), 3000);
-    } catch {
+      setTelegramDiagnostics(data);
+      window.setTimeout(() => {
+        setTelegramStatus("idle");
+        setTelegramModalOpen(false);
+      }, 1500);
+    } catch (error) {
       setTelegramStatus("error");
-      window.setTimeout(() => setTelegramStatus("idle"), 5000);
+      setTelegramDiagnostics({ error: error instanceof Error ? error.message : "Telegram delivery failed." });
     }
   }
 
-  function shareViaEmail() {
-    const subject = "Aurelius research: " + query.slice(0, 80);
-    const body = buildShareText();
-    const mailto = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
-    setShareEmailFallback(false);
-    window.location.href = mailto;
+  function shareViaTelegram() {
+    void openTelegramShare();
+  }
 
-    window.setTimeout(() => {
-      setShareEmailFallback(true);
-    }, 1200);
+  function shareViaEmail() {
+    setEmailSendStatus("idle");
+    setShareEmailFallback(true);
+  }
+
+  async function sendEmailReport() {
+    setEmailSendStatus("sending");
+    try {
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          to: emailRecipient.trim(),
+          subject: "AURELIUS research: " + query.slice(0, 100),
+          payload: buildExportPayload(),
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(String(data?.error || "Email delivery failed."));
+      setEmailSendStatus("sent");
+      window.setTimeout(() => {
+        setEmailSendStatus("idle");
+        setShareEmailFallback(false);
+      }, 1500);
+    } catch (error) {
+      setEmailSendStatus("error");
+      setLiveError(error instanceof Error ? error.message : "Email delivery failed.");
+    }
   }
 
   async function shareViaSystem() {
@@ -866,12 +913,12 @@ export default function Home() {
         disabled: telegramStatus === "sending" || shownResults.length === 0,
         accent: telegramStatus === "sent",
       },
-      { label: radioText("email"), icon: Mail, run: shareViaEmail, disabled: false, accent: false },
+      { label: radioText("email"), icon: Mail, run: shareViaEmail, disabled: shownResults.length === 0, accent: emailSendStatus === "sent" },
       {
         label: compact ? radioText("systemShare") : radioText("share"),
         icon: Share2,
         run: () => void shareViaSystem(),
-        disabled: false,
+        disabled: shownResults.length === 0,
         accent: false,
       },
     ];
@@ -2267,7 +2314,8 @@ export default function Home() {
 
               <button
                 onClick={exportCsv}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
+                disabled={!usingLiveData}
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Download size={12} />
                 CSV
@@ -2862,7 +2910,7 @@ export default function Home() {
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {renderShareActions(true)}
-              <button onClick={exportCsv} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+              <button onClick={exportCsv} disabled={!usingLiveData} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40">
                 <Download size={12} /> CSV
               </button>
               <button onClick={() => void exportExcel()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Excel</button>
@@ -3238,24 +3286,22 @@ export default function Home() {
           onMouseDown={() => setShareEmailFallback(false)}
         >
           <div
-            className="glass w-full max-w-[520px] rounded-[26px] p-5 sm:p-6"
+            className="glass w-full max-w-[620px] rounded-[26px] p-5 sm:p-6"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                   <Mail size={14} />
-                  {lang === "ru" ? "Открыть письмо" : "Open email"}
+                  {lang === "ru" ? "Отправить отчёт по почте" : "Send research report by email"}
                 </div>
                 <h3 className="mt-2 text-lg font-semibold text-[var(--text)]">
-                  {lang === "ru"
-                    ? "Письмо с результатами подготовлено"
-                    : "Your research email is prepared"}
+                  {lang === "ru" ? "Профессиональный отчёт" : "Professional research report"}
                 </h3>
                 <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
                   {lang === "ru"
-                    ? "Если системная почта не открылась автоматически, выберите почтовый сервис ниже."
-                    : "If your default mail app did not open, choose a mail service below."}
+                    ? "Получатель должен быть разрешён в EMAIL_ALLOWED_RECIPIENTS. В письмо войдут HTML-отчёт, XLSX и PDF."
+                    : "The recipient must be allowlisted. The email contains an HTML report plus XLSX and PDF attachments."}
                 </p>
               </div>
               <button
@@ -3267,39 +3313,152 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+            <div className="mt-5">
+              <label className="text-[10px] uppercase tracking-[.16em] text-[var(--text-faint)]">
+                {lang === "ru" ? "Email получателя" : "Recipient email"}
+              </label>
+              <input
+                value={emailRecipient}
+                onChange={(event) => setEmailRecipient(event.target.value)}
+                placeholder="name@example.com"
+                type="email"
+                className="mt-2 w-full rounded-xl border border-[var(--line-soft)] bg-black/10 px-4 py-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] focus:border-[var(--gold)]/40"
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => void sendEmailReport()}
+                disabled={emailSendStatus === "sending" || !emailRecipient.trim()}
+                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Mail size={15} />
+                {emailSendStatus === "sending"
+                  ? (lang === "ru" ? "Отправка…" : "Sending…")
+                  : emailSendStatus === "sent"
+                    ? (lang === "ru" ? "Отправлено ✓" : "Sent ✓")
+                    : (lang === "ru" ? "Отправить отчёт" : "Send report")}
+              </button>
               <a
-                href={"https://mail.google.com/mail/?view=cm&fs=1&su=" + encodeURIComponent("Aurelius research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
+                href={"https://mail.google.com/mail/?view=cm&fs=1&su=" + encodeURIComponent("AURELIUS research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
                 target="_blank"
                 rel="noreferrer"
-                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-soft)]"
               >
                 Gmail
               </a>
               <a
-                href={"https://outlook.live.com/mail/0/deeplink/compose?subject=" + encodeURIComponent("Aurelius research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
+                href={"https://outlook.live.com/mail/0/deeplink/compose?subject=" + encodeURIComponent("AURELIUS research: " + query.slice(0, 80)) + "&body=" + encodeURIComponent(buildShareText())}
                 target="_blank"
                 rel="noreferrer"
-                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-soft)]"
               >
                 Outlook
               </a>
+            </div>
+
+            {emailSendStatus === "error" && liveError ? (
+              <div className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/6 p-3 text-xs leading-5 text-[var(--danger)]">
+                {liveError}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {telegramModalOpen && (
+        <div
+          className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-md"
+          onMouseDown={() => setTelegramModalOpen(false)}
+        >
+          <div
+            className="glass w-full max-w-[620px] rounded-[26px] p-5 sm:p-6"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
+                  <Send size={14} />
+                  Telegram delivery
+                </div>
+                <h3 className="mt-2 text-lg font-semibold text-[var(--text)]">
+                  {lang === "ru" ? "Отправить отчёт в Telegram" : "Send report to Telegram"}
+                </h3>
+                <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                  {telegramDiagnostics?.botUsername
+                    ? "@" + telegramDiagnostics.botUsername
+                    : (lang === "ru" ? "Проверка бота…" : "Checking bot…")}
+                  {" · "}
+                  {lang === "ru" ? "Поле можно оставить пустым для основного Chat ID." : "Leave the field empty to use the server default Chat ID."}
+                </p>
+              </div>
               <button
-                onClick={() => {
-                  void navigator.clipboard?.writeText(buildShareText());
-                  setShareEmailFallback(false);
-                }}
-                className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-3 text-xs text-[var(--text-soft)]"
+                onClick={() => setTelegramModalOpen(false)}
+                className="rounded-xl border border-[var(--line-soft)] p-2 text-[var(--text-muted)]"
+                aria-label="Close Telegram options"
               >
-                {lang === "ru" ? "Скопировать" : "Copy"}
+                <X size={15} />
               </button>
             </div>
 
-            <div className="mt-4 rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-3 text-[10px] leading-4 text-[var(--text-faint)]">
-              {lang === "ru"
-                ? "В письмо попадут запрос, найденные результаты, источники и evidence."
-                : "The email contains the query, results, sources and evidence."}
+            {telegramDiagnostics?.hasBotIdAsTarget ? (
+              <div className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/6 p-4 text-xs leading-5 text-[var(--danger)]">
+                {lang === "ru"
+                  ? "В Vercel указан ID самого бота. Это не Chat ID пользователя. Открой бота, нажми Start, затем укажи настоящий Chat ID пользователя."
+                  : "Vercel contains the bot's own ID. That is not a recipient chat ID. Open the bot, press Start, then configure the user's actual Chat ID."}
+              </div>
+            ) : null}
+
+            <div className="mt-5">
+              <label className="text-[10px] uppercase tracking-[.16em] text-[var(--text-faint)]">
+                {lang === "ru" ? "Chat ID получателей" : "Recipient chat IDs"}
+              </label>
+              <input
+                value={telegramRecipients}
+                onChange={(event) => setTelegramRecipients(event.target.value)}
+                placeholder={lang === "ru" ? "Оставьте пустым или: 123456789, -1001234567890" : "Leave empty or enter: 123456789, -1001234567890"}
+                className="mt-2 w-full rounded-xl border border-[var(--line-soft)] bg-black/10 px-4 py-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] focus:border-[var(--gold)]/40"
+              />
+              <div className="mt-2 text-[10px] leading-4 text-[var(--text-faint)]">
+                {lang === "ru"
+                  ? "Для безопасности получатели должны быть добавлены в TELEGRAM_ALLOWED_CHAT_IDS."
+                  : "For safety, recipient IDs must be added to TELEGRAM_ALLOWED_CHAT_IDS."}
+              </div>
             </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => void sendTelegramReport()}
+                disabled={telegramStatus === "sending" || shownResults.length === 0}
+                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Send size={15} />
+                {telegramStatus === "sending"
+                  ? (lang === "ru" ? "Отправка…" : "Sending…")
+                  : telegramStatus === "sent"
+                    ? (lang === "ru" ? "Отправлено ✓" : "Sent ✓")
+                    : (lang === "ru" ? "Отправить отчёт + XLSX + PDF" : "Send report + XLSX + PDF")}
+              </button>
+            </div>
+
+            {telegramStatus === "error" && telegramDiagnostics?.error ? (
+              <div className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/6 p-4 text-xs leading-5 text-[var(--danger)]">
+                {String(telegramDiagnostics.error)}
+              </div>
+            ) : null}
+
+            {telegramDiagnostics?.targetDiagnostics?.length ? (
+              <div className="mt-4 space-y-2">
+                {telegramDiagnostics.targetDiagnostics.slice(0, 6).map((target: any) => (
+                  <div key={String(target.chatId)} className="flex items-center justify-between rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-3 py-2 text-[10px]">
+                    <span className="text-[var(--text-soft)]">{String(target.chatId)}</span>
+                    <span className={target.valid ? "text-[var(--success)]" : "text-[var(--danger)]"}>
+                      {target.valid ? (target.title || target.type || "OK") : (target.reason || "invalid")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       )}
