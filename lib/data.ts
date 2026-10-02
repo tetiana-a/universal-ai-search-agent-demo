@@ -17,6 +17,13 @@ export type Result = {
   source: string;
   url: string;
   why: string;
+  sourceType?: string;
+  sourceDomain?: string;
+  evidenceQuote?: string;
+  retrievedAt?: string;
+  freshnessDays?: number;
+  confidence?: number;
+  independentVerification?: boolean;
   qualityGate?: {
     gate: "PASS" | "REVIEW" | "FAIL";
     passed: number;

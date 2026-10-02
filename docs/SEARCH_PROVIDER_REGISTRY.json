@@ -1,0 +1,31 @@
+{
+  "lastVerified": "2026-10-02",
+  "providers": [
+    {"id":"openai_web_search","role":"live_web_research","status":"primary"},
+    {"id":"brave","role":"web_search","status":"adapter"},
+    {"id":"exa","role":"semantic_search","status":"adapter"},
+    {"id":"tavily","role":"ai_web_search","status":"adapter"},
+    {"id":"mojeek","role":"independent_web_search","status":"adapter"},
+    {"id":"yandex","role":"regional_search","status":"adapter"},
+    {"id":"naver","role":"regional_search","status":"adapter"},
+    {"id":"dataforseo","role":"serp_aggregation","status":"adapter",
+      "engines":["google","bing","yahoo","baidu","naver","seznam"]}
+  ],
+  "publicCommunityTargets":[
+    "facebook_public_groups_and_pages",
+    "telegram_public_channels_and_pages",
+    "linkedin_public_profiles_companies_and_group_pages",
+    "reddit_communities",
+    "youtube_channels_and_videos",
+    "meetup_communities_and_events",
+    "discord_public_discovery_pages",
+    "quora",
+    "public_forums_and_google_groups"
+  ],
+  "policy": {
+    "captchaBypass": false,
+    "antiDetect": false,
+    "borrowedCredentials": false,
+    "unauthorizedAuthenticationBypass": false
+  }
+}

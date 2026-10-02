@@ -43,6 +43,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
 import type { AppSettings, SettingsTab } from "@/lib/settings";
 import { defaultSettings } from "@/lib/settings";
+import { exportCsv as exportCsvFile, exportXlsx, exportDoc, exportJson, printPdf } from "@/lib/exporters";
 import { resultsByScenario, scenarios, sourceRegistry, tasks } from "@/lib/data";
 
 type Theme = "dark" | "light";
@@ -206,6 +207,10 @@ const labels = {
     xlsx: "XLSX",
     includeEvidence: "Включать Evidence",
     includeMetadata: "Включать Source metadata",
+    exportExcel: "Excel",
+    exportPdf: "PDF",
+    exportGoogleDocs: "Google Docs",
+    exportJson: "JSON",
   },
   en: {
     product: "Universal AI Research Engine",
@@ -355,6 +360,10 @@ const labels = {
     xlsx: "XLSX",
     includeEvidence: "Include Evidence",
     includeMetadata: "Include Source metadata",
+    exportExcel: "Excel",
+    exportPdf: "PDF",
+    exportGoogleDocs: "Google Docs",
+    exportJson: "JSON",
   },
 } as const;
 
@@ -379,8 +388,16 @@ export default function Home() {
     duplicatesRemoved: 0,
     qualified: 0,
     evidenceCoverage: 0,
+    sourcesBlocked: 0,
+    sourcesManualReview: 0,
+    averageConfidence: 0,
   });
   const [liveSources, setLiveSources] = useState<string[]>([]);
+  const [liveSourceRegistry, setLiveSourceRegistry] = useState<any[]>([]);
+  const [accessEvents, setAccessEvents] = useState<any[]>([]);
+  const [searchBranches, setSearchBranches] = useState<string[]>([]);
+  const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
+  const [researchSummary, setResearchSummary] = useState("");
   const [qualityGate, setQualityGate] = useState({
     total: 0,
     pass: 0,
@@ -505,8 +522,16 @@ export default function Home() {
       duplicatesRemoved: 0,
       qualified: 0,
       evidenceCoverage: 0,
+      sourcesBlocked: 0,
+      sourcesManualReview: 0,
+      averageConfidence: 0,
     });
     setLiveSources([]);
+    setLiveSourceRegistry([]);
+    setAccessEvents([]);
+    setSearchBranches([]);
+    setQueryUnderstanding(null);
+    setResearchSummary("");
     setQualityGate({
       total: 0,
       pass: 0,
@@ -534,7 +559,12 @@ export default function Home() {
           query,
           language: lang,
           scenario: detected,
-          maxResults: 8,
+          maxResults: Math.min(12, Math.max(8, Math.floor(settings.maxSources / 5))),
+          depth: settings.defaultDepth,
+          maxSources: settings.maxSources,
+          maxPages: settings.maxPages,
+          multilingual: settings.multilingualSearch,
+          followRelatedLinks: settings.followRelatedLinks,
         }),
       });
 
@@ -569,9 +599,17 @@ export default function Home() {
         duplicatesRemoved: Number(data.stats?.duplicatesRemoved || 0),
         qualified: Number(data.stats?.qualified || 0),
         evidenceCoverage: Number(data.stats?.evidenceCoverage || 0),
+        sourcesBlocked: Number(data.stats?.sourcesBlocked || 0),
+        sourcesManualReview: Number(data.stats?.sourcesManualReview || 0),
+        averageConfidence: Number(data.stats?.averageConfidence || 0),
       });
       setSearchPlan(String(data.searchPlan || ""));
+      setResearchSummary(String(data.summary || ""));
+      setQueryUnderstanding(data.queryUnderstanding || null);
+      setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
       setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
+      setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+      setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
       setQualityGate({
         total: Number(data.qualityGate?.total || 0),
         pass: Number(data.qualityGate?.pass || 0),
@@ -601,6 +639,11 @@ export default function Home() {
       setRunning(false);
       setLiveResults([]);
       setLiveSources([]);
+      setLiveSourceRegistry([]);
+      setAccessEvents([]);
+      setSearchBranches([]);
+      setQueryUnderstanding(null);
+      setResearchSummary("");
       setQualityGate({
         total: 0,
         pass: 0,
@@ -617,10 +660,52 @@ export default function Home() {
         duplicatesRemoved: 0,
         qualified: 0,
         evidenceCoverage: 0,
+        sourcesBlocked: 0,
+        sourcesManualReview: 0,
+        averageConfidence: 0,
       });
     }
   }
+
+  function getExportContext() {
+    return {
+      query,
+      searchPlan,
+      summary: researchSummary,
+      sourceUrls: liveSources,
+      stats: liveStats as Record<string, number>,
+      queryUnderstanding,
+      searchBranches,
+      sourceRegistry: liveSourceRegistry,
+      accessEvents,
+    };
+  }
+
   function exportCsv() {
+    exportCsvFile(shownResults, getExportContext());
+  }
+
+  function exportExcelFile() {
+    exportXlsx(shownResults, getExportContext());
+  }
+
+  function exportPdfFile() {
+    printPdf(shownResults, getExportContext());
+  }
+
+  function exportGoogleDocsFile() {
+    exportDoc(shownResults, getExportContext());
+  }
+
+  function exportJsonFile() {
+    exportJson(shownResults, getExportContext());
+  }
+
+  /* legacy CSV implementation moved to lib/exporters.ts */
+  function legacyExportCsvDisabled() {
+    return;
+  }
+  /*
     const headers = [
       "Title",
       "Location",
@@ -667,6 +752,7 @@ export default function Home() {
     anchor.remove();
     URL.revokeObjectURL(url);
   }
+  */
 
   function startMic() {
     setVoiceError("");
@@ -1283,6 +1369,37 @@ export default function Home() {
           </div>
         )}
 
+        {usingLiveData && (queryUnderstanding || searchBranches.length || researchSummary) ? (
+          <div className="mt-4 grid gap-3 xl:grid-cols-[1.1fr_.9fr]">
+            <div className="glass-soft rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[10px] uppercase tracking-[.16em] text-[var(--gold)]">AI QUERY UNDERSTANDING</div>
+                <div className="text-[10px] text-[var(--text-faint)]">{queryUnderstanding?.entityType || "—"}</div>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {[
+                  ["Intent", queryUnderstanding?.intent],
+                  ["Geography", Array.isArray(queryUnderstanding?.geography) ? queryUnderstanding.geography.join(", ") : ""],
+                  ["Criteria", Array.isArray(queryUnderstanding?.criteria) ? queryUnderstanding.criteria.join(" · ") : ""],
+                  ["Required fields", Array.isArray(queryUnderstanding?.requiredFields) ? queryUnderstanding.requiredFields.join(" · ") : ""],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3">
+                    <div className="text-[9px] uppercase tracking-[.13em] text-[var(--text-faint)]">{label}</div>
+                    <div className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">{String(value || "—")}</div>
+                  </div>
+                ))}
+              </div>
+              {researchSummary ? <div className="mt-3 rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3 text-[10px] leading-4 text-[var(--text-muted)]">{researchSummary}</div> : null}
+            </div>
+            <div className="glass-soft rounded-xl p-4">
+              <div className="text-[10px] uppercase tracking-[.16em] text-[var(--cyan)]">SEARCH BRANCHES</div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {searchBranches.slice(0, 16).map((branch) => <span key={branch} className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-2.5 py-1.5 text-[9px] text-[var(--text-muted)]">{branch}</span>)}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-5 grid gap-2 md:grid-cols-7">
           {researchStages.map((item, index) => {
             const Icon = item.icon;
@@ -1817,6 +1934,47 @@ export default function Home() {
           </section>
         ) : null}
 
+        {usingLiveData && (liveSourceRegistry.length || accessEvents.length) ? (
+          <section className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
+            <div className="glass rounded-[26px] p-6 sm:p-7">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[.18em] text-[var(--gold)]">SOURCE REGISTRY / ACCESS POLICY</div>
+                  <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">{lang === "ru" ? "Что реально было доступно" : "What was actually accessible"}</h3>
+                </div>
+                <span className="rounded-full border border-[var(--line)] px-3 py-1 text-[10px] text-[var(--text-muted)]">{liveSourceRegistry.length}</span>
+              </div>
+              <div className="mt-5 thin-scroll overflow-x-auto">
+                <table className="mobile-table w-full border-collapse">
+                  <thead><tr className="border-b border-[var(--line-soft)] text-left text-[9px] uppercase tracking-[.14em] text-[var(--text-faint)]"><th className="px-3 py-3">Source</th><th className="px-3 py-3">Access</th><th className="px-3 py-3">Method</th><th className="px-3 py-3">Evidence</th><th className="px-3 py-3">Quality</th></tr></thead>
+                  <tbody>{liveSourceRegistry.slice(0, 25).map((source: any) => (
+                    <tr key={`${source.domain}-${source.url}`} className="border-b border-[var(--line-soft)] last:border-0">
+                      <td className="px-3 py-3"><div className="text-[10px] font-medium text-[var(--text-soft)]">{source.name}</div><div className="mt-1 text-[9px] text-[var(--text-faint)]">{source.domain}</div></td>
+                      <td className="px-3 py-3 text-[9px] text-[var(--text-muted)]">{source.accessStatus}</td>
+                      <td className="px-3 py-3 text-[9px] text-[var(--text-muted)]">{source.accessMethod}</td>
+                      <td className="px-3 py-3 text-[9px]">{source.evidenceAvailable ? "YES" : "NO"}</td>
+                      <td className="px-3 py-3 text-[9px] text-[var(--text-muted)]">{source.quality}%</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+            <div className="glass rounded-[26px] p-6 sm:p-7">
+              <div className="text-[10px] uppercase tracking-[.18em] text-[var(--cyan)]">ACCESS EVENTS</div>
+              <div className="mt-4 space-y-2">
+                {accessEvents.slice(0, 14).map((event: any, index: number) => (
+                  <div key={`${event.url}-${index}`} className="rounded-xl border border-[var(--line-soft)] bg-white/[.012] p-3">
+                    <div className="flex items-center gap-2"><span className="rounded-full bg-white/[.04] px-2 py-1 text-[9px] text-[var(--gold-bright)]">{event.status}</span><span className="text-[9px] text-[var(--text-faint)]">{event.method}</span></div>
+                    <div className="mt-2 break-all text-[9px] text-[var(--text-muted)]">{event.url}</div>
+                    <div className="mt-1 text-[9px] leading-4 text-[var(--text-faint)]">{event.reason}</div>
+                    <div className="mt-1 text-[9px] leading-4 text-[var(--cyan)]">Fallback: {event.fallback}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
 <section className="glass rounded-[26px] p-5 sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -2106,13 +2264,15 @@ export default function Home() {
               </button>
             ))}
 
-            <button
-              onClick={exportCsv}
-              className="panel-hover ml-auto inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]"
-            >
-              <Download size={12} />
-              {t.export}
-            </button>
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              <button onClick={exportCsv} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+                <Download size={12} /> CSV
+              </button>
+              <button onClick={exportExcelFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Excel</button>
+              <button onClick={exportPdfFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">PDF</button>
+              <button onClick={exportGoogleDocsFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Google Docs</button>
+              <button onClick={exportJsonFile} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">JSON</button>
+            </div>
           </div>
 
           <div className="thin-scroll overflow-x-auto">
@@ -2368,6 +2528,8 @@ export default function Home() {
                 [t.area, selectedResult.area],
                 [t.price, selectedResult.price],
                 [t.match, `${selectedResult.match}%`],
+                [lang === "ru" ? "Confidence" : "Confidence", `${selectedResult.confidence ?? 0}%`],
+                [lang === "ru" ? "Quality Gate" : "Quality Gate", selectedResult.qualityGate?.gate || "—"],
               ].map(([label, value]) => (
                 <div className="glass-soft rounded-xl p-4" key={String(label)}>
                   <div className="text-[10px] text-[var(--text-faint)]">{String(label)}</div>
@@ -2391,11 +2553,20 @@ export default function Home() {
               <div className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
                 {selectedResult.evidence}
               </div>
+              {selectedResult.evidenceQuote ? (
+                <div className="mt-4 rounded-xl border border-[var(--line-soft)] bg-white/[.02] p-3 text-[11px] leading-5 text-[var(--text-soft)]">
+                  <div className="mb-1 text-[9px] uppercase tracking-[.14em] text-[var(--text-faint)]">Evidence quote</div>
+                  “{selectedResult.evidenceQuote}”
+                </div>
+              ) : null}
               <div className="mt-4 text-[10px] text-[var(--text-faint)]">
-                {t.retrieved}: demo timestamp
+                {t.retrieved}: {selectedResult.retrievedAt || "—"}
               </div>
               <div className="mt-1 text-[10px] text-[var(--text-faint)]">
-                {t.extraction}: public source / browser / parser (demo)
+                {t.extraction}: {selectedResult.sourceType || "web"} · {selectedResult.sourceDomain || "—"}
+              </div>
+              <div className="mt-1 text-[10px] text-[var(--text-faint)]">
+                Freshness: {selectedResult.freshnessDays ?? 0} day(s) · Independent check: {selectedResult.independentVerification ? "YES" : "NO"}
               </div>
             </div>
 
