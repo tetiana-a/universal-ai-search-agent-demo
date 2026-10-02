@@ -17,11 +17,30 @@ export async function POST(request: Request) {
   const query = String(body.query || "").trim();
   if (!query) return NextResponse.json({ error: "Query is required." }, { status: 400 });
   const language = body.language === "en" ? "en" : "ru";
-  const input: BackgroundResearchRequest = { query, language, depth: body.depth || "Deep", maxResults: Math.min(Math.max(Number(body.maxResults || 12), 4), 30), maxSources: Math.min(Math.max(Number(body.maxSources || 50), 5), 120), maxPages: Math.min(Math.max(Number(body.maxPages || 150), 20), 1500), multilingual: body.multilingual !== false, followRelatedLinks: body.followRelatedLinks !== false, sourceMemory: Array.isArray(body.sourceMemory) ? body.sourceMemory.slice(0, 120) : [] };
+  const testMode = body.testMode === true;
+  const input: BackgroundResearchRequest = {
+    query,
+    language,
+    depth: testMode ? "Quick" : (body.depth || "Deep"),
+    maxResults: testMode ? 3 : Math.min(Math.max(Number(body.maxResults || 12), 4), 30),
+    maxSources: testMode ? 8 : Math.min(Math.max(Number(body.maxSources || 50), 5), 120),
+    maxPages: testMode ? 20 : Math.min(Math.max(Number(body.maxPages || 150), 20), 1500),
+    multilingual: testMode ? false : body.multilingual !== false,
+    followRelatedLinks: testMode ? false : body.followRelatedLinks !== false,
+    testMode,
+    sourceMemory: Array.isArray(body.sourceMemory) ? body.sourceMemory.slice(0, 40) : [],
+  };
   const providerCatalog = getSearchProviderCatalog();
   const searchMatrix = buildSearchMatrix(query, language);
   let providerHints: unknown[] = [];
-  if (process.env.SUPPLEMENTAL_SEARCH_ENABLED !== "false") { try { providerHints = await Promise.race([runProviderDiscovery(query, language), new Promise<unknown[]>((resolve) => setTimeout(() => resolve([]), Number(process.env.SUPPLEMENTAL_SEARCH_TIMEOUT_MS || 5000)))]); } catch { providerHints = []; } }
+  if (!testMode && process.env.SUPPLEMENTAL_SEARCH_ENABLED !== "false") {
+    try {
+      providerHints = await Promise.race([
+        runProviderDiscovery(query, language),
+        new Promise<unknown[]>((resolve) => setTimeout(() => resolve([]), Number(process.env.SUPPLEMENTAL_SEARCH_TIMEOUT_MS || 5000))),
+      ]);
+    } catch { providerHints = []; }
+  }
   const basePrompt = language === "ru" ? UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU : UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN;
   const prompt = basePrompt + "\n\nSupplemental provider candidates:\n" + JSON.stringify(providerHints).slice(0, 20000);
   try {
