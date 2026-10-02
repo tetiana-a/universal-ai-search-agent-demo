@@ -37,7 +37,7 @@ function resultRow(item:ExportResult,i:number){
 }
 
 export function exportCsvFile(payload:ResearchExportPayload){
- const rows=[resultHeaders,...payload.results.map(resultRow)];
+ const rows=[resultHeaders,...payload.results.map((item, index) => resultRow(item, index))];
  const csv="\uFEFF"+rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""').replace(/\r?\n/g," ")}"`).join(";")).join("\r\n");
  downloadBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}),`aurelius-${safePart(payload.query||"research")}.csv`);
 }
