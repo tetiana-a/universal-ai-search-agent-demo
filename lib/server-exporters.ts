@@ -117,7 +117,13 @@ export async function createXlsxBuffer(payload: ResearchExportPayload) {
   });
   ws.autoFilter = { from: "A7", to: "T" + Math.max(7, ws.rowCount) };
   if (ws.rowCount > 7) {
-    ws.addTable({ name: "AureliusResults", ref: "A7:T" + ws.rowCount, headerRow: true, style: { theme: "TableStyleMedium2", showRowStripes: true } });
+    ws.addTable({
+      name: "AureliusResults",
+      ref: "A7:T" + ws.rowCount,
+      headerRow: true,
+      columns: HEADERS.map(function(name) { return { name: name }; }),
+      style: { theme: "TableStyleMedium2", showRowStripes: true },
+    });
   }
 
   const summary = workbook.addWorksheet("Executive Summary");
