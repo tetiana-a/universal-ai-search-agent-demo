@@ -18,7 +18,7 @@ export function normalizeResultUrl(value: unknown) {
     const u = new URL(raw);
     u.hash = "";
     for (const key of Array.from(u.searchParams.keys())) {
-      if (/^(utm_|fbclid|gclid|mc_|ref$|ref_src$)/i.test(key)) u.searchParams.delete(key);
+      if (/^(utm_|fbclid|gclid|yclid|srsltid|mc_|ref$|ref_src$)/i.test(key)) u.searchParams.delete(key);
     }
     u.searchParams.sort();
     u.hostname = u.hostname.toLowerCase();
