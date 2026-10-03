@@ -11,6 +11,7 @@ import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
 import { directRead } from "@/lib/direct-reader";
 import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
 import { fieldSchemaFor, heuristicFields } from "@/lib/task-profile";
+import { classifyPage, pageTypeLabel, placeFromQuery, profileFromText, termCoverage, type PageType } from "@/lib/page-kind";
 import { inferResearchKind } from "@/lib/relevance-gate";
 
 export type FreeSearchHit = {
@@ -162,38 +163,60 @@ function firstSentences(text: string, limit = 320) {
 }
 
 // Candidates preserved for Manual Review when AI extraction is unavailable or returns nothing.
+// Fields come only from the page text; the score reflects how much of the query the page covers.
 export function fallbackResults(hits: FreeSearchHit[], input: BackgroundResearchRequest) {
   const kind = inferResearchKind(input.query);
+  const ru = input.language === "ru";
   return hits.slice(0, input.maxResults).map((hit) => {
     const quote = firstSentences(hit.snippet || String(hit.content || ""));
-    const fields = heuristicFields(kind, [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n"));
+    const text = [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n");
+    const fields = heuristicFields(kind, text);
+    const pageType = classifyPage({ url: hit.url, title: hit.title, text }, kind);
+    const entity = pageType === "entity";
+    const place = placeFromQuery(input.query, text);
+    const match = Math.round(30 + 55 * termCoverage(input.query, text)) - (entity ? 0 : 25);
+    const why = entity
+      ? (ru
+          ? (hit.content ? "Страница прочитана, совпадение по запросу. AI-проверка не выполнялась, подтвердите вручную." : "Найдено поиском, страница не прочитана. Проверьте вручную.")
+          : (hit.content ? "Page read and matches the query. Not checked by AI, confirm manually." : "Found by search, page not read. Confirm manually."))
+      : pageTypeLabel(pageType, input.language) + (ru ? ": на странице могут быть подходящие варианты, но сама она не является результатом." : ": the page may list matching items but is not a result itself.");
     return {
       title: hit.title || hit.domain,
       organization: "",
-      specialization: "",
-      geography: "",
+      specialization: profileFromText(kind, text),
+      geography: place,
       contact: "",
       investment_type: "",
       stage: "",
       ticket: "",
-      location: "",
+      location: place,
       area: "",
       price: "",
-      match: 50,
-      confidence: 40,
+      match: Math.max(10, Math.min(85, match)),
+      confidence: (hit.content ? 55 : 35) - (entity ? 0 : 15),
       evidence: quote || "Discovered by live web search; page evidence was not extracted.",
       evidence_quote: quote,
       status: "Manual review",
       source: hit.domain,
       source_type: hit.provider + "_search_candidate",
       url: hit.url,
-      why: "Live search candidate. AI extraction did not confirm it, so it needs manual review.",
+      why,
+      page_type: pageType,
       retrieved_at: hit.retrievedAt,
       freshness_days: 0,
       independent_verification: false,
       ...fields,
     };
   });
+}
+
+// Real entities first, then by score; listing pages and articles go to the end.
+export function rankResults<T extends { page_type?: string; pageType?: string; match?: number }>(items: T[]) {
+  const rank = (item: T) => ((item.page_type || item.pageType || "entity") === "entity" ? 0 : 1);
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => rank(a.item) - rank(b.item) || Number(b.item.match || 0) - Number(a.item.match || 0) || a.index - b.index)
+    .map((x) => x.item);
 }
 
 type ProviderRun = { hits: FreeSearchHit[]; diagnostics: ProviderDiagnostic[] };
@@ -408,9 +431,11 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
         .map((item: any) => {
           const hit = allowedUrls.get(normalizeResultUrl(item?.url))!;
           const pageText = [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n");
-          const ruleFields = heuristicFields(kind, pageText);
+          const place = placeFromQuery(input.query, pageText);
+          const ruleFields: Record<string, string> = { ...heuristicFields(kind, pageText), location: place, geography: place, specialization: profileFromText(kind, pageText) };
           const filled: Record<string, string> = {};
-          for (const [k, v] of Object.entries(ruleFields)) if (!String(item?.[k] || "").trim()) filled[k] = v;
+          for (const [k, v] of Object.entries(ruleFields)) if (v && !String(item?.[k] || "").trim()) filled[k] = v;
+          const pageType: PageType = classifyPage({ url: hit.url, title: hit.title, text: pageText }, kind);
           return {
             ...item,
             ...filled,
@@ -421,6 +446,8 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
             evidence_quote: item?.evidence_quote || "",
             // A result whose page was never read cannot be more than Manual review.
             status: hit.content ? item?.status : "Manual review",
+            page_type: pageType,
+            match: pageType === "entity" ? item?.match : Math.max(0, Number(item?.match || 0) - 20),
             retrieved_at: item?.retrieved_at || hit.retrievedAt,
           };
         })
@@ -437,7 +464,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     rejected = [...rejected, ...fallback.rejected];
     usedCandidateFallback = results.length > 0;
   }
-  results = results.slice(0, input.maxResults);
+  results = rankResults(results).slice(0, input.maxResults);
 
   const outcome = results.length
     ? (usedCandidateFallback ? "candidates_for_review" : "results")
@@ -445,7 +472,9 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
 
   const summaryParts = [
     parsed?.search_summary ? String(parsed.search_summary) : "",
-    aiError ? "AI: " + aiError : "",
+    aiError ? (!configuredAiProviders(edition).length && input.language === "ru"
+      ? "AI-извлечение не подключено: добавьте бесплатный OPENROUTER_API_KEY (или GEMINI_API_KEY / GROQ_API_KEY) в Vercel. Сейчас поля взяты со страниц правилами, результаты нужно проверить вручную."
+      : "AI: " + aiError) : "",
     usedMemoryFallback ? "Search returned nothing; learned sources from memory were re-read." : "",
     usedCandidateFallback ? "Results are live search candidates kept for Manual review." : "",
     hallucinatedUrls > 0 ? hallucinatedUrls + " AI result(s) dropped because their URL was not among retrieved sources." : "",

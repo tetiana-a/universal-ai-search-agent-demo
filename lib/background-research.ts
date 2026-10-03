@@ -287,6 +287,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
     freshnessDays: Math.max(0, Number(item?.freshness_days ?? item?.freshnessDays ?? 0)), independentVerification: Boolean(item?.independent_verification ?? item?.independentVerification),
     relevanceTier: String(item?.relevanceTier || "accept"), relevanceScore: Number(item?.relevanceScore ?? 60), relevanceReason: String(item?.relevanceReason || ""),
     alternateUrls: Array.isArray(item?.alternateUrls) ? item.alternateUrls : [],
+    pageType: String(item?.page_type || item?.pageType || "entity"),
   }));
   const sourcePlans: AccessEscalationPlan[] = [];
   const sourceRegistry: LiveSourceRecord[] = (Array.isArray(parsed.source_registry) ? parsed.source_registry : []).slice(0, input.maxSources).map((s: any) => {
@@ -359,7 +360,7 @@ export function progressCounters(input: { discovered: number; knownSources: numb
     sourcesNotReached: registry.filter((s) => s?.accessStatus === "partial").length,
     resultsFound: Math.max(input.recordsExtracted, results.length),
     afterDedupe: Math.max(results.length, input.afterDedupe),
-    matchingCriteria: results.filter((r) => r?.status === "Verified" || r?.status === "Reviewed").length,
+    matchingCriteria: results.filter((r) => (r?.status === "Verified" || r?.status === "Reviewed") && (r?.pageType || "entity") === "entity").length,
     needsReview: results.filter((r) => r?.status === "Manual review").length,
   };
 }

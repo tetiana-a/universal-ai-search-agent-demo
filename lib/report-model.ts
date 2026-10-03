@@ -2,6 +2,7 @@ import type { ReportResult, ResearchExportPayload } from "@/lib/research-report"
 import { compactText } from "@/lib/research-report";
 import { inferResearchKind, type ResearchKind } from "@/lib/relevance-gate";
 import { fieldSchemaFor, type FieldDef } from "@/lib/task-profile";
+import { pageTypeLabel } from "@/lib/page-kind";
 
 // One description of a finished research run, shared by every output format
 // (CSV, XLSX, PDF, Telegram) so they all show the same columns, counters and labels.
@@ -84,6 +85,12 @@ export function resultName(item: ReportResult) {
 export type StatusTone = "ok" | "partial" | "review" | "fail";
 
 export function statusInfo(item: ReportResult, lang: ReportLanguage): { label: string; tone: StatusTone } {
+  const base = baseStatus(item, lang);
+  const kind = pageTypeLabel(String(item.pageType || ""), lang);
+  return kind ? { label: base.label + " · " + kind, tone: base.tone } : base;
+}
+
+function baseStatus(item: ReportResult, lang: ReportLanguage): { label: string; tone: StatusTone } {
   const gate = String(item.qualityGate?.gate || "").toUpperCase();
   const status = String(item.status || "");
   if (gate === "FAIL") return { label: lang === "ru" ? "Не подтверждено" : "Not confirmed", tone: "fail" };
