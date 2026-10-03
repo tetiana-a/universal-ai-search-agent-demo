@@ -1,4 +1,5 @@
 import { botHandle, loadSettings } from "@/lib/scout/config";
+import { CITY_ALIASES } from "@/lib/scout/extract";
 import { getOne, increment, listAll, logAction, putOne, readCounter, removeMany } from "@/lib/scout/store";
 import { nowIso, randomId, stableId } from "@/lib/scout/text";
 import type { Draft, DraftChannel, Lang, ScoutSettings, StopEntry } from "@/lib/scout/types";
@@ -28,6 +29,13 @@ export function renderTemplate(template: string, vars: Record<string, string | u
   return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// City names are stored in Russian; English and Spanish messages use the local spelling.
+export function cityFor(city: string | undefined, lang: Lang) {
+  if (!city || lang === "ru" || lang === "uk") return city || "";
+  const latin = CITY_ALIASES[city]?.[0];
+  return latin ? latin.charAt(0).toUpperCase() + latin.slice(1) : city;
+}
+
 export function buildFirstMessage(settings: ScoutSettings, templateId: string, lang: Lang, vars: Record<string, string | undefined>) {
   const template = settings.templates[templateId]?.[lang] || settings.templates[templateId]?.en || "";
   return renderTemplate(template, {
@@ -35,8 +43,8 @@ export function buildFirstMessage(settings: ScoutSettings, templateId: string, l
     sender: settings.senderName,
     unsubscribe: settings.unsubscribeText[lang],
     bot: botHandle(),
-    city: vars.city || "",
     ...vars,
+    city: cityFor(vars.city, lang),
   });
 }
 

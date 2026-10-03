@@ -146,9 +146,10 @@ describe("scout qualification dialogue", () => {
 
 describe("scout first-contact rules", () => {
   it("renders approved templates with who/where/why/unsubscribe", () => {
-    const text = buildFirstMessage(DEFAULT_SETTINGS, "investor_first", "es", { name: "Ana", source: "LinkedIn", city: "Valencia" });
+    const text = buildFirstMessage(DEFAULT_SETTINGS, "investor_first", "es", { name: "Ana", source: "LinkedIn", city: "Валенсия" });
     expect(text).toContain(DEFAULT_SETTINGS.companyName);
     expect(text).toContain("LinkedIn");
+    expect(text).toContain("en Valencia");
     expect(firstContactProblems(text, DEFAULT_SETTINGS, "es", "email")).toEqual([]);
     expect(firstContactProblems("hola", DEFAULT_SETTINGS, "es", "email")).toHaveLength(2);
   });
@@ -212,10 +213,10 @@ describe("scout meetings and reminders", () => {
 describe("scout daily run and report", () => {
   it("scans, dedupes, matches, drafts and renders the report in the spec format", async () => {
     await putMany("investors", [investor({ interest: { segments: ["penthouse", "apartment"], geography: ["Испания"], budgetMin: 200000, budgetMax: 400000, goals: [] }, channel: "info@iberia-fo.com" })]);
-    const search = async (queries: string[]) => queries.map((q) => q.includes("Valencia") && !q.includes("inmobiliaria") ? [
+    const search = async (queries: string[]) => ({ errors: [], results: queries.map((q) => q.includes("Valencia") && !q.includes("inmobiliaria") ? [
       { title: "Ático en venta en Ruzafa, Valencia", url: "https://www.idealista.com/inmueble/1/", snippet: "Ático 95 m², 250.000 €" },
       { title: "Ático Ruzafa con terraza", url: "https://www.fotocasa.es/es/comprar/vivienda/valencia/1/d", snippet: "95 m² 251.000 € Valencia Ruzafa" },
-    ] : q.startsWith("t.me") ? [{ title: "Инвестиции в Испанию 2026", url: "https://t.me/invest_spain_2026", snippet: "2 400 subscribers, объекты и сделки, недвижимость Испания" }] : []);
+    ] : q.startsWith("t.me") ? [{ title: "Инвестиции в Испанию 2026", url: "https://t.me/invest_spain_2026", snippet: "2 400 subscribers, объекты и сделки, недвижимость Испания" }] : []) });
     const stats = await runScan({ search, deadlineAt: Date.now() + 60_000 });
     expect(stats.objectsNew).toBe(1);
     expect(stats.objectsMerged).toBeGreaterThanOrEqual(1);

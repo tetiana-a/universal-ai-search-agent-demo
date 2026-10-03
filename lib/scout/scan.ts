@@ -79,20 +79,31 @@ export function monitorQueries(settings: ScoutSettings, watch: WatchItem[]) {
   return [...rotate(groups, 2), ...rotate(platforms, 1), "ECSP crowdfunding licence real estate " + new Date().getUTCFullYear()];
 }
 
-type SearchFn = (queries: string[], lang: string, deadlineAt: number) => Promise<RawHit[][]>;
+// Results are aligned with the queries (an empty list for a query that failed).
+export type SearchOutput = { results: RawHit[][]; errors: string[] };
+type SearchFn = (queries: string[], lang: string, deadlineAt: number) => Promise<SearchOutput>;
 
 // Paid search keys (if any) are used first; otherwise keyless DuckDuckGo/SearXNG.
 export const defaultSearch: SearchFn = async (queries, lang, deadlineAt) => {
-  if (configuredFallbackProviders().length) {
-    const out: RawHit[][] = [];
-    for (const q of queries) {
-      if (Date.now() > deadlineAt - 3000) break;
-      out.push((await searchFallbackProviders(q, lang)).map((h) => ({ title: h.title, url: h.url, snippet: h.snippet, domain: h.domain, publishedAt: h.publishedAt })));
+  const results: RawHit[][] = [];
+  const errors: string[] = [];
+  const paid = configuredFallbackProviders().length > 0;
+  for (const q of queries) {
+    if (Date.now() > deadlineAt - 3000) break;
+    if (paid) {
+      results.push((await searchFallbackProviders(q, lang)).map((h) => ({ title: h.title, url: h.url, snippet: h.snippet, domain: h.domain, publishedAt: h.publishedAt })));
+      continue;
     }
-    return out;
+    const outcomes = await runKeylessSearch([q], lang, deadlineAt);
+    const ok = outcomes.find((o) => o.ok);
+    results.push(ok ? ok.hits.map((h) => ({ title: h.title, url: h.url, snippet: h.snippet, domain: h.domain })) : []);
+    if (!ok) {
+      errors.push(outcomes.map((o) => o.message).filter(Boolean)[0] || "search failed");
+      // A keyless engine asking for a human check will keep refusing: stop instead of hammering it.
+      if (outcomes.some((o) => o.status === "rate_limited") && !process.env.SEARXNG_URL) break;
+    }
   }
-  const outcomes = await runKeylessSearch(queries, lang, deadlineAt);
-  return outcomes.filter((o) => o.ok).map((o) => o.hits.map((h) => ({ title: h.title, url: h.url, snippet: h.snippet, domain: h.domain })));
+  return { results, errors };
 };
 
 export type ScanOptions = { deadlineAt?: number; search?: SearchFn; createDrafts?: boolean; actor?: "cron" | "bot" | "human" };
@@ -135,7 +146,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
   for (const item of oq) byLang.set(item.target.lang, [...(byLang.get(item.target.lang) || []), item]);
   for (const [lang, items] of byLang) {
     if (!timeLeft(25_000)) break;
-    const results = await search(items.map((i) => i.q), lang, deadlineAt - 22_000);
+    const { results, errors } = await search(items.map((i) => i.q), lang, deadlineAt - 22_000);
+    stats.errors.push(...errors);
     results.forEach((hits, index) => {
       stats.queries += 1;
       stats.hits += hits.length;
@@ -168,7 +180,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
   const agencyCandidates: AgencyCard[] = [];
   if (timeLeft(18_000)) {
     const iq = investorQueries(settings);
-    const results = await search(iq, "en", deadlineAt - 14_000);
+    const { results, errors } = await search(iq, "en", deadlineAt - 14_000);
+    stats.errors.push(...errors);
     results.forEach((hits) => { stats.queries += 1; stats.hits += hits.length; for (const hit of hits) { const inv = extractInvestor(hit, "web: " + (hit.domain || "")); if (inv) investorCandidates.push(scoreInvestor(inv, settings)); } });
   }
   const cities = settings.targets.map((t) => t.city).filter(Boolean) as string[];
@@ -180,7 +193,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
       agencyCandidates.push(...places);
     }
     const aq = agencyQueries(settings);
-    const results = await search(aq, "en", deadlineAt - 10_000);
+    const { results, errors } = await search(aq, "en", deadlineAt - 10_000);
+    stats.errors.push(...errors);
     results.forEach((hits) => { stats.queries += 1; stats.hits += hits.length; for (const hit of hits) { const ag = extractAgency(hit, cities, "web: " + (hit.domain || "")); if (ag) agencyCandidates.push(ag); } });
   }
   const newInvestors = dedupeById(existingInvestors, investorCandidates);
@@ -192,7 +206,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
   const discovered: ScoutSource[] = [];
   if (timeLeft(9_000)) {
     const mq = monitorQueries(settings, watch);
-    const results = await search(mq, "en", deadlineAt - 6_000);
+    const { results, errors } = await search(mq, "en", deadlineAt - 6_000);
+    stats.errors.push(...errors);
     const focus = settings.targets.map((t) => t.country);
     results.forEach((hits) => { stats.queries += 1; stats.hits += hits.length; for (const hit of hits) { const src = extractSource(hit, focus); if (src && src.recommendation !== "ignore") discovered.push(src); } });
   }
@@ -222,6 +237,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
   if (options.createDrafts !== false) await draftFirstContacts(settings, newInvestors, newAgencies, added);
   await processReminders(settings);
 
+  stats.errors = Array.from(new Set(stats.errors)).slice(0, 5);
   stats.finishedAt = nowIso();
   await setValue("last-scan", stats);
   await logAction({ actor: options.actor || "cron", action: "scan", detail: `objects +${stats.objectsNew}, investors +${stats.investorsNew}, agencies +${stats.agenciesNew}, sources +${stats.sourcesDiscovered}, queries ${stats.queries}` });

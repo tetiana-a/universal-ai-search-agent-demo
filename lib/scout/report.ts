@@ -83,7 +83,8 @@ export async function collectReport(now = Date.now()): Promise<ReportData> {
   };
 }
 
-const link = (href: string, text: string) => '<a href="' + escapeHtml(href) + '">' + escapeHtml(text) + "</a>";
+// Only http(s) links are rendered; anything else falls back to plain text.
+const link = (href: string, text: string) => /^https?:\/\//i.test(href) ? '<a href="' + escapeHtml(href) + '">' + escapeHtml(text) + "</a>" : escapeHtml(text);
 
 export function renderReport(data: ReportData): { html: string; keyboard: Keyboard } {
   const L: string[] = [];
