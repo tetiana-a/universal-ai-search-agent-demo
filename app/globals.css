@@ -389,6 +389,36 @@ html.light .gold-text {
   transition: box-shadow 1200ms ease;
 }
 
+
+/* Wordmark: bright champagne foil with a slow sheen and a soft halo. */
+.brand-mark {
+  display: inline-block;
+  background: linear-gradient(100deg, #b8924f 0%, #f3dca4 22%, #fff8e4 34%, #e6c47e 48%, #b8924f 62%, #f7e4b2 80%, #c9a96a 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 14px rgba(232, 196, 120, .28)) drop-shadow(0 1px 0 rgba(0, 0, 0, .35));
+  animation: brand-sheen 9s ease-in-out infinite;
+}
+
+html.light .brand-mark {
+  background-image: linear-gradient(100deg, #6e5428 0%, #a9844a 25%, #d8b46c 38%, #8f6f35 55%, #5e4720 75%, #a9844a 100%);
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, .8));
+}
+
+.radio-live .brand-mark {
+  background-image: linear-gradient(100deg, #ffd60a, #ff9500, #ff375f, #af52de, #0a84ff, #00c7be, #34c759, #ffd60a);
+  background-size: 320% 100%;
+  animation-duration: 4s;
+  filter: drop-shadow(0 0 16px rgba(175, 82, 222, .35));
+}
+
+@keyframes brand-sheen {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
 @keyframes float-in {
   from {
     opacity: 0;

@@ -457,6 +457,29 @@ function readSourceMemoryFromStorage() {
   }
 }
 
+function SourceIcon({ src, label, className = "h-5 w-5" }: { src: string; label: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (label.replace(/^\d+\.\s*/, "").trim()[0] || "•").toUpperCase();
+  return (
+    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--line-soft)] bg-[var(--gold)]/8 text-[10px] font-semibold text-[var(--gold-bright)] ${className}`}>
+      {failed ? letter : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" className="h-full w-full object-contain" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      )}
+    </span>
+  );
+}
+
+function countLocalSourceMemory() {
+  try {
+    const raw = window.localStorage.getItem("aurelius-source-memory-v1");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ru");
   const [theme, setTheme] = useState<Theme>("dark");
@@ -536,6 +559,7 @@ export default function Home() {
   const [aiMode, setAiMode] = useState<"free" | "paid" | "unknown">("unknown");
   const [aiModel, setAiModel] = useState("");
   const [memoryStatus, setMemoryStatus] = useState<"persistent" | "local" | "unknown">("unknown");
+  const [memoryCount, setMemoryCount] = useState<number | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -581,9 +605,12 @@ export default function Home() {
       .then((data) => {
         if (cancelled) return;
         setMemoryStatus(data?.persistent ? "persistent" : "local");
+        setMemoryCount(Math.max(Number(data?.sourceCount) || 0, countLocalSourceMemory()));
       })
       .catch(() => {
-        if (!cancelled) setMemoryStatus("unknown");
+        if (cancelled) return;
+        setMemoryStatus("unknown");
+        setMemoryCount(countLocalSourceMemory());
       });
     return () => {
       cancelled = true;
@@ -1013,7 +1040,9 @@ export default function Home() {
         const key = String(item?.url || item?.domain || item?.name || "").trim().toLowerCase();
         if (key) merged.set(key, { ...item, lastChecked: item?.lastChecked || new Date().toISOString() });
       });
-      window.localStorage.setItem("aurelius-source-memory-v1", JSON.stringify(Array.from(merged.values()).slice(-500)));
+      const stored = Array.from(merged.values()).slice(-500);
+      window.localStorage.setItem("aurelius-source-memory-v1", JSON.stringify(stored));
+      setMemoryCount((count) => Math.max(count ?? 0, stored.length));
     } catch { return; }
   }
 
@@ -1574,7 +1603,7 @@ export default function Home() {
             {icon}
           </div>
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-[var(--text-soft)]">{title}</h2>
+            <h2 className="font-sans text-sm font-semibold tracking-normal text-[var(--text-soft)]">{title}</h2>
             {description ? (
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{description}</p>
             ) : null}
@@ -2438,7 +2467,9 @@ export default function Home() {
             ) : shownResults.length === 0 ? (
               <div className="p-8 text-center text-sm text-[var(--text-muted)]">{t.noResults}</div>
             ) : (
-              <table className="mobile-table w-full border-collapse">
+              <>
+              {renderResultCards()}
+              <table className="mobile-table hidden w-full border-collapse md:table">
                 <thead>
                   <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.15em] text-[var(--text-faint)]">
                     <th className="px-6 py-4 font-medium">Result</th>
@@ -2494,6 +2525,7 @@ export default function Home() {
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         </section>
@@ -2579,12 +2611,7 @@ export default function Home() {
                       rel="noreferrer"
                       className="group flex items-center gap-3 rounded-xl border border-[var(--line-soft)] bg-white/[.012] px-3 py-3 hover:border-[var(--line)]"
                     >
-                      <img
-                        src={sourceFavicon(host)}
-                        alt=""
-                        className="h-5 w-5 shrink-0"
-                        referrerPolicy="no-referrer"
-                      />
+                      <SourceIcon src={sourceFavicon(host)} label={host} />
                       <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-soft)]">
                         {host}
                       </span>
@@ -2760,7 +2787,7 @@ export default function Home() {
               key={task.id}
               className={`glass panel-hover rounded-2xl p-5 float-in float-in-delay-${Math.min(index + 1, 3)}`}
             >
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(340px,440px)_auto] lg:items-center lg:gap-8">
                 <div className="flex min-w-0 items-start gap-4">
                   <div className="icon-lift grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[var(--line)] bg-[var(--gold)]/7 text-[var(--gold)]">
                     {task.status === "Running" ? <Activity size={18} /> : task.status === "Completed" ? <Check size={18} /> : <CirclePause size={18} />}
@@ -2771,7 +2798,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 lg:min-w-[420px]">
+                <div className="grid grid-cols-3 gap-4">
                   {[
                     [t.status, statusLabel(task.status)],
                     [t.duration, task.duration],
@@ -2831,7 +2858,7 @@ export default function Home() {
           <div className="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--cyan)]">
             LIVE SEARCH SOURCES
           </div>
-          <h2 className="mt-2 text-lg font-semibold text-[var(--text)]">
+          <h2 className="mt-2 text-2xl font-medium text-[var(--text)]">
             {lang === "ru" ? "Источники последнего реального поиска" : "Sources from the latest live search"}
           </h2>
           <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
@@ -2862,7 +2889,8 @@ export default function Home() {
         </div>
 
 <div className="glass overflow-hidden rounded-[26px]">
-          <div className="thin-scroll overflow-x-auto">
+          {renderSourceCards()}
+          <div className="thin-scroll hidden overflow-x-auto md:block">
             <table className="mobile-table w-full border-collapse">
               <thead>
                 <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">
@@ -2887,12 +2915,7 @@ export default function Home() {
                   >
                     <td className="px-4 py-4 align-top">
                       <div className="flex gap-2">
-                        <img
-                          src={sourceFavicon(source.domain)}
-                          alt=""
-                          className="mt-0.5 h-5 w-5 shrink-0"
-                          referrerPolicy="no-referrer"
-                        />
+                        <SourceIcon src={sourceFavicon(source.domain)} label={source.name} className="mt-0.5 h-5 w-5" />
                         <div>
                           <div className="max-w-[230px] text-xs font-semibold text-[var(--text-soft)]">
                             {index + 1}. {source.name}
@@ -2997,7 +3020,8 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="thin-scroll overflow-x-auto">
+          {renderResultCards()}
+          <div className="thin-scroll hidden overflow-x-auto md:block">
             <table className="mobile-table w-full border-collapse">
               <thead>
                 <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.15em] text-[var(--text-faint)]">
@@ -3044,6 +3068,78 @@ export default function Home() {
     );
   }
 
+  function renderResultCards() {
+    return (
+      <div className="divide-y divide-[var(--line-soft)] md:hidden">
+        {shownResults.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setSelectedResult(item)}
+            className="flex w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-white/[.015]"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm font-medium leading-5 text-[var(--text-soft)]">{item.title}</div>
+                <span className="shrink-0 rounded-full bg-[var(--success)]/8 px-2.5 py-1 text-[10px] text-[var(--success)]">
+                  {item.match}%
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11.5px] leading-5 text-[var(--text-muted)]">
+                {[item.location, item.area, item.price].filter(Boolean).join(" · ")}
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
+                <span className="truncate text-[var(--gold-bright)]">{item.source}</span>
+                <span className="shrink-0 text-[var(--text-faint)]">{item.status}</span>
+              </div>
+            </div>
+            <ArrowUpRight size={14} className="mt-1 shrink-0 text-[var(--text-faint)]" />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderSourceCards() {
+    return (
+      <div className="divide-y divide-[var(--line-soft)] md:hidden">
+        {sourceRegistry.map((source, index) => (
+          <a
+            key={`${source.name}-${source.url}-card`}
+            href={source.url}
+            target="_blank"
+            rel="noreferrer"
+            className="flex gap-3 px-4 py-4 transition hover:bg-white/[.015]"
+          >
+            <SourceIcon src={sourceFavicon(source.domain)} label={source.name} className="mt-0.5 h-6 w-6" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-[13px] font-semibold leading-5 text-[var(--text-soft)]">
+                  {index + 1}. {source.name}
+                </div>
+                <span className="shrink-0 rounded-full bg-[var(--success)]/8 px-2 py-1 text-[10px] text-[var(--success)]">
+                  {source.quality}%
+                </span>
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">
+                {[source.category, source.access, source.method].filter(Boolean).join(" · ")}
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-[var(--text-faint)]">{source.dataAvailable}</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
+                <span className={`rounded-full px-2 py-0.5 ${source.decision === "Keep" ? "bg-[var(--success)]/8 text-[var(--success)]" : "bg-[var(--warning)]/8 text-[var(--warning)]"}`}>
+                  {source.decision}
+                </span>
+                <span className="text-[var(--warning)]">{source.robotsTerms}</span>
+                <span className="text-[var(--text-faint)]">{source.cost}</span>
+              </div>
+            </div>
+            <ExternalLink size={13} className="mt-1 shrink-0 text-[var(--gold-bright)]" />
+          </a>
+        ))}
+      </div>
+    );
+  }
+
   function renderActiveView() {
     if (activeNav === "tasks") return renderTasks();
     if (activeNav === "sources") return renderSources();
@@ -3066,8 +3162,11 @@ export default function Home() {
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
               <div>
-                <div className="font-display gold-text text-[26px] font-medium leading-none tracking-[.22em]">AURELIUS</div>
-                <div className="mt-2 text-[11px] leading-4 tracking-[.04em] text-[var(--text-muted)]">{t.product}</div>
+                <div className="brand-mark font-display text-[32px] font-semibold leading-none tracking-[.2em]">AURELIUS</div>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
+                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">{t.product}</span>
+                </div>
               </div>
               <button
                 onClick={() => setMobileOpen(false)}
@@ -3107,14 +3206,37 @@ export default function Home() {
               })}
             </nav>
 
-            <div className="glass mt-8 rounded-2xl p-4 panel-hover">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("sources");
+                setMobileOpen(false);
+              }}
+              className="glass panel-hover group mt-8 w-full rounded-2xl p-4 text-left"
+              title={lang === "ru" ? "Открыть источники" : "Open sources"}
+            >
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                 <ShieldCheck size={14} />
                 {t.memory}
+                <ArrowUpRight size={13} className="ml-auto text-[var(--text-faint)] transition group-hover:text-[var(--gold-bright)]" />
               </div>
-              <div className="mt-3 text-2xl font-semibold text-[var(--text)]">12,480</div>
-              <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{t.known}</div>
-            </div>
+              <div className="font-display mt-3 text-[34px] font-medium leading-none lining-nums tabular-nums text-[var(--text)]">
+                {memoryCount === null ? "…" : memoryCount.toLocaleString(lang === "ru" ? "ru-RU" : "en-US")}
+              </div>
+              <div className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                {memoryCount === 0
+                  ? (lang === "ru" ? "Пополнится после первого поиска" : "Fills up after your first search")
+                  : t.known}
+              </div>
+              <div className="mt-3 flex items-center gap-1.5 text-[10px] text-[var(--text-faint)]">
+                <span className={`h-1.5 w-1.5 rounded-full ${memoryStatus === "persistent" ? "bg-[var(--success)]" : memoryStatus === "local" ? "bg-[var(--gold)]" : "bg-[var(--text-faint)]"}`} />
+                {memoryStatus === "persistent"
+                  ? (lang === "ru" ? "Постоянное хранилище" : "Persistent storage")
+                  : memoryStatus === "local"
+                    ? (lang === "ru" ? "Хранится в этом браузере" : "Stored in this browser")
+                    : (lang === "ru" ? "Проверяю…" : "Checking…")}
+              </div>
+            </button>
 
             <div className="mt-auto space-y-1">
               <button
@@ -3166,9 +3288,9 @@ export default function Home() {
                 <PanelLeft size={18} />
               </button>
 
-              <div className="hidden items-center gap-2 text-xs text-[var(--text-faint)] sm:flex">
-                <span>{t.workspace}</span>
-                <span>/</span>
+              <div className="hidden items-center gap-2 whitespace-nowrap text-xs text-[var(--text-faint)] sm:flex">
+                <span className="hidden 2xl:inline">{t.workspace}</span>
+                <span className="hidden 2xl:inline">/</span>
                 <span className="text-[var(--text-soft)]">
                   {lang === "ru"
                     ? nav.find((item) => item.key === activeNav)?.ru
@@ -3177,13 +3299,13 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 [&>*]:whitespace-nowrap">
-              <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] md:flex">
+            <div className="flex min-w-0 items-center gap-1.5 sm:gap-2 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
+              <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] 2xl:flex">
                 <Command size={13} /> K
               </div>
 
               <div
-                className={`group relative hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex ${
+                className={`group relative hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] xl:flex ${
                   aiMode === "free"
                     ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
                     : aiMode === "paid"
@@ -3200,7 +3322,7 @@ export default function Home() {
 
               <div
                 className={
-                  "hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex " +
+                  "hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] 2xl:flex " +
                   (memoryStatus === "persistent"
                     ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
                     : memoryStatus === "local"
@@ -3239,9 +3361,9 @@ export default function Home() {
                   {planInfo.usage ? <span className="opacity-80">{planInfo.usage.used}/{planInfo.usage.limit}</span> : null}
                 </button>
               ) : null}
-              <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-3 py-1.5 text-[11px] text-[var(--gold-bright)]">
+              <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-2.5 py-1.5 text-[11px] text-[var(--gold-bright)] sm:px-3" title={t.live}>
                 <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
-                {t.live}
+                <span className="hidden lg:inline">{t.live}</span>
               </div>
 
               <button
@@ -3251,7 +3373,7 @@ export default function Home() {
                 title={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
               >
                 <RadioIcon size={15} className="shrink-0" />
-                <span className="hidden max-w-[86px] truncate md:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
+                <span className="hidden max-w-[86px] truncate xl:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
               </button>
 
               <button
@@ -3299,7 +3421,7 @@ export default function Home() {
                 <div className="text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                   {t.details}
                 </div>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text)]">
+                <h2 className="mt-2 text-3xl font-medium text-[var(--text)]">
                   {selectedResult.title}
                 </h2>
               </div>
@@ -3697,7 +3819,7 @@ export default function Home() {
         <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
       </audio>
 
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 hidden -translate-x-1/2 rounded-full border md:block border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 hidden -translate-x-1/2 rounded-full border xl:block border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
         <span className="inline-flex items-center gap-2">
           <Sparkles size={12} className="text-[var(--gold)]" />
           {t.voice} • {t.noRealTime}
