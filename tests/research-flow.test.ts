@@ -37,6 +37,9 @@ beforeEach(() => {
   vi.stubEnv("PLAN_ENFORCEMENT", "off");
   vi.stubEnv("JINA_API_KEY", "jina_test_key");
   vi.stubEnv("OPENROUTER_API_KEY", "or_test_key");
+  vi.stubEnv("KEYLESS_SEARCH_PAUSE_MS", "0");
+  vi.stubEnv("DIRECT_READ", "off");
+  for (const key of ["GEMINI_API_KEY", "GROQ_API_KEY", "SEARXNG_URL", "PRO_OPENROUTER_MODEL", "OPENAI_API_KEY"]) vi.stubEnv(key, "");
   for (const key of ["BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY", "MOJEEK_API_KEY", "YANDEX_SEARCH_API_KEY", "NAVER_CLIENT_ID", "DATAFORSEO_LOGIN", "KV_REST_API_URL", "UPSTASH_REDIS_REST_URL"]) vi.stubEnv(key, "");
 });
 
@@ -46,8 +49,9 @@ afterEach(() => {
 });
 
 describe("research flow: explicit errors instead of empty results", () => {
-  it("returns a clear 503 when JINA_API_KEY and every fallback provider are missing", async () => {
+  it("returns a clear 503 when keyless search is off and no search key is configured", async () => {
     vi.stubEnv("JINA_API_KEY", "");
+    vi.stubEnv("KEYLESS_SEARCH", "off");
     const calls = mockFetch([]);
     const response = await POST(request());
     const body = await response.json();
@@ -176,8 +180,10 @@ describe("plans", () => {
     vi.stubEnv("PLAN_ENFORCEMENT", "on");
     vi.stubEnv("FREE_DAILY_TASKS", "1");
     vi.stubEnv("JINA_API_KEY", "");
+    vi.stubEnv("KEYLESS_SEARCH", "off");
     mockFetch([]);
     expect((await POST(request())).status).toBe(503);
+    vi.stubEnv("KEYLESS_SEARCH", "");
     vi.stubEnv("JINA_API_KEY", "jina_test_key");
     mockFetch([{ match: (u) => u.startsWith("https://s.jina.ai/"), respond: () => json({ code: 200, data: [] }) }]);
     expect((await POST(request())).status).toBe(200);

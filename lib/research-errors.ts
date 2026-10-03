@@ -15,7 +15,7 @@ export type ResearchErrorCode =
 
 export type ProviderDiagnostic = {
   provider: string;
-  status: "ok" | "empty" | "error" | "not_configured" | "skipped";
+  status: "ok" | "empty" | "error" | "not_configured" | "skipped" | "rate_limited";
   httpStatus?: number;
   hits?: number;
   message?: string;

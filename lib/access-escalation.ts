@@ -131,7 +131,7 @@ export function buildAccessEscalationPlan(input: {
     };
   }
 
-  if (input.httpStatus === 403 || /cloudflare|access denied|forbidden|bot protection/.test(text)) {
+  if (input.httpStatus === 403 || input.status === "blocked" || /cloudflare|access denied|forbidden|bot protection/.test(text)) {
     return {
       status: "blocked",
       nextStep: "permitted_browser",
@@ -155,6 +155,16 @@ export function buildAccessEscalationPlan(input: {
       steps: ORDER,
       reason: reason || ("HTTP " + input.httpStatus + ". Use an alternate allowed source."),
     };
+  }
+
+  // A source is only "checked" when evidence was actually retrieved; anything else
+  // keeps the status it was reported with.
+  const declared = String(input.status || "").trim().toLowerCase();
+  if (declared === "unavailable" || declared === "not_automatable") {
+    return { status: declared, nextStep: "alternate_source", steps: ORDER, reason: reason || "The page could not be read automatically." };
+  }
+  if (declared === "partial") {
+    return { status: "partial", nextStep: "public_web_html_json", steps: ORDER, reason: reason || "Discovered, not yet read." };
   }
 
   return {

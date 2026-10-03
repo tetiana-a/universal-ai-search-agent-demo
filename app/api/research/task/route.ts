@@ -9,6 +9,8 @@ import { errorBody } from "@/lib/research-errors";
 import { checkResearchQuota, clampToPlan, publicPlanInfo, refundResearchQuota, resolvePlan } from "@/lib/plans";
 import { taskSpecificRules } from "@/lib/research-prompts";
 import { isSafePublicUrl } from "@/lib/url-safety";
+import { editionFor, pipelineFor, researchMode } from "@/lib/editions";
+import { applyClarifications } from "@/lib/task-profile";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -34,14 +36,32 @@ async function readJson(request: Request) {
   try { return { ok: true as const, body: await request.json() }; } catch { return { ok: false as const, body: null }; }
 }
 
+// Continuation state comes from the browser: keep only a bounded list of public URLs.
+function sanitizeContinuation(value: any) {
+  if (!value || typeof value !== "object") return undefined;
+  const round = Math.max(0, Math.min(50, Math.floor(Number(value.round || 0))));
+  const excludeUrls = (Array.isArray(value.excludeUrls) ? value.excludeUrls : [])
+    .slice(0, 400)
+    .map((u: unknown) => String(u || "").trim().slice(0, 600))
+    .filter((u: string) => isSafePublicUrl(u));
+  return round > 0 || excludeUrls.length ? { round, excludeUrls } : undefined;
+}
+
+function sanitizeAnswers(value: any): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value).slice(0, 8)) out[String(k).slice(0, 40)] = String(v ?? "").slice(0, 200);
+  return out;
+}
+
 function taskId(responseId: string) { return "AURE-" + responseId.replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase(); }
 
 export async function POST(request: Request) {
-  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
   const parsed = await readJson(request);
   if (!parsed.ok) return NextResponse.json({ error: "Invalid JSON request body.", code: "INVALID_REQUEST" }, { status: 400 });
   const body: any = parsed.body || {};
-  const query = String(body?.query || "").trim();
+  const language = body?.language === "en" ? "en" : "ru";
+  const query = applyClarifications(String(body?.query || ""), sanitizeAnswers(body?.clarifications), language);
   if (!query) return NextResponse.json({ error: "Query is required.", code: "INVALID_REQUEST" }, { status: 400 });
   if (query.length > 2000) return NextResponse.json({ error: "Query is too long (max 2000 characters).", code: "INVALID_REQUEST" }, { status: 400 });
 
@@ -52,7 +72,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...e.body, plan: publicPlanInfo(plan), usage: quota.usage }, { status: e.status });
   }
   const planInfo = { ...publicPlanInfo(plan), usage: quota.usage };
-  const language = body?.language === "en" ? "en" : "ru";
+  const provider = pipelineFor(plan);
+  const edition = editionFor(plan);
+  const continuation = sanitizeContinuation(body?.continuation);
   const testMode = body?.testMode === true;
   const limits = clampToPlan(plan, { depth: testMode ? "Quick" : body?.depth, maxResults: body?.maxResults, maxSources: body?.maxSources, maxPages: body?.maxPages });
 
@@ -63,14 +85,17 @@ export async function POST(request: Request) {
         query,
         language,
         depth: limits.depth,
-        maxResults: testMode ? 3 : Math.min(limits.maxResults, 15),
-        maxSources: testMode ? 8 : Math.min(limits.maxSources, 30),
+        maxResults: testMode ? 3 : Math.min(limits.maxResults, edition === "pro" ? 30 : 15),
+        maxSources: testMode ? 8 : Math.min(limits.maxSources, edition === "pro" ? 60 : 30),
         maxPages: testMode ? 20 : Math.min(limits.maxPages, 200),
         multilingual: testMode ? false : body?.multilingual !== false,
         followRelatedLinks: testMode ? false : body?.followRelatedLinks !== false,
         testMode,
         deadlineAt: Date.now() + (maxDuration - 6) * 1000,
         sourceMemory: [...memoryContext.sources, ...sanitizeSourceMemory(body?.sourceMemory)].slice(0, 60),
+        edition,
+        continuation,
+        knownSourceCount: memoryContext.sources.length,
       };
       const result = await runFreeResearch(input);
       await Promise.race([
@@ -134,8 +159,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
-  if (provider === "free") return NextResponse.json({ error: "Free research tasks are completed in the initial request; polling is not required." }, { status: 400 });
+  const provider = researchMode() === "free" || !process.env.OPENAI_API_KEY ? "free" : "paid";
+  if (provider === "free" || new URL(request.url).searchParams.get("responseId")?.startsWith("free_")) return NextResponse.json({ error: "Free research tasks are completed in the initial request; polling is not required." }, { status: 400 });
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 503 });
   const url = new URL(request.url); const responseId = url.searchParams.get("responseId")?.trim();
@@ -174,8 +199,8 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
-  if (provider === "free") return NextResponse.json({ live: true, cancelled: true, status: "cancelled" }, { headers: { "Cache-Control": "no-store" } });
+  const provider = researchMode() === "free" || !process.env.OPENAI_API_KEY ? "free" : "paid";
+  if (provider === "free" || new URL(request.url).searchParams.get("responseId")?.startsWith("free_")) return NextResponse.json({ live: true, cancelled: true, status: "cancelled" }, { headers: { "Cache-Control": "no-store" } });
   const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 503 });
   const url = new URL(request.url); const responseId = url.searchParams.get("responseId")?.trim();
   if (!responseId) return NextResponse.json({ error: "responseId is required." }, { status: 400 });

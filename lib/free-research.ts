@@ -1,4 +1,4 @@
-import { BACKGROUND_RESEARCH_SCHEMA, type BackgroundResearchRequest, normalizeCompletedResearch } from "@/lib/background-research";
+import { BACKGROUND_RESEARCH_SCHEMA, type BackgroundResearchRequest, normalizeCompletedResearch, progressCounters } from "@/lib/background-research";
 import { UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN, UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU, taskSpecificRules } from "@/lib/research-prompts";
 import { buildSearchMatrix } from "@/lib/search-matrix";
 import { buildAccessEscalationPlan } from "@/lib/access-escalation";
@@ -7,6 +7,11 @@ import { configuredFallbackProviders, searchFallbackProviders } from "@/lib/prov
 import { ResearchError, type ProviderDiagnostic } from "@/lib/research-errors";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { normalizeResultUrl } from "@/lib/result-quality";
+import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
+import { directRead } from "@/lib/direct-reader";
+import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
+import { fieldSchemaFor, heuristicFields } from "@/lib/task-profile";
+import { inferResearchKind } from "@/lib/relevance-gate";
 
 export type FreeSearchHit = {
   title: string;
@@ -19,7 +24,7 @@ export type FreeSearchHit = {
   readStatus?: ReadStatus;
 };
 
-type ReadStatus = "checked" | "unavailable" | "blocked" | "rate_limited" | "skipped";
+type ReadStatus = "checked" | "unavailable" | "blocked" | "rate_limited" | "skipped" | "policy_restricted" | "auth_required";
 
 function host(url: string) {
   try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
@@ -115,12 +120,17 @@ async function jinaRead(url: string): Promise<{ content: string; status: ReadSta
   } catch {
     result = { content: "", status: "unavailable" };
   }
+  // Keyless Jina is rate limited quickly; fall back to a robots-aware direct read.
+  if (result.status !== "checked" && result.status !== "blocked" && process.env.DIRECT_READ !== "off") {
+    const direct = await directRead(url);
+    if (direct.status === "checked" || result.status === "unavailable") result = { content: direct.content, status: direct.status, httpStatus: direct.httpStatus };
+  }
   READ_CACHE.set(url, { at: Date.now(), content: result.content, status: result.status });
   if (READ_CACHE.size > 300) READ_CACHE.delete(READ_CACHE.keys().next().value as string);
   return result;
 }
 
-function buildBranches(query: string, language: "ru" | "en", testMode = false, sourceMemory: BackgroundResearchRequest["sourceMemory"] = []) {
+function buildBranches(query: string, language: "ru" | "en", testMode = false, sourceMemory: BackgroundResearchRequest["sourceMemory"] = [], edition: "free" | "pro" = "free", round = 0) {
   const matrix = buildSearchMatrix(query, language);
   const branches = matrix
     .sort((a, b) => b.priority - a.priority)
@@ -132,26 +142,15 @@ function buildBranches(query: string, language: "ru" | "en", testMode = false, s
       const domain = String(source?.domain || "").trim();
       return domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain) ? [`site:${domain} ${query}`] : [];
     });
-  const limit = testMode ? 3 : 6;
+  const limit = testMode ? 3 : edition === "pro" ? 10 : 6;
+  const pool = [...new Set([query, ...branches])];
+  // A continuation round moves on to search branches that earlier rounds did not use.
+  const offset = round > 0 && pool.length > limit ? (round * (limit - 1)) % pool.length : 0;
+  const rotated = offset ? [...pool.slice(offset), ...pool.slice(0, offset)] : pool;
   // Keep one learned-source branch in the budget so memory is actually reused.
-  const core = [...new Set([query, ...branches])].slice(0, memoryBranches.length ? limit - 1 : limit);
-  return [...new Set([...core, ...memoryBranches.slice(0, 1)])].slice(0, limit);
-}
-
-function extractJsonText(response: any) {
-  const message = response?.choices?.[0]?.message;
-  if (typeof message?.content === "string") return message.content.trim();
-  if (Array.isArray(message?.content)) return message.content.map((part: any) => String(part?.text || "")).join("").trim();
-  return "";
-}
-
-function cleanJsonText(text: string) {
-  const trimmed = text.trim().replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "");
-  try { return JSON.parse(trimmed); } catch {}
-  const first = trimmed.indexOf("{");
-  const last = trimmed.lastIndexOf("}");
-  if (first >= 0 && last > first) return JSON.parse(trimmed.slice(first, last + 1));
-  throw new Error("Free AI returned invalid structured output.");
+  const core = rotated.slice(0, memoryBranches.length ? limit - 1 : limit);
+  const memoryPick = memoryBranches.length ? memoryBranches[round % memoryBranches.length] : undefined;
+  return [...new Set([...core, ...(memoryPick ? [memoryPick] : [])])].slice(0, limit);
 }
 
 function firstSentences(text: string, limit = 320) {
@@ -164,8 +163,10 @@ function firstSentences(text: string, limit = 320) {
 
 // Candidates preserved for Manual Review when AI extraction is unavailable or returns nothing.
 export function fallbackResults(hits: FreeSearchHit[], input: BackgroundResearchRequest) {
+  const kind = inferResearchKind(input.query);
   return hits.slice(0, input.maxResults).map((hit) => {
     const quote = firstSentences(hit.snippet || String(hit.content || ""));
+    const fields = heuristicFields(kind, [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n"));
     return {
       title: hit.title || hit.domain,
       organization: "",
@@ -190,13 +191,14 @@ export function fallbackResults(hits: FreeSearchHit[], input: BackgroundResearch
       retrieved_at: hit.retrievedAt,
       freshness_days: 0,
       independent_verification: false,
+      ...fields,
     };
   });
 }
 
 type ProviderRun = { hits: FreeSearchHit[]; diagnostics: ProviderDiagnostic[] };
 
-async function discoverCandidates(queries: string[], language: "ru" | "en"): Promise<ProviderRun> {
+async function discoverCandidates(queries: string[], language: "ru" | "en", deadlineAt: number): Promise<ProviderRun> {
   const diagnostics: ProviderDiagnostic[] = [];
   const hits: FreeSearchHit[] = [];
   const key = jinaKey();
@@ -216,6 +218,27 @@ async function discoverCandidates(queries: string[], language: "ru" | "en"): Pro
     });
   } else {
     diagnostics.push({ provider: "jina", status: "not_configured", message: "JINA_API_KEY is not set." });
+  }
+
+  // Keyless search keeps the Free edition working without any paid or registered key.
+  const keyless = keylessProviders();
+  if (keyless.length && (!key || hits.length < 5 || process.env.KEYLESS_SEARCH === "always")) {
+    const outcomes = await runKeylessSearch(queries, language, Math.min(deadlineAt - 25_000, Date.now() + 22_000));
+    for (const provider of keyless) {
+      const mine = outcomes.filter((o) => o.provider === provider);
+      if (!mine.length) continue;
+      const providerHits = mine.flatMap((o) => o.hits);
+      const failed = mine.find((o) => !o.ok);
+      const anyOk = mine.some((o) => o.ok);
+      diagnostics.push({
+        provider,
+        status: !anyOk ? (failed?.status === "rate_limited" ? "rate_limited" : "error") : providerHits.length ? "ok" : "empty",
+        httpStatus: !anyOk ? failed?.httpStatus : undefined,
+        hits: providerHits.length,
+        message: failed?.message,
+      });
+      for (const hit of providerHits) hits.push({ ...hit, retrievedAt: new Date().toISOString() });
+    }
   }
 
   const supplemental = process.env.SUPPLEMENTAL_SEARCH_ENABLED === "true";
@@ -245,12 +268,12 @@ async function discoverCandidates(queries: string[], language: "ru" | "en"): Pro
 }
 
 function assertSearchConfigured(language: "ru" | "en") {
-  if (jinaKey() || configuredFallbackProviders().length) return;
+  if (jinaKey() || configuredFallbackProviders().length || keylessProviders().length) return;
   throw new ResearchError(
     "JINA_API_KEY_MISSING",
     language === "ru"
-      ? "Поиск не настроен: не задан JINA_API_KEY и нет ни одного запасного поискового провайдера (Brave, Tavily, Exa, Serper…). Добавьте JINA_API_KEY в Vercel → Settings → Environment Variables и сделайте Redeploy."
-      : "Search is not configured: JINA_API_KEY is missing and no fallback search provider (Brave, Tavily, Exa, Serper…) is configured. Add JINA_API_KEY in Vercel → Settings → Environment Variables and redeploy.",
+      ? "Поиск не настроен: бесплатный поиск без ключа выключен (KEYLESS_SEARCH=off), не задан JINA_API_KEY и нет ни одного запасного поискового провайдера (Brave, Tavily, Exa, Serper…). Уберите KEYLESS_SEARCH=off или добавьте ключ в Vercel → Settings → Environment Variables и сделайте Redeploy."
+      : "Search is not configured: keyless search is off (KEYLESS_SEARCH=off), JINA_API_KEY is missing and no fallback search provider (Brave, Tavily, Exa, Serper…) is configured. Remove KEYLESS_SEARCH=off or add a key in Vercel → Settings → Environment Variables and redeploy.",
     503,
     { providers: [{ provider: "jina", status: "not_configured" }] },
   );
@@ -261,12 +284,17 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const deadlineAt = input.deadlineAt ?? Date.now() + 55_000;
   assertSearchConfigured(input.language);
 
-  const queries = buildBranches(input.query, input.language, input.testMode === true, input.sourceMemory);
-  const discovery = await discoverCandidates(queries, input.language);
-  const allHits = discovery.hits;
+  const edition = input.edition === "pro" ? "pro" : "free";
+  const round = Math.max(0, Math.floor(Number(input.continuation?.round || 0)));
+  const excluded = new Set((input.continuation?.excludeUrls || []).map((u) => normalizeResultUrl(u).toLowerCase()).filter(Boolean));
+  const queries = buildBranches(input.query, input.language, input.testMode === true, input.sourceMemory, edition, round);
+  const discovery = await discoverCandidates(queries, input.language, deadlineAt);
+  const discoveredTotal = discovery.hits.length;
+  // Pages already reviewed in earlier rounds are not read again.
+  const allHits = excluded.size ? discovery.hits.filter((hit) => !excluded.has(hit.url.toLowerCase())) : discovery.hits;
   const providerDiagnostics = discovery.diagnostics;
 
-  if (!allHits.length && providerDiagnostics.every((d) => d.status === "error" || d.status === "not_configured")) {
+  if (!discoveredTotal && providerDiagnostics.every((d) => d.status === "error" || d.status === "not_configured" || d.status === "rate_limited")) {
     const reason = providerDiagnostics.filter((d) => d.message).map((d) => d.provider + ": " + d.message).join(" ");
     throw new ResearchError(
       "SEARCH_PROVIDERS_FAILED",
@@ -276,13 +304,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     );
   }
 
-  let candidateHits = allHits.slice(0, Math.min(input.maxSources, input.testMode ? 8 : 16));
+  let candidateHits = allHits.slice(0, Math.min(input.maxSources, input.testMode ? 8 : edition === "pro" ? 30 : 16));
   let usedMemoryFallback = false;
 
   // Providers answered but found nothing: try previously learned public sources before reporting zero.
   if (!candidateHits.length && Array.isArray(input.sourceMemory)) {
     const memory = input.sourceMemory
-      .filter((source) => isSafePublicUrl(source?.url))
+      .filter((source) => isSafePublicUrl(source?.url) && !excluded.has(normalizeResultUrl(String(source.url)).toLowerCase()))
       .slice(0, input.testMode ? 3 : 6);
     const memoryHits = await Promise.all(memory.map(async (source) => {
       const url = normalizeResultUrl(source.url);
@@ -295,7 +323,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     usedMemoryFallback = candidateHits.length > 0;
   }
 
-  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : 8);
+  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : edition === "pro" ? 14 : 8);
   await Promise.all(candidateHits.slice(0, readerLimit).map(async (hit) => {
     if (hit.content) return;
     const read = await jinaRead(hit.url);
@@ -306,7 +334,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
 
   const researchedHits = candidateHits.filter((hit) => Boolean(hit.content));
   const sourceRegistry = candidateHits.map((hit) => {
-    const status = hit.readStatus === "checked" || hit.content ? "checked" : hit.readStatus === "blocked" ? "blocked" : hit.readStatus === "rate_limited" ? "rate_limited" : hit.readStatus === "unavailable" ? "unavailable" : "partial";
+    const status = hit.readStatus === "checked" || hit.content ? "checked" : hit.readStatus === "skipped" || !hit.readStatus ? "partial" : hit.readStatus;
     const reason = status === "checked"
       ? "Public page content retrieved."
       : status === "partial"
@@ -319,7 +347,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       domain: hit.domain,
       category: "web_search:" + hit.provider,
       access_status: plan.status,
-      access_method: hit.content ? "jina_reader" : hit.provider + "_search",
+      access_method: hit.content ? "page_reader" : hit.provider + "_search",
       reason: plan.reason,
       evidence_available: Boolean(hit.content),
       quality: hit.content ? 80 : 50,
@@ -354,63 +382,41 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     "Return ONLY one JSON object matching the supplied schema. Do not add markdown fences.",
   ].join("\n");
 
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
-  const freeModel = process.env.OPENROUTER_MODEL || "openrouter/free";
-  const remaining = deadlineAt - Date.now() - 2500;
-  const aiTimeoutMs = Math.min(Number(process.env.FREE_AI_TIMEOUT_MS || (input.testMode ? 18000 : 30000)), remaining);
-
-  let raw: any = null;
-  let aiError = "";
-  if (!candidateHits.length) {
-    aiError = "";
-  } else if (!openRouterKey) {
-    aiError = "OPENROUTER_API_KEY is not configured; candidates are shown for manual review.";
-  } else if (aiTimeoutMs < 5000) {
-    aiError = "Not enough time left for AI extraction; candidates are shown for manual review.";
-  } else {
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + openRouterKey,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://universal-ai-search-agent-demo.vercel.app",
-          "X-OpenRouter-Title": "Aurelius Universal AI Research Engine",
-        },
-        body: JSON.stringify({
-          model: freeModel,
-          messages: [{ role: "system", content: system }, { role: "user", content: user }],
-          temperature: 0.1,
-          max_tokens: input.testMode ? 3000 : 4500,
-          response_format: { type: "json_schema", json_schema: { name: "aurelius_research", strict: true, schema: BACKGROUND_RESEARCH_SCHEMA } },
-        }),
-        signal: AbortSignal.timeout(aiTimeoutMs),
-      });
-      raw = await response.json().catch(() => null);
-      if (!response.ok) aiError = "OpenRouter HTTP " + response.status + ": " + String(raw?.error?.message || "request failed");
-    } catch (error) {
-      aiError = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
-        ? "AI extraction timed out after " + Math.round(aiTimeoutMs / 1000) + "s; candidates are shown for manual review."
-        : "OpenRouter request failed: " + (error instanceof Error ? error.message : "network error");
-    }
-  }
-
   let parsed: any = null;
-  if (raw && !aiError) {
-    try { parsed = cleanJsonText(extractJsonText(raw)); } catch { aiError = "Free AI returned invalid structured output; candidates are shown for manual review."; }
+  let aiError = "";
+  let ai: Awaited<ReturnType<typeof runStructuredExtraction>> | null = null;
+  if (candidateHits.length) {
+    ai = await runStructuredExtraction({
+      system,
+      user,
+      schema: BACKGROUND_RESEARCH_SCHEMA,
+      edition,
+      deadlineAt,
+      maxTokens: input.testMode ? 3000 : edition === "pro" ? 6000 : 4500,
+      perCallTimeoutMs: Number(process.env.FREE_AI_TIMEOUT_MS || (input.testMode ? 18000 : 30000)),
+    });
+    parsed = ai.parsed;
+    aiError = ai.error;
   }
+  const raw: any = ai ? { usage: ai.usage } : null;
 
+  const kind = inferResearchKind(input.query);
   const allowedUrls = new Map(candidateHits.map((hit) => [hit.url, hit]));
   const groundedResults = Array.isArray(parsed?.results)
     ? parsed.results
         .filter((item: any) => allowedUrls.has(normalizeResultUrl(item?.url)))
         .map((item: any) => {
           const hit = allowedUrls.get(normalizeResultUrl(item?.url))!;
+          const pageText = [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n");
+          const ruleFields = heuristicFields(kind, pageText);
+          const filled: Record<string, string> = {};
+          for (const [k, v] of Object.entries(ruleFields)) if (!String(item?.[k] || "").trim()) filled[k] = v;
           return {
             ...item,
+            ...filled,
             url: hit.url,
             source: item?.source || hit.domain,
-            source_type: item?.source_type || (hit.content ? "jina_reader" : hit.provider + "_search"),
+            source_type: item?.source_type || (hit.content ? "page_reader" : hit.provider + "_search"),
             evidence: item?.evidence || hit.snippet,
             evidence_quote: item?.evidence_quote || "",
             // A result whose page was never read cannot be more than Manual review.
@@ -449,10 +455,10 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
 
   const finalParsed = {
     query_understanding: parsed?.query_understanding || { intent: "research", entity_type: "unknown", geography: [], languages: [input.language], criteria: [], exclusions: [], required_fields: [], source_classes: ["web"] },
-    search_plan: String(parsed?.search_plan || "Live web search (" + providerDiagnostics.filter((d) => d.status === "ok").map((d) => d.provider).join(", ") + ") + Jina Reader + free AI extraction."),
+    search_plan: String(parsed?.search_plan || "Live web search (" + providerDiagnostics.filter((d) => d.status === "ok").map((d) => d.provider).join(", ") + ") + page reader + " + (ai?.provider ? ai.provider + " AI extraction." : "rule-based extraction.")),
     search_branches: queries,
     search_summary: summaryParts.join(" "),
-    candidates_seen: allHits.length,
+    candidates_seen: discoveredTotal,
     duplicates_removed: 0,
     access_events: [...accessEvents, ...(Array.isArray(parsed?.access_events) ? parsed.access_events.slice(0, 20) : [])],
     source_registry: sourceRegistry,
@@ -467,18 +473,36 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     input,
     { sourceText, rejected, preFiltered: true },
   );
-  normalized.billing = { provider: "openrouter", model: freeModel, billable: false, webSearchCalls: queries.length, usage: raw?.usage || null, background: false };
+  const aiModel = ai?.model || configuredAiProviders(edition)[0]?.model || "rules";
+  normalized.billing = { provider: ai?.provider || "rules", model: aiModel, billable: edition === "pro" && Boolean(process.env.PRO_OPENROUTER_MODEL) && ai?.provider === "openrouter", webSearchCalls: queries.length, usage: raw?.usage || null, background: false };
   normalized.task = { id: taskIdFrom(normalized.query), responseId: "free_" + Date.now().toString(36), providerStatus: "completed" };
   normalized.live = true;
   normalized.partial = false;
   normalized.degraded = Boolean(aiError) || usedCandidateFallback || usedMemoryFallback;
   normalized.outcome = outcome;
   normalized.providers = providerDiagnostics;
-  normalized.aiStatus = aiError ? { ok: false, message: aiError } : { ok: Boolean(parsed), message: parsed ? "ok" : "skipped" };
-  normalized.stats.candidatesFound = allHits.length;
+  normalized.aiStatus = aiError ? { ok: false, message: aiError, attempts: ai?.attempts || [] } : { ok: Boolean(parsed), message: parsed ? "ok" : "skipped", provider: ai?.provider, attempts: ai?.attempts || [] };
+  normalized.stats.candidatesFound = discoveredTotal;
+  normalized.edition = edition;
+  normalized.taskKind = kind;
+  normalized.fieldSchema = fieldSchemaFor(kind);
+  normalized.progressCounters = progressCounters({
+    discovered: discoveredTotal,
+    knownSources: Number(input.knownSourceCount || 0),
+    registry: normalized.sourceRegistry,
+    recordsExtracted: Number(normalized.stats.recordsExtracted || 0) + rejected.length,
+    afterDedupe: Number(normalized.stats.recordsExtracted || 0) - Number(normalized.stats.duplicatesRemoved || 0),
+    results: normalized.results,
+  });
+  normalized.continuation = {
+    round: round + 1,
+    seenUrls: [...new Set([...excluded, ...candidateHits.map((hit) => hit.url.toLowerCase())])].slice(-400),
+    canContinue: allHits.length > candidateHits.length || queries.length > 1,
+  };
   return normalized;
 }
 
 function taskIdFrom(query: string) {
   return "FREE-" + Buffer.from(query).toString("base64").replace(/[^A-Z0-9]/gi, "").slice(-10).toUpperCase();
 }
+

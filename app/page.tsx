@@ -48,6 +48,7 @@ import {
   Volume2,
   SkipForward,
 } from "lucide-react";
+import ResearchControlPanel, { mergeRound, type ResearchSession } from "@/components/research-control-panel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
 import type { AppSettings, SettingsTab } from "@/lib/settings";
@@ -515,6 +516,10 @@ export default function Home() {
   const [liveBilling, setLiveBilling] = useState<Record<string, unknown> | undefined>(undefined);
   const [activeTask, setActiveTask] = useState<{ id: string; responseId: string; query: string; language: Lang; depth: "Quick" | "Balanced" | "Deep"; maxResults: number; maxSources: number; maxPages: number } | null>(null);
   const pollingTaskRef = useRef<string | null>(null);
+  const [researchSession, setResearchSession] = useState<ResearchSession | null>(null);
+  const [clarifications, setClarifications] = useState<Record<string, string>>({});
+  const researchAbortRef = useRef<AbortController | null>(null);
+  const continueNextRef = useRef(false);
   const [qualityGate, setQualityGate] = useState({
     total: 0,
     pass: 0,
@@ -572,7 +577,7 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/research/mode", { cache: "no-store" })
+    fetch("/api/research/mode", { cache: "no-store", headers: planHeaders() })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(String(data?.error || "AI mode unavailable"));
@@ -1057,6 +1062,9 @@ export default function Home() {
   }
 
   function applyResearchResult(data: any) {
+    const session = mergeRound(researchSession, data, query);
+    setResearchSession(session);
+    if (data?.continuation) data = { ...data, results: session.results };
     setLiveResults(data.results);
     setLiveStats({
       sourcesFound: Number(data.stats?.sourcesFound || 0),
@@ -1164,8 +1172,18 @@ export default function Home() {
 
   async function cancelResearch() {
     const task = activeTask;
+    if (researchAbortRef.current) {
+      researchAbortRef.current.abort();
+      researchAbortRef.current = null;
+    }
     if (!task?.responseId) {
       setRunning(false);
+      // Results from earlier rounds stay available after a stop.
+      if (researchSession?.results.length) {
+        setLiveResults(researchSession.results);
+        setCompletedSearch(true);
+      }
+      setLiveError(lang === "ru" ? "Поиск остановлен. Можно изменить критерии и продолжить." : "Search stopped. You can change the criteria and continue.");
       return;
     }
 
@@ -1199,7 +1217,14 @@ export default function Home() {
   }, []);
 
   // NOSONAR - orchestration function intentionally coordinates task initialization, API start and polling.
+  function continueResearch() {
+    continueNextRef.current = true;
+    void startResearch();
+  }
+
   async function startResearch() {
+    const isContinuation = continueNextRef.current && researchSession !== null;
+    continueNextRef.current = false;
     const detected = detectScenarioFromQuery(query);
     setScenario(detected);
     setActiveNav("research");
@@ -1236,12 +1261,18 @@ export default function Home() {
         multilingual: testMode ? false : settings.multilingualSearch,
         followRelatedLinks: testMode ? false : settings.followRelatedLinks,
         sourceMemory,
+        clarifications,
+        continuation: isContinuation && researchSession ? { round: researchSession.round, excludeUrls: researchSession.seenUrls } : undefined,
       };
+      if (!isContinuation) setResearchSession(null);
 
+      const controller = new AbortController();
+      researchAbortRef.current = controller;
       const response = await fetch("/api/research/task", {
         method: "POST",
         headers: planHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const raw = await response.text();
       let data: any = null;
@@ -1275,12 +1306,16 @@ export default function Home() {
       saveActiveTask(task);
       await pollResearchTask(task);
     } catch (error) {
+      // A user stop aborts the request; cancelResearch already updated the view.
+      if (error instanceof Error && error.name === "AbortError") return;
       setLiveError(error instanceof Error ? error.message : "Live research failed.");
       setRunning(false);
       setCompletedSearch(false);
       setLiveResults(null);
       clearActiveTask();
       refreshPlan();
+    } finally {
+      researchAbortRef.current = null;
     }
   }
 
@@ -1967,6 +2002,22 @@ export default function Home() {
   const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
   const taskStateLabel = running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY";
 
+  function renderControlPanel() {
+    return (
+      <ResearchControlPanel
+        lang={lang === "ru" ? "ru" : "en"}
+        query={query}
+        running={running}
+        session={researchSession}
+        planHeaders={() => planHeaders()}
+        clarifications={clarifications}
+        onClarificationsChange={setClarifications}
+        onStop={() => void cancelResearch()}
+        onContinue={continueResearch}
+      />
+    );
+  }
+
   function renderResearchProcess() {
     const stage = researchStages[researchStage] ?? researchStages[0];
 
@@ -2156,6 +2207,7 @@ export default function Home() {
             </div>
           </div>
         )}
+        {renderControlPanel()}
       </section>
     );
   }
@@ -2316,7 +2368,7 @@ export default function Home() {
           </div>
         </section>
 
-        {running || progress > 0 || completedSearch ? renderResearchProcess() : null}
+        {running || progress > 0 || completedSearch ? renderResearchProcess() : renderControlPanel()}
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[
