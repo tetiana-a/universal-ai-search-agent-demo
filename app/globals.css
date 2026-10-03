@@ -483,6 +483,22 @@ html.light .brand-mark {
   will-change: transform, opacity;
 }
 
+/* Always-on: a faint aurora whose colours drift slowly (both themes). Music turns it up. */
+.music-atmosphere:not(.is-live) {
+  opacity: .3;
+  animation:
+    music-ambient 38s ease-in-out infinite alternate,
+    music-color-drift 22s ease-in-out infinite alternate;
+}
+
+html.light .music-atmosphere:not(.is-live) {
+  opacity: .26;
+}
+
+html.light .music-atmosphere.is-live {
+  opacity: .5;
+}
+
 .music-atmosphere.is-live {
   opacity: .8;
   animation:
@@ -574,6 +590,7 @@ html.light .brand-mark {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .music-atmosphere,
   .music-atmosphere.is-live,
   .radio-live::after,
   .radio-panel {
