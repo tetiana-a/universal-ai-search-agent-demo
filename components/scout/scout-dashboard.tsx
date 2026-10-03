@@ -249,7 +249,7 @@ export default function ScoutDashboard() {
           <Panel title="Доступ к дашборду" icon={KeyRound} color="#ffd60a">
             <p className="mb-3 text-sm text-[var(--text-muted)]">CRM содержит персональные данные, поэтому дашборд защищён ключом SCOUT_ADMIN_KEY.</p>
             <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); }}>
-              <input className={inputClass} type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Ключ доступа" />
+              <input className={inputClass} type="password" value={key} onChange={(e) => setKey(e.target.value)} aria-label="Ключ доступа" placeholder="Ключ доступа" />
               <Button variant="spectrum" onClick={() => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); }}>Войти</Button>
             </form>
           </Panel>
@@ -370,7 +370,7 @@ function ObjectsTab({ state, act, focusId, place, query, setQuery }: { state: St
     return !q || (o.title + " " + o.city + " " + o.district + " " + o.country).toLowerCase().includes(q);
   }), [state.objects, focusId, place, query]);
   return (
-    <Panel title={"Объекты · " + list.length} icon={Building2} color="#ff9500" actions={<input className={inputClass + " w-56"} placeholder="Поиск: город, район…" value={query} onChange={(e) => setQuery(e.target.value)} />}>
+    <Panel title={"Объекты · " + list.length} icon={Building2} color="#ff9500" actions={<input className={inputClass + " w-56"} aria-label="Поиск: город, район…" placeholder="Поиск: город, район…" value={query} onChange={(e) => setQuery(e.target.value)} />}>
       {!list.length ? <Empty>Объектов пока нет. Запустите обход или добавьте фиды порталов (SCOUT_FEEDS).</Empty> : (
         <div className="grid gap-3 md:grid-cols-2">
           {list.map((o) => (
@@ -425,7 +425,7 @@ function InvestorsTab({ state, act, focusId }: { state: State; act: Act; focusId
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     <Chip tone="gold">{KIND_RU[i.kind]}</Chip>
                     {i.interest.geography.map((g) => <Chip key={g}><MapPin size={11} />{g}</Chip>)}
-                    {(i.interest.budgetMin || i.interest.budgetMax) && <Chip tone="green">{money(i.interest.budgetMin, i.interest.currency)} – {money(i.interest.budgetMax, i.interest.currency)}</Chip>}
+                    {(i.interest.budgetMin || i.interest.budgetMax) ? <Chip tone="green">{money(i.interest.budgetMin, i.interest.currency)} – {money(i.interest.budgetMax, i.interest.currency)}</Chip> : null}
                     {i.interest.segments.slice(0, 3).map((s) => <Chip key={s} tone="blue">{TYPE_RU[s]}</Chip>)}
                     {i.comment && <Chip tone={i.comment.level === "explicit" ? "red" : "violet"}>💬 {i.comment.level === "explicit" ? "явный интерес" : "интерес"}</Chip>}
                   </div>
@@ -444,13 +444,13 @@ function InvestorsTab({ state, act, focusId }: { state: State; act: Act; focusId
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel title="Комментаторы под постом (5.1)" icon={MessageSquare} color="#ff2d55">
           <p className="mb-2 text-xs text-[var(--text-muted)]">Скопируйте комментарии из поста, который видите сами (Facebook, Instagram, LinkedIn). Агент отберёт явный и общий интерес и подготовит публичный ответ в ветке — личные сообщения незнакомым не пишет.</p>
-          <input className={inputClass + " mb-2"} placeholder="Ссылка на пост" value={postUrl} onChange={(e) => setPostUrl(e.target.value)} />
-          <textarea className={inputClass + " h-32"} placeholder={"Иван Петров: Сколько стоит?\nAna López: Me interesa, ¿precio?"} value={comments} onChange={(e) => setComments(e.target.value)} />
+          <input className={inputClass + " mb-2"} aria-label="Ссылка на пост" placeholder="Ссылка на пост" value={postUrl} onChange={(e) => setPostUrl(e.target.value)} />
+          <textarea aria-label="Комментарии" className={inputClass + " h-32"} placeholder={"Иван Петров: Сколько стоит?\nAna López: Me interesa, ¿precio?"} value={comments} onChange={(e) => setComments(e.target.value)} />
           <div className="mt-2"><Button variant="spectrum" disabled={!postUrl || !comments} onClick={() => void act("comments.import", { postUrl, comments }).then(() => setComments(""))}>Разобрать</Button></div>
         </Panel>
         <Panel title="Импорт CSV" icon={Upload} color="#00c7be">
           <p className="mb-2 text-xs text-[var(--text-muted)]">Официальный экспорт LinkedIn / Sales Navigator или список участников мероприятия. Колонки: name, company, role, country, contact, interest.</p>
-          <textarea className={inputClass + " h-32 font-mono text-xs"} placeholder={"name,company,role,country,contact,interest\nAna López,Iberia FO,Partner,Spain,ana@iberia.es,residential Valencia 1-3M EUR"} value={csv} onChange={(e) => setCsv(e.target.value)} />
+          <textarea aria-label="CSV инвесторов" className={inputClass + " h-32 font-mono text-xs"} placeholder={"name,company,role,country,contact,interest\nAna López,Iberia FO,Partner,Spain,ana@iberia.es,residential Valencia 1-3M EUR"} value={csv} onChange={(e) => setCsv(e.target.value)} />
           <div className="mt-2"><Button variant="spectrum" disabled={!csv.trim()} onClick={() => void act("investors.import", { rows: parseCsv(csv) }).then((r) => { if (r?.ok) setCsv(""); })}>Импортировать</Button></div>
         </Panel>
       </div>
@@ -477,7 +477,7 @@ function AgenciesTab({ state, act }: { state: State; act: Act }) {
                   {a.email && <Chip>{a.email}</Chip>}
                 </div>
               </div>
-              <select className={inputClass + " sm:w-40"} value={a.state} onChange={(e) => void act("card.state", { type: "agency", id: a.id, state: e.target.value })}>
+              <select aria-label="Статус агентства" className={inputClass + " sm:w-40"} value={a.state} onChange={(e) => void act("card.state", { type: "agency", id: a.id, state: e.target.value })}>
                 {AGENCY_STATES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
@@ -546,7 +546,7 @@ function LeadsTab({ state, act }: { state: State; act: Act }) {
                           {l.transcript.map((m) => <div key={m.at + m.from + m.text.slice(0, 40)} className={"rounded-xl px-3 py-2 " + (m.from === "contact" ? "bg-[var(--surface-strong)]" : "border border-[var(--line-soft)]")}><span className="text-[10px] uppercase text-[var(--text-faint)]">{m.from === "contact" ? l.name : "агент"}</span><div className="whitespace-pre-wrap">{m.text}</div></div>)}
                         </div>
                         {l.escalation && <p className="mt-2 text-xs text-[#ff375f]">Эскалация: «{l.escalation}»</p>}
-                        <textarea className={inputClass + " mt-2 h-20"} placeholder="Вставьте ответ контакта…" value={reply} onChange={(e) => setReply(e.target.value)} />
+                        <textarea className={inputClass + " mt-2 h-20"} aria-label="Вставьте ответ контакта…" placeholder="Вставьте ответ контакта…" value={reply} onChange={(e) => setReply(e.target.value)} />
                         <div className="mt-2 flex flex-wrap gap-2">
                           <Button variant="spectrum" disabled={!reply.trim()} onClick={() => void act("lead.reply", { id: l.id, text: reply }).then((r) => { if (r?.ok) setReply(""); })}>Обработать ответ</Button>
                           <Button onClick={() => void act("card.state", { type: "lead", id: l.id, state: "handed_over" })}><Check size={13} />Беру в работу</Button>
@@ -562,8 +562,8 @@ function LeadsTab({ state, act }: { state: State; act: Act }) {
       </Panel>
       <Panel title="Новый диалог вручную" icon={Users} color="#34c759">
         <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <input className={inputClass} placeholder="Имя" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className={inputClass} placeholder="Контакт (email, телефон, @username)" value={contact} onChange={(e) => setContact(e.target.value)} />
+          <input className={inputClass} aria-label="Имя" placeholder="Имя" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={inputClass} aria-label="Контакт (email, телефон, @username)" placeholder="Контакт (email, телефон, @username)" value={contact} onChange={(e) => setContact(e.target.value)} />
           <Button variant="spectrum" disabled={!name} onClick={() => void act("lead.create", { type: "investor", name, contact }).then(() => { setName(""); setContact(""); })}>Создать</Button>
         </div>
       </Panel>
@@ -588,7 +588,7 @@ function DraftsTab({ state, act }: { state: State; act: Act }) {
         <Chip>{d.channel}</Chip><Chip>{d.lang.toUpperCase()}</Chip>
         {d.target.contact && <span className="truncate text-xs text-[var(--text-muted)]">{d.target.contact}</span>}
       </div>
-      <textarea className={inputClass + " h-36"} value={edits[d.id] ?? d.text} disabled={d.state !== "pending"} onChange={(e) => setEdits((x) => ({ ...x, [d.id]: e.target.value }))} />
+      <textarea aria-label="Текст сообщения" className={inputClass + " h-36"} value={edits[d.id] ?? d.text} disabled={d.state !== "pending"} onChange={(e) => setEdits((x) => ({ ...x, [d.id]: e.target.value }))} />
       <div className="mt-2 flex flex-wrap gap-2">
         {d.state === "pending" ? <>
           <Button variant="spectrum" onClick={() => void decide(d, "approve")}><Send size={13} />Отправить</Button>
@@ -649,10 +649,10 @@ function IntelTab({ state, act }: { state: State; act: Act }) {
       <Panel title="Watchlist" icon={Radar} color="#ffd60a">
         <p className="mb-2 text-xs text-[var(--text-muted)]">Персоны и группы с публичным Telegram-каналом (@канал или t.me/…) читаются каждый день. Ключевые слова расширяют поиск новых групп, домены — поиск объектов.</p>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <select className={inputClass + " sm:w-36"} value={kind} onChange={(e) => setKind(e.target.value as WatchItem["kind"])}>
+          <select aria-label="Тип наблюдения" className={inputClass + " sm:w-36"} value={kind} onChange={(e) => setKind(e.target.value as WatchItem["kind"])}>
             <option value="person">персона</option><option value="group">группа</option><option value="keyword">ключ</option><option value="domain">домен</option>
           </select>
-          <input className={inputClass} placeholder="@valencia_realty, t.me/…, недвижимость Валенсия, kyero.com" value={value} onChange={(e) => setValue(e.target.value)} />
+          <input className={inputClass} aria-label="@valencia_realty, t.me/…, недвижимость Валенсия, kyero.com" placeholder="@valencia_realty, t.me/…, недвижимость Валенсия, kyero.com" value={value} onChange={(e) => setValue(e.target.value)} />
           <Button variant="spectrum" disabled={!value.trim()} onClick={() => void act("watch.add", { kind, value }).then(() => setValue(""))}>Добавить</Button>
         </div>
         <ul className="mt-4 divide-y divide-[var(--line-soft)] text-sm">
@@ -700,44 +700,44 @@ function SettingsTab({ state, act }: { state: State; act: Act }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <Panel title="Критерии поиска" icon={Settings2} color="#a3b6c4" actions={<Button variant="spectrum" onClick={save}>Сохранить всё</Button>}>
-        <label className="text-xs text-[var(--text-muted)]">Страна | город | типы | язык поиска (по строке)</label>
-        <textarea className={inputClass + " h-28 font-mono text-xs"} value={targets} onChange={(e) => setTargets(e.target.value)} />
+        <label htmlFor="scout-targets" className="text-xs text-[var(--text-muted)]">Страна | город | типы | язык поиска (по строке)</label>
+        <textarea id="scout-targets" className={inputClass + " h-28 font-mono text-xs"} value={targets} onChange={(e) => setTargets(e.target.value)} />
         <p className="mb-3 text-[11px] text-[var(--text-faint)]">Типы: apartment, penthouse, house, villa, land, commercial, hotel. Языки: es, en, ru, uk.</p>
         <div className="grid grid-cols-3 gap-2">
           <label className="text-xs text-[var(--text-muted)]">Цена от, €<input className={inputClass} value={priceMin} onChange={(e) => setPriceMin(e.target.value)} /></label>
           <label className="text-xs text-[var(--text-muted)]">Цена до, €<input className={inputClass} value={priceMax} onChange={(e) => setPriceMax(e.target.value)} /></label>
           <label className="text-xs text-[var(--text-muted)]">Ниже рынка от, %<input className={inputClass} value={discount} onChange={(e) => setDiscount(e.target.value)} /></label>
         </div>
-        <label className="mt-3 block text-xs text-[var(--text-muted)]">Рыночная цена €/м² по городам (для скоринга «ниже рынка»)</label>
-        <textarea className={inputClass + " h-28 font-mono text-xs"} value={market} onChange={(e) => setMarket(e.target.value)} />
-        <label className="mt-3 block text-xs text-[var(--text-muted)]">Ключевые слова мониторинга групп (по строке)</label>
-        <textarea className={inputClass + " h-24 text-xs"} value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+        <label htmlFor="scout-market" className="mt-3 block text-xs text-[var(--text-muted)]">Рыночная цена €/м² по городам (для скоринга «ниже рынка»)</label>
+        <textarea className={inputClass + " h-28 font-mono text-xs"} id="scout-market" value={market} onChange={(e) => setMarket(e.target.value)} />
+        <label htmlFor="scout-keywords" className="mt-3 block text-xs text-[var(--text-muted)]">Ключевые слова мониторинга групп (по строке)</label>
+        <textarea className={inputClass + " h-24 text-xs"} id="scout-keywords" value={keywords} onChange={(e) => setKeywords(e.target.value)} />
       </Panel>
       <Panel title="Первое касание" icon={Send} color="#af52de">
         <div className="grid grid-cols-2 gap-2">
           <label className="text-xs text-[var(--text-muted)]">Компания<input className={inputClass} value={company} onChange={(e) => setCompany(e.target.value)} /></label>
           <label className="text-xs text-[var(--text-muted)]">Отправитель<input className={inputClass} value={sender} onChange={(e) => setSender(e.target.value)} /></label>
         </div>
-        <label className="mt-3 block text-xs text-[var(--text-muted)]">Лимиты сообщений в день по каналам</label>
+        <div className="mt-3 block text-xs text-[var(--text-muted)]">Лимиты сообщений в день по каналам</div>
         <div className="grid grid-cols-3 gap-2">
           {Object.entries(limits).map(([k, v]) => <label key={k} className="text-[11px] text-[var(--text-faint)]">{k}<input className={inputClass} value={v} onChange={(e) => setLimits({ ...limits, [k]: Number(e.target.value) || 0 })} /></label>)}
         </div>
-        <label className="mt-3 block text-xs text-[var(--text-muted)]">Шаблоны (плейсхолдеры: {"{name} {company} {sender} {source} {object} {city} {unsubscribe} {bot}"})</label>
+        <label htmlFor="scout-template" className="mt-3 block text-xs text-[var(--text-muted)]">Шаблоны (плейсхолдеры: {"{name} {company} {sender} {source} {object} {city} {unsubscribe} {bot}"})</label>
         <div className="mb-2 flex gap-2">
-          <select className={inputClass} value={tplId} onChange={(e) => setTplId(e.target.value)}>{Object.keys(templates).map((id) => <option key={id} value={id}>{id}</option>)}</select>
-          <select className={inputClass + " w-24"} value={tplLang} onChange={(e) => setTplLang(e.target.value as any)}>{["ru", "en", "es", "uk"].map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}</select>
+          <select className={inputClass} aria-label="Шаблон" value={tplId} onChange={(e) => setTplId(e.target.value)}>{Object.keys(templates).map((id) => <option key={id} value={id}>{id}</option>)}</select>
+          <select className={inputClass + " w-24"} aria-label="Язык шаблона" value={tplLang} onChange={(e) => setTplLang(e.target.value as any)}>{["ru", "en", "es", "uk"].map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}</select>
         </div>
-        <textarea className={inputClass + " h-40 text-xs"} value={templates[tplId]?.[tplLang] || ""} onChange={(e) => setTemplates({ ...templates, [tplId]: { ...templates[tplId], [tplLang]: e.target.value } })} />
+        <textarea id="scout-template" className={inputClass + " h-40 text-xs"} value={templates[tplId]?.[tplLang] || ""} onChange={(e) => setTemplates({ ...templates, [tplId]: { ...templates[tplId], [tplLang]: e.target.value } })} />
       </Panel>
       <Panel title="Стоп-лист и GDPR" icon={ShieldCheck} color="#ff375f">
-        <label className="text-xs text-[var(--text-muted)]">Больше никогда не писать этому контакту</label>
-        <div className="mb-3 flex gap-2"><input className={inputClass} placeholder="email, телефон, @username" value={stop} onChange={(e) => setStop(e.target.value)} /><Button disabled={!stop} onClick={() => void act("stop.add", { contact: stop }).then(() => setStop(""))}>В стоп-лист</Button></div>
-        <label className="text-xs text-[var(--text-muted)]">Право на удаление: стереть все записи с контактом</label>
-        <div className="flex gap-2"><input className={inputClass} placeholder="email, телефон, @username" value={forget} onChange={(e) => setForget(e.target.value)} /><Button variant="danger" disabled={!forget} onClick={() => void act("forget", { contact: forget }).then(() => setForget(""))}><Trash2 size={13} />Удалить</Button></div>
+        <label htmlFor="scout-stop" className="text-xs text-[var(--text-muted)]">Больше никогда не писать этому контакту</label>
+        <div className="mb-3 flex gap-2"><input className={inputClass} placeholder="email, телефон, @username" id="scout-stop" value={stop} onChange={(e) => setStop(e.target.value)} /><Button disabled={!stop} onClick={() => void act("stop.add", { contact: stop }).then(() => setStop(""))}>В стоп-лист</Button></div>
+        <label htmlFor="scout-forget" className="text-xs text-[var(--text-muted)]">Право на удаление: стереть все записи с контактом</label>
+        <div className="flex gap-2"><input className={inputClass} placeholder="email, телефон, @username" id="scout-forget" value={forget} onChange={(e) => setForget(e.target.value)} /><Button variant="danger" disabled={!forget} onClick={() => void act("forget", { contact: forget }).then(() => setForget(""))}><Trash2 size={13} />Удалить</Button></div>
         <p className="mt-2 text-[11px] text-[var(--text-faint)]">В стоп-листе хранится только хэш контакта. Данные лежат в Upstash Redis — выберите европейский регион при подключении.</p>
       </Panel>
       <Panel title="Встречи" icon={CalendarPlus} color="#0a84ff">
-        <div className="flex gap-2"><input className={inputClass} placeholder="18.10 11:00 Zoom — Engel & Völkers Valencia" value={meet} onChange={(e) => setMeet(e.target.value)} /><Button variant="spectrum" disabled={!meet} onClick={() => void act("meeting.create", { text: meet }).then((r) => { if (r?.ok) { setMeet(""); setMeetLink(r.google); } })}>Создать</Button></div>
+        <div className="flex gap-2"><input className={inputClass} aria-label="18.10 11:00 Zoom — Engel & Völkers Valencia" placeholder="18.10 11:00 Zoom — Engel & Völkers Valencia" value={meet} onChange={(e) => setMeet(e.target.value)} /><Button variant="spectrum" disabled={!meet} onClick={() => void act("meeting.create", { text: meet }).then((r) => { if (r?.ok) { setMeet(""); setMeetLink(r.google); } })}>Создать</Button></div>
         {meetLink && <a href={safeHref(meetLink)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-[#0a84ff] underline">Добавить в Google Календарь</a>}
         <ul className="mt-3 divide-y divide-[var(--line-soft)] text-sm">
           {state.meetings.map((m) => <li key={m.id} className="flex items-center justify-between gap-2 py-2"><span>{when(m.startsAt)} — {m.where}, {m.with}</span><a className="text-xs text-[#0a84ff] underline" href={"/api/scout/ics?id=" + m.id}>.ics</a></li>)}
