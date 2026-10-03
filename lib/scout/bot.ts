@@ -7,6 +7,7 @@ import { collectReport, renderReport } from "@/lib/scout/report";
 import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
 import { deleteValue, getOne, getValue, listAll, logAction, putOne, setValue } from "@/lib/scout/store";
+import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingCriteria, loadTask, startResearch, statusKeyboard, statusText } from "@/lib/scout/research-bot";
 import { answerCallback, controlIds, editMessage, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
@@ -19,7 +20,13 @@ import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSou
 export type BotResult = { background?: () => Promise<void> };
 
 const HELP = [
-  "<b>Разведчик AURELIUS — управление</b>",
+  "<b>AURELIUS — универсальный AI-агент поиска</b>",
+  "Напишите задачу обычным текстом, например: «Найди земельные участки в Мадриде от 10 000 м²» или «Найди инвесторов в Амстердаме для B2B SaaS».",
+  "Агент уточнит критерии, соберёт базу источников, проверит их и пришлёт таблицу результатов (Excel + CSV).",
+  "В группе: /find задача, упоминание бота или ответ на его сообщение.",
+  "/find задача — новый поиск · /status — прогресс текущего поиска",
+  "",
+  "<b>Разведчик (недвижимость + инвесторы)</b>",
   "/report — отчёт за сегодня",
   "/scan — запустить обход сейчас",
   "/objects [город] — топ объектов",
@@ -83,6 +90,19 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "help":
       await sendMessage(chatId, HELP);
       return {};
+
+    case "find":
+    case "search": {
+      if (!args) { await sendMessage(chatId, "Напишите задачу после команды, например: /find инвесторы в Амстердаме для B2B SaaS"); return {}; }
+      return { background: await startResearch(chatId, userId, args) };
+    }
+
+    case "status": {
+      const task = await loadTask(chatId);
+      if (task) await sendMessage(chatId, statusText(task), statusKeyboard(task));
+      else await sendMessage(chatId, "Активной задачи нет. Напишите, что найти.");
+      return {};
+    }
 
     case "report": {
       const { html, keyboard } = renderReport(await collectReport());
@@ -255,6 +275,7 @@ async function handleCallback(query: any): Promise<BotResult> {
   const by = query.from?.username ? "@" + query.from.username : query.from?.first_name || userId;
   if (!isControl(chatId, userId)) { await answerCallback(query.id, "Нет доступа"); return {}; }
   const [kind, action, id] = data.split(":");
+  if (kind === "rs") return { background: await handleResearchCallback(chatId, action, query.id) };
 
   if (kind === "src") {
     const updated = await setSourceState(id, action === "approve" ? "approved" : "rejected", by);
@@ -380,6 +401,30 @@ async function handleInbound(message: any): Promise<BotResult> {
   return {};
 }
 
+// ---- Universal research by plain text --------------------------------------------
+
+// In a group the bot only takes text addressed to it (a reply to its message or an
+// @mention); in a private chat every message is for the bot.
+function addressedText(message: any) {
+  const text = String(message.text || "").trim();
+  if (message.chat?.type === "private") return text;
+  const handle = botHandle().toLowerCase();
+  const mentioned = text.toLowerCase().includes(handle);
+  const replyToBot = Boolean(message.reply_to_message?.from?.is_bot);
+  if (!mentioned && !replyToBot) return "";
+  return text.replace(new RegExp(handle.replace("@", "@?"), "ig"), "").trim();
+}
+
+async function handleResearchText(message: any, chatId: string, userId: string): Promise<BotResult> {
+  const text = addressedText(message);
+  if (!text) return {};
+  if (await isEditingCriteria(chatId)) return { background: await applyCriteriaChange(chatId, text) };
+  const task = await loadTask(chatId);
+  if (task?.state === "clarifying") return { background: await answerQuestion(task, text) };
+  if (text.length < 8) { await sendMessage(chatId, "Опишите, что найти, одной-двумя фразами. /help — подсказка."); return {}; }
+  return { background: await startResearch(chatId, userId, text) };
+}
+
 // ---- Entry point ---------------------------------------------------------------
 
 export async function handleUpdate(update: any): Promise<BotResult> {
@@ -401,7 +446,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     }
     const command = commandOf(message.text);
     if (command) return handleCommand(chatId, userId, userName, command.cmd, command.args);
-    return {}; // ordinary group chatter is not for the bot
+    return handleResearchText(message, chatId, userId);
   }
 
   // Strangers in groups are ignored; only private chats start a qualification dialogue.

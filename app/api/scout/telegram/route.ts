@@ -5,10 +5,10 @@ import { webhookSecret } from "@/lib/scout/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Telegram webhook. Telegram signs each call with the secret set in setWebhook;
-// anything without it is rejected. Long work (/scan) runs after the 200 reply.
+// anything without it is rejected. Long work (/scan, research rounds) runs after the 200 reply.
 export async function POST(request: Request) {
   const secret = webhookSecret();
   if (!secret || request.headers.get("x-telegram-bot-api-secret-token") !== secret) return new Response("forbidden", { status: 403 });

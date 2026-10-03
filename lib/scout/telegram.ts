@@ -93,6 +93,24 @@ export async function sendLong(chatId: string, html: string, keyboard?: Keyboard
   return last;
 }
 
+// Sends a file (CSV / Excel export) as a Telegram document.
+export async function sendDocument(chatId: string, filename: string, data: Buffer | Uint8Array, caption?: string, keyboard?: Keyboard) {
+  const token = botToken();
+  if (!token) return false;
+  const form = new FormData();
+  form.append("chat_id", await resolveChatId(chatId));
+  form.append("document", new Blob([new Uint8Array(data)]), filename);
+  if (caption) form.append("caption", caption.slice(0, 1000));
+  if (keyboard) form.append("reply_markup", JSON.stringify({ inline_keyboard: keyboard }));
+  try {
+    const response = await fetch("https://api.telegram.org/bot" + token + "/sendDocument", { method: "POST", body: form, signal: AbortSignal.timeout(30000), cache: "no-store" });
+    const result = (await response.json().catch(() => null)) as any;
+    return Boolean(result?.ok);
+  } catch {
+    return false;
+  }
+}
+
 export async function sendDirect(userId: string, text: string) {
   const result = await tgCall("sendMessage", { chat_id: userId, text: text.slice(0, 4096) });
   return Boolean(result?.ok);
@@ -107,6 +125,8 @@ export async function editMessage(chatId: string | number, messageId: number, ht
 }
 
 export const BOT_COMMANDS = [
+  { command: "find", description: "Новый поиск: что найти" },
+  { command: "status", description: "Прогресс текущего поиска" },
   { command: "report", description: "Отчёт за сегодня" },
   { command: "scan", description: "Запустить обход сейчас" },
   { command: "objects", description: "Топ объектов" },
