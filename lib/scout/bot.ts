@@ -259,7 +259,7 @@ async function handleCallback(query: any): Promise<BotResult> {
   if (kind === "src") {
     const updated = await setSourceState(id, action === "approve" ? "approved" : "rejected", by);
     await answerCallback(query.id, updated ? (action === "approve" ? "Источник подключён — завтра агент уже ищет в нём" : "Отклонено") : "Не найдено");
-    if (updated && messageId && /^🔭/.test(String(query.message?.text || ""))) await editMessage(chatId, messageId, sourceText(updated) + "\n\n" + (action === "approve" ? "✅ Одобрено" : "✖️ Отклонено") + " — " + escapeHtml(by));
+    if (updated && messageId && String(query.message?.text || "").startsWith("🔭")) await editMessage(chatId, messageId, sourceText(updated) + "\n\n" + (action === "approve" ? "✅ Одобрено" : "✖️ Отклонено") + " — " + escapeHtml(by));
     return {};
   }
 
