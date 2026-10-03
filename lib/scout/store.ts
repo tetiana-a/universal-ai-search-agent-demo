@@ -24,7 +24,7 @@ const LOG_LIMIT = 500;
 type MemoryState = { hashes: Map<string, Map<string, string>>; values: Map<string, string>; log: string[] };
 const globalScope = globalThis as unknown as { __scoutMemory?: MemoryState };
 function memory(): MemoryState {
-  if (!globalScope.__scoutMemory) globalScope.__scoutMemory = { hashes: new Map(), values: new Map(), log: [] };
+  globalScope.__scoutMemory ??= { hashes: new Map(), values: new Map(), log: [] };
   return globalScope.__scoutMemory;
 }
 

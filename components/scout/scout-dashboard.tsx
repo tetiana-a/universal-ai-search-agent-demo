@@ -606,9 +606,9 @@ function DraftsTab({ state, act }: { state: State; act: Act }) {
     <>
       <Panel title={"На одобрение · " + pending.length} icon={Send} color="#af52de">
         <p className="mb-3 text-xs text-[var(--text-muted)]">Первое касание только по согласованным шаблонам: кто мы, откуда контакт, зачем пишем, как отписаться. Стоп-лист и дневные лимиты проверяются при нажатии «Отправить».</p>
-        {pending.length ? <div className="grid gap-3 lg:grid-cols-2">{pending.map(card)}</div> : <Empty>Нет сообщений на одобрение.</Empty>}
+        {pending.length ? <div className="grid gap-3 lg:grid-cols-2">{pending.map((d) => card(d))}</div> : <Empty>Нет сообщений на одобрение.</Empty>}
       </Panel>
-      {approved.length > 0 && <Panel title={"Одобрено, ждёт отправки · " + approved.length} icon={Check} color="#34c759"><div className="grid gap-3 lg:grid-cols-2">{approved.map(card)}</div></Panel>}
+      {approved.length > 0 && <Panel title={"Одобрено, ждёт отправки · " + approved.length} icon={Check} color="#34c759"><div className="grid gap-3 lg:grid-cols-2">{approved.map((d) => card(d))}</div></Panel>}
     </>
   );
 }

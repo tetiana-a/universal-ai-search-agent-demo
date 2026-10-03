@@ -103,7 +103,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "objects": {
       const city = args.toLowerCase();
       const list = (await listAll<ObjectCard>("objects")).filter((o) => o.state !== "rejected" && (!city || (o.city || "").toLowerCase().includes(city) || o.country.toLowerCase().includes(city))).sort((a, b) => b.score - a.score).slice(0, 8);
-      await sendMessage(chatId, list.length ? "<b>Топ объектов</b>\n" + list.map(objectLine).join("\n") : "Объектов пока нет — /scan запустит обход.");
+      await sendMessage(chatId, list.length ? "<b>Топ объектов</b>\n" + list.map((o, i) => objectLine(o, i)).join("\n") : "Объектов пока нет — /scan запустит обход.");
       return {};
     }
 
@@ -151,7 +151,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
         await sendMessage(chatId, item ? "👁 Добавлено в watchlist: " + item.kind + " — " + escapeHtml(item.value) : "Не удалось добавить.");
         return {};
       }
-      if (m && m[1].toLowerCase() === "del") {
+      if (m?.[1].toLowerCase() === "del") {
         const all = await listAll<WatchItem>("watch");
         const hit = all.find((w) => w.id === m[3] || w.value.toLowerCase() === m[3].toLowerCase());
         if (hit) await removeWatch(hit.id);
