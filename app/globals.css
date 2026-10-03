@@ -260,52 +260,133 @@ html.light .gold-text {
   border-radius: 999px;
 }
 
-/*
- * The "spectrum" classes used to be a rainbow system. They now render a quiet
- * champagne-gold treatment; the names are kept so markup did not have to move.
- */
-.spectrum-line {
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--gold) 70%, transparent) 30%, var(--gold-bright) 50%, color-mix(in srgb, var(--gold) 70%, transparent) 70%, transparent);
-  height: 1px !important;
-  opacity: .8;
-}
-
-.spectrum-progress {
-  background: linear-gradient(90deg, var(--gold-deep), var(--gold) 55%, var(--gold-bright));
-  box-shadow: 0 0 16px color-mix(in srgb, var(--gold) 28%, transparent);
-}
-
-.spectrum-button {
-  background: linear-gradient(180deg, #ecd8ab 0%, #c9a96a 55%, #a88a4f 100%);
-  color: #17130c !important;
-  box-shadow:
-    0 1px 0 rgba(255,255,255,.45) inset,
-    0 -1px 0 rgba(0,0,0,.18) inset,
-    0 14px 34px -14px rgba(201,169,106,.55) !important;
-  letter-spacing: .02em;
-}
-
-html.light .spectrum-button {
-  background: linear-gradient(180deg, #2a241a 0%, #17130c 100%);
-  color: #f3e6c8 !important;
-  box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 14px 30px -14px rgba(40,30,10,.55) !important;
-}
-
-.spectrum-icon {
-  background: color-mix(in srgb, var(--gold) 10%, transparent);
-  color: var(--gold-bright);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 22%, transparent) inset;
-}
-
-.spectrum-icon-text {
-  color: var(--gold);
-}
-
 .btn-gold {
   background: linear-gradient(180deg, #ecd8ab 0%, #c9a96a 55%, #a88a4f 100%);
   color: #17130c;
   box-shadow: 0 1px 0 rgba(255,255,255,.45) inset, 0 14px 34px -14px rgba(201,169,106,.55);
 }
+}
+
+
+/* Multicolour spectrum accents (signature of the product), kept from v2. */
+.spectrum-line,
+.spectrum-progress {
+  background: linear-gradient(
+    90deg,
+    #ff3b30 0%,
+    #ff9500 12%,
+    #ffd60a 24%,
+    #34c759 38%,
+    #00c7be 50%,
+    #0a84ff 63%,
+    #5856d6 74%,
+    #af52de 86%,
+    #ff2d55 100%
+  );
+  background-size: 360% 100%;
+  animation: spectrum-flow 8s linear infinite;
+}
+
+.spectrum-line {
+  box-shadow: 0 0 28px rgba(10, 132, 255, .18), 0 0 22px rgba(175, 82, 222, .16);
+}
+
+.spectrum-progress {
+  box-shadow:
+    0 0 20px rgba(10, 132, 255, .20),
+    0 0 24px rgba(175, 82, 222, .16),
+    0 0 28px rgba(52, 199, 89, .14);
+}
+
+.spectrum-button {
+  background: linear-gradient(
+    110deg,
+    #ffd60a,
+    #ff9500,
+    #ff375f,
+    #af52de,
+    #0a84ff,
+    #00c7be,
+    #34c759,
+    #ffd60a
+  );
+  background-size: 320% 320%;
+  animation: spectrum-flow 8s linear infinite, spectrum-breathe 3.6s ease-in-out infinite;
+}
+
+.spectrum-icon {
+  background: linear-gradient(140deg, rgba(255,214,10,.22), rgba(10,132,255,.18), rgba(175,82,222,.18));
+  color: #fff;
+  animation: spectrum-icon-cycle 7s linear infinite;
+}
+
+.spectrum-icon-text {
+  animation: spectrum-icon-color 7s linear infinite;
+}
+
+.spectrum-shell .spectrum-glow {
+  animation: spectrum-breathe 4.2s ease-in-out infinite;
+}
+
+@keyframes spectrum-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes spectrum-breathe {
+  0%, 100% { filter: saturate(1); transform: translateZ(0) scale(1); }
+  50% { filter: saturate(1.18); transform: translateZ(0) scale(1.012); }
+}
+
+@keyframes spectrum-icon-cycle {
+  0% { box-shadow: 0 0 0 1px rgba(255,214,10,.22), 0 0 22px rgba(255,214,10,.10); }
+  25% { box-shadow: 0 0 0 1px rgba(52,199,89,.22), 0 0 22px rgba(52,199,89,.10); }
+  50% { box-shadow: 0 0 0 1px rgba(10,132,255,.24), 0 0 22px rgba(10,132,255,.11); }
+  75% { box-shadow: 0 0 0 1px rgba(175,82,222,.24), 0 0 22px rgba(175,82,222,.11); }
+  100% { box-shadow: 0 0 0 1px rgba(255,214,10,.22), 0 0 22px rgba(255,214,10,.10); }
+}
+
+@keyframes spectrum-icon-color {
+  0% { color: #ffd60a; }
+  18% { color: #ff9500; }
+  36% { color: #34c759; }
+  54% { color: #00c7be; }
+  72% { color: #0a84ff; }
+  86% { color: #af52de; }
+  100% { color: #ffd60a; }
+}
+
+
+/* While the radio plays, the spectrum gets faster, brighter and glows harder. */
+.radio-live .spectrum-line,
+.radio-live .spectrum-progress {
+  animation-duration: 3.2s;
+  filter: saturate(1.35) brightness(1.08);
+}
+
+.radio-live .spectrum-line {
+  height: 2px;
+  box-shadow: 0 0 34px rgba(10,132,255,.38), 0 0 30px rgba(175,82,222,.34), 0 0 24px rgba(255,149,0,.26);
+}
+
+.radio-live .spectrum-button {
+  animation: spectrum-flow 3.2s linear infinite, spectrum-breathe 1.8s ease-in-out infinite;
+  box-shadow: 0 0 34px rgba(175,82,222,.35), 0 0 28px rgba(10,132,255,.30);
+}
+
+.radio-live .spectrum-icon,
+.radio-live .spectrum-icon-text {
+  animation-duration: 3s;
+}
+
+.radio-live .glow {
+  box-shadow:
+    0 0 0 1px rgba(175,82,222,.22),
+    0 40px 120px -40px rgba(10,132,255,.35),
+    0 30px 100px -50px rgba(255,149,0,.30),
+    var(--shadow);
+  transition: box-shadow 1200ms ease;
 }
 
 @keyframes float-in {
@@ -362,21 +443,22 @@ html.light .spectrum-button {
   z-index: 0;
   opacity: 0;
   background:
-    radial-gradient(circle at 18% 26%, rgba(0,199,190,.16), transparent 28%),
-    radial-gradient(circle at 82% 20%, rgba(88,86,214,.13), transparent 30%),
-    radial-gradient(circle at 64% 82%, rgba(255,149,0,.09), transparent 32%),
-    radial-gradient(circle at 34% 74%, rgba(175,82,222,.07), transparent 26%);
+    radial-gradient(circle at 18% 26%, rgba(0,199,190,.30), transparent 30%),
+    radial-gradient(circle at 82% 20%, rgba(88,86,214,.28), transparent 32%),
+    radial-gradient(circle at 64% 82%, rgba(255,149,0,.22), transparent 34%),
+    radial-gradient(circle at 34% 74%, rgba(175,82,222,.22), transparent 28%),
+    radial-gradient(circle at 50% 45%, rgba(255,45,85,.10), transparent 30%);
   transform: translate3d(0,0,0) scale(1);
   transition: opacity 1200ms ease;
   will-change: transform, opacity;
 }
 
 .music-atmosphere.is-live {
-  opacity: .42;
+  opacity: .8;
   animation:
-    music-ambient 26s ease-in-out infinite alternate,
-    music-color-drift 18s ease-in-out infinite alternate;
-  filter: saturate(1.04);
+    music-ambient 14s ease-in-out infinite alternate,
+    music-color-drift 9s ease-in-out infinite alternate;
+  filter: saturate(1.2);
 }
 
 .radio-live .app-grid {
@@ -390,9 +472,9 @@ html.light .spectrum-button {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(circle at 16% 24%, rgba(0,199,190,.045), transparent 24%),
-    radial-gradient(circle at 84% 18%, rgba(88,86,214,.045), transparent 26%),
-    radial-gradient(circle at 72% 82%, rgba(255,149,0,.032), transparent 30%);
+    radial-gradient(circle at 16% 24%, rgba(0,199,190,.10), transparent 26%),
+    radial-gradient(circle at 84% 18%, rgba(88,86,214,.10), transparent 28%),
+    radial-gradient(circle at 72% 82%, rgba(255,149,0,.08), transparent 32%);
   animation: radio-vignette 16s ease-in-out infinite alternate;
 }
 
@@ -437,10 +519,10 @@ html.light .spectrum-button {
     filter: hue-rotate(0deg) saturate(1);
   }
   50% {
-    filter: hue-rotate(10deg) saturate(1.08);
+    filter: hue-rotate(40deg) saturate(1.3);
   }
   100% {
-    filter: hue-rotate(-8deg) saturate(1.02);
+    filter: hue-rotate(-30deg) saturate(1.15);
   }
 }
 
@@ -457,7 +539,7 @@ html.light .spectrum-button {
 
 @media (max-width: 767px) {
   .music-atmosphere.is-live {
-    opacity: .28;
+    opacity: .6;
   }
 }
 

@@ -2332,7 +2332,7 @@ export default function Home() {
             >
               <div className="flex items-center justify-between">
                 <div className="text-xs text-[var(--text-muted)]">{String(label)}</div>
-                <Icon size={16} strokeWidth={1.5} className="spectrum-icon-text opacity-80" />
+                <Icon size={16} strokeWidth={1.5} className="spectrum-icon-text" />
               </div>
               <div className="font-display mt-5 text-[44px] font-medium leading-none lining-nums tabular-nums text-[var(--text)]">
                 {String(value)}
