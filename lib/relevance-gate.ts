@@ -15,7 +15,7 @@ function join(values: unknown[]) {
 
 export function inferResearchKind(query: string): ResearchKind {
   const q = text(query);
-  if (/investor|investors|venture capital|vc fund|angel investor|funds|venchurn|инвестор|инвесторы|венчур|фонд|бизнес ангел|інвестор|венчур/.test(q)) return "investor";
+  if (/investor|investors|venture capital|vc fund|angel investor|funds|венчур|инвестор|инвесторы|фонд|инвестицион|бизнес ангел|інвестор/.test(q)) return "investor";
   if (/land|plot|property|real estate|apartment|house|недвиж|участ|квартир|дом|земел/.test(q)) return "real_estate";
   if (/company|companies|supplier|manufacturer|distributor|software vendor|компан|поставщик|производител|дистриб/.test(q)) return "company";
   if (/person|people|specialist|expert|broker|agent|manager|founder|человек|люди|специалист|эксперт|брокер|агент|основатель/.test(q)) return "person";
@@ -27,13 +27,32 @@ const INVESTMENT_ACTIVITY = /invests?|investment strategy|investment focus|portf
 const INVESTOR_SECTOR = /saas|b2b|enterprise|software|technology|tech|startup|digital|cloud|cyber|fintech|ai|data|platform|software as a service/i;
 const INVESTOR_NOISE = /\b(event|events|conference|conferences|networking|programmes?|programme|webinar|meetup|jobs?|job|career|hiring|vacanc(?:y|ies)|ipo|initial public offering|stock price|share price|shares|listing|ticker|news)\b|конферен|мероприят|нетворкинг|ваканс|работ|ipo|акци|листинг|новост/i;
 
-function hasCyprusSignal(value:export function evaluateResearchRelevance(item: any, query: string): RelevanceDecision {
+function hasCyprusSignal(value: string) {
+  return /cyprus|κυπρ|кипр|кипре|κυπρος/i.test(value);
+}
+
+export type RelevanceDecision = {
+  accepted: boolean;
+  score: number;
+  reason: string;
+};
+
+export function evaluateResearchRelevance(item: any, query: string): RelevanceDecision {
   const kind = inferResearchKind(query);
   const title = join([item?.title, item?.organization, item?.source]);
   const body = join([
-    item?.title, item?.organization, item?.specialization, item?.geography,
-    item?.investment_type, item?.stage, item?.ticket, item?.why,
-    item?.evidence, item?.evidence_quote, item?.source, item?.url,
+    item?.title,
+    item?.organization,
+    item?.specialization,
+    item?.geography,
+    item?.investment_type,
+    item?.stage,
+    item?.ticket,
+    item?.why,
+    item?.evidence,
+    item?.evidence_quote,
+    item?.source,
+    item?.url,
   ]);
   const q = text(query);
 
@@ -53,7 +72,8 @@ function hasCyprusSignal(value:export function evaluateResearchRelevance(item: a
     const hasSector = INVESTOR_SECTOR.test(body);
     const hasCyprus = hasCyprusSignal(body);
     const queryHasCyprus = hasCyprusSignal(q);
-    const noise = INVESTOR_NOISE.test(title) || INVESTOR_NOISE.test(String(item?.evidence || "") + " " + String(item?.evidence_quote || ""));
+    const noise = INVESTOR_NOISE.test(title) ||
+      INVESTOR_NOISE.test(String(item?.evidence || "") + " " + String(item?.evidence_quote || ""));
 
     if (hasInvestorEntity) score += 35;
     if (hasInvestmentActivity) score += 25;
@@ -64,6 +84,7 @@ function hasCyprusSignal(value:export function evaluateResearchRelevance(item: a
     if (noise && !hasInvestorEntity && !hasInvestmentActivity) {
       return { accepted: false, score: Math.min(score, 20), reason: "investor_query_noise" };
     }
+
     if (!hasInvestorEntity && !hasInvestmentActivity) {
       return { accepted: false, score, reason: "no_investor_activity_signal" };
     }
@@ -99,8 +120,6 @@ function hasCyprusSignal(value:export function evaluateResearchRelevance(item: a
 
   return { accepted: true, score: 60, reason: "general_research" };
 }
-return { accepted: true, score: 60, reason: "general_research" };
-}
 
 export function filterResearchResults(items: any[], query: string) {
   const accepted: any[] = [];
@@ -108,8 +127,13 @@ export function filterResearchResults(items: any[], query: string) {
 
   for (const item of items) {
     const decision = evaluateResearchRelevance(item, query);
+
     if (decision.accepted) {
-      accepted.push({ ...item, relevanceScore: decision.score, relevanceReason: decision.reason });
+      accepted.push({
+        ...item,
+        relevanceScore: decision.score,
+        relevanceReason: decision.reason,
+      });
     } else {
       rejected.push({
         title: String(item?.title || item?.organization || item?.source || "Unknown"),
