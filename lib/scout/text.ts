@@ -8,7 +8,7 @@ export function normalize(value: unknown) {
   return String(value ?? "")
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/\p{M}/gu, "")
     .replace(/[^a-z0-9а-яёіїєґ]+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();

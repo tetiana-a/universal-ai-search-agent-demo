@@ -57,13 +57,22 @@ function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   const delimiter = (text.split("\n")[0].match(/;/g) || []).length > (text.split("\n")[0].match(/,/g) || []).length ? ";" : ",";
   let row: string[] = []; let field = ""; let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
+  let i = 0;
+  while (i < text.length) {
     const c = text[i];
-    if (quoted) { if (c === '"' && text[i + 1] === '"') { field += '"'; i += 1; } else if (c === '"') quoted = false; else field += c; continue; }
-    if (c === '"') quoted = true;
+    const next = text[i + 1];
+    let step = 1;
+    if (quoted) {
+      if (c === '"' && next === '"') { field += '"'; step = 2; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
     else if (c === delimiter) { row.push(field); field = ""; }
-    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i += 1; row.push(field); rows.push(row); row = []; field = ""; }
-    else field += c;
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && next === "\n") step = 2;
+      row.push(field); rows.push(row); row = []; field = "";
+    } else field += c;
+    i += step;
   }
   if (field || row.length) { row.push(field); rows.push(row); }
   const [header, ...body] = rows.filter((r) => r.some((x) => x.trim()));
@@ -80,10 +89,20 @@ function unescapeHtml(text: string) {
 }
 
 // Renders the Telegram report HTML (only <b> and <a> tags) as React elements, without innerHTML.
+// Stable keys: each line keyed by its text plus how many identical lines came before it.
+function keyedLines(lines: string[]) {
+  const seen = new Map<string, number>();
+  return lines.map((line) => {
+    const n = (seen.get(line) || 0) + 1;
+    seen.set(line, n);
+    return { line, key: line + "#" + n };
+  });
+}
+
 function ReportView({ html }: { html: string }) {
   return (
     <>
-      {html.split("\n").map((line, lineIndex) => {
+      {keyedLines(html.split("\n")).map(({ line, key }) => {
         const parts: ReactNode[] = [];
         const re = /<b>([\s\S]*?)<\/b>|<a href="([^"]*)">([\s\S]*?)<\/a>/g;
         let last = 0;
@@ -95,7 +114,7 @@ function ReportView({ html }: { html: string }) {
           last = at + m[0].length;
         }
         if (last < line.length) parts.push(unescapeHtml(line.slice(last)));
-        return <div key={lineIndex} className="min-h-[1.4em]">{parts}</div>;
+        return <div key={key} className="min-h-[1.4em]">{parts}</div>;
       })}
     </>
   );
@@ -261,7 +280,7 @@ export default function ScoutDashboard() {
         {state && tab === "log" && <LogTab state={state} />}
       </main>
 
-      {toast && <div role="status" className="glass fixed bottom-4 left-1/2 z-50 max-w-[92vw] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm">{toast}</div>}
+      {toast && <output className="glass fixed bottom-4 left-1/2 z-50 block max-w-[92vw] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm">{toast}</output>}
     </div>
   );
 }
@@ -524,7 +543,7 @@ function LeadsTab({ state, act }: { state: State; act: Act }) {
                       <ul className="space-y-1 text-sm">{keys.map((k) => <li key={k} className="flex gap-2"><span className={l.answers[k]?.value ? "text-[#34c759]" : "text-[var(--text-faint)]"}>{l.answers[k]?.value ? "✓" : "○"}</span><span className="text-[var(--text-muted)]">{CHECKLIST_RU[k]}:</span><span>{l.answers[k]?.value || "—"}</span></li>)}</ul>
                       <div>
                         <div className="max-h-56 space-y-2 overflow-y-auto pr-1 text-sm">
-                          {l.transcript.map((m, i) => <div key={i} className={"rounded-xl px-3 py-2 " + (m.from === "contact" ? "bg-[var(--surface-strong)]" : "border border-[var(--line-soft)]")}><span className="text-[10px] uppercase text-[var(--text-faint)]">{m.from === "contact" ? l.name : "агент"}</span><div className="whitespace-pre-wrap">{m.text}</div></div>)}
+                          {l.transcript.map((m) => <div key={m.at + m.from + m.text.slice(0, 40)} className={"rounded-xl px-3 py-2 " + (m.from === "contact" ? "bg-[var(--surface-strong)]" : "border border-[var(--line-soft)]")}><span className="text-[10px] uppercase text-[var(--text-faint)]">{m.from === "contact" ? l.name : "агент"}</span><div className="whitespace-pre-wrap">{m.text}</div></div>)}
                         </div>
                         {l.escalation && <p className="mt-2 text-xs text-[#ff375f]">Эскалация: «{l.escalation}»</p>}
                         <textarea className={inputClass + " mt-2 h-20"} placeholder="Вставьте ответ контакта…" value={reply} onChange={(e) => setReply(e.target.value)} />
@@ -734,7 +753,7 @@ function LogTab({ state }: { state: State }) {
     <Panel title="Журнал действий агента" icon={ScrollText} color="#c9a96a">
       {!state.log.length ? <Empty>Журнал пуст.</Empty> : (
         <ul className="divide-y divide-[var(--line-soft)] text-sm">
-          {state.log.map((e, i) => <li key={i} className="flex flex-wrap gap-x-3 py-2"><span className="w-28 shrink-0 tabular-nums text-[var(--text-faint)]">{when(e.at)}</span><Chip tone={e.actor === "human" ? "gold" : e.actor === "bot" ? "blue" : "muted"}>{e.actor}</Chip><span className="font-mono text-xs">{e.action}</span><span className="text-[var(--text-muted)]">{e.detail}</span></li>)}
+          {state.log.map((e) => <li key={e.at + e.action + (e.detail || "")} className="flex flex-wrap gap-x-3 py-2"><span className="w-28 shrink-0 tabular-nums text-[var(--text-faint)]">{when(e.at)}</span><Chip tone={e.actor === "human" ? "gold" : e.actor === "bot" ? "blue" : "muted"}>{e.actor}</Chip><span className="font-mono text-xs">{e.action}</span><span className="text-[var(--text-muted)]">{e.detail}</span></li>)}
         </ul>
       )}
     </Panel>
