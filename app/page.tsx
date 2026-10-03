@@ -457,6 +457,29 @@ function readSourceMemoryFromStorage() {
   }
 }
 
+function SourceIcon({ src, label, className = "h-5 w-5" }: { src: string; label: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (label.replace(/^\d+\.\s*/, "").trim()[0] || "•").toUpperCase();
+  return (
+    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-[var(--line-soft)] bg-[var(--gold)]/8 text-[10px] font-semibold text-[var(--gold-bright)] ${className}`}>
+      {failed ? letter : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" className="h-full w-full object-contain" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      )}
+    </span>
+  );
+}
+
+function countLocalSourceMemory() {
+  try {
+    const raw = window.localStorage.getItem("aurelius-source-memory-v1");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ru");
   const [theme, setTheme] = useState<Theme>("dark");
@@ -536,6 +559,7 @@ export default function Home() {
   const [aiMode, setAiMode] = useState<"free" | "paid" | "unknown">("unknown");
   const [aiModel, setAiModel] = useState("");
   const [memoryStatus, setMemoryStatus] = useState<"persistent" | "local" | "unknown">("unknown");
+  const [memoryCount, setMemoryCount] = useState<number | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -581,9 +605,12 @@ export default function Home() {
       .then((data) => {
         if (cancelled) return;
         setMemoryStatus(data?.persistent ? "persistent" : "local");
+        setMemoryCount(Math.max(Number(data?.sourceCount) || 0, countLocalSourceMemory()));
       })
       .catch(() => {
-        if (!cancelled) setMemoryStatus("unknown");
+        if (cancelled) return;
+        setMemoryStatus("unknown");
+        setMemoryCount(countLocalSourceMemory());
       });
     return () => {
       cancelled = true;
@@ -982,7 +1009,7 @@ export default function Home() {
               disabled={action.disabled}
               title={action.label}
               className={
-                "panel-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] transition " +
+                "panel-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11.5px] transition " +
                 (action.disabled
                   ? "cursor-not-allowed border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-faint)] opacity-60"
                   : action.accent
@@ -1013,7 +1040,9 @@ export default function Home() {
         const key = String(item?.url || item?.domain || item?.name || "").trim().toLowerCase();
         if (key) merged.set(key, { ...item, lastChecked: item?.lastChecked || new Date().toISOString() });
       });
-      window.localStorage.setItem("aurelius-source-memory-v1", JSON.stringify(Array.from(merged.values()).slice(-500)));
+      const stored = Array.from(merged.values()).slice(-500);
+      window.localStorage.setItem("aurelius-source-memory-v1", JSON.stringify(stored));
+      setMemoryCount((count) => Math.max(count ?? 0, stored.length));
     } catch { return; }
   }
 
@@ -1574,7 +1603,7 @@ export default function Home() {
             {icon}
           </div>
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-[var(--text-soft)]">{title}</h2>
+            <h2 className="font-sans text-sm font-semibold tracking-normal text-[var(--text-soft)]">{title}</h2>
             {description ? (
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{description}</p>
             ) : null}
@@ -1606,7 +1635,7 @@ export default function Home() {
               <div className="text-[10px] font-semibold uppercase tracking-[.24em] text-[var(--gold)]">
                 AURELIUS • SYSTEM CONFIG
               </div>
-              <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-[var(--text)] sm:text-4xl">
+              <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-5xl">
                 {t.settingsTitle}
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
@@ -1629,7 +1658,7 @@ export default function Home() {
               </button>
               <button
                 onClick={saveSettings}
-                className="shine-button inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-2.5 text-xs font-semibold text-black"
+                className="shine-button inline-flex items-center gap-2 rounded-xl btn-gold px-4 py-2.5 text-xs font-semibold text-black"
               >
                 <CheckCircle2 size={14} />
                 {t.apply}
@@ -1957,7 +1986,7 @@ export default function Home() {
             </div>
           </div>
           <div className="text-left lg:text-right">
-            <div className="text-3xl font-semibold tracking-[-.04em] text-[var(--text)]">{progress}%</div>
+            <div className="font-display text-5xl font-medium leading-none lining-nums tabular-nums text-[var(--text)]">{progress}%</div>
             <div className="mt-1 text-[10px] uppercase tracking-[.16em] text-[var(--text-faint)]">{stage[lang === "ru" ? "ru" : "en"]}</div>
           </div>
         </div>
@@ -2134,7 +2163,7 @@ export default function Home() {
   function renderResearch() {
     return (
       <>
-        <section className="glass glow ambient relative overflow-hidden rounded-[30px] p-5 sm:p-7 lg:p-9 float-in">
+        <section className="glass glow relative overflow-hidden rounded-[32px] p-6 sm:p-9 lg:p-12 float-in">
           <div className="absolute -right-28 -top-32 h-80 w-80 rounded-full bg-[color:color-mix(in_srgb,var(--gold)_10%,transparent)] blur-3xl" />
           <div className="absolute inset-x-0 top-0 h-px shimmer opacity-70" />
 
@@ -2144,21 +2173,21 @@ export default function Home() {
               {t.product}
             </div>
 
-            <h1 className="mt-4 max-w-4xl text-3xl font-semibold tracking-[-.045em] text-[var(--text)] sm:text-4xl lg:text-[54px]">
+            <h1 className="font-display mt-5 max-w-4xl text-[40px] font-medium leading-[1.02] tracking-[-.012em] text-[var(--text)] sm:text-[52px] lg:text-[68px]">
               {t.tell}
             </h1>
 
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-[var(--text-muted)] sm:text-base">
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--text-muted)] sm:text-[15px]">
               {t.sub}
             </p>
 
-            <div className="mt-7 rounded-[22px] border border-[var(--line)] bg-black/20 p-2.5 backdrop-blur-xl">
+            <div className="mt-9 rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-2 backdrop-blur-xl">
               <div className="rounded-[17px] border border-[var(--line-soft)] bg-[var(--surface-strong)] p-3 shadow-2xl">
                 <textarea
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   rows={4}
-                  className="w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-[var(--text-soft)] outline-none placeholder:text-[var(--text-faint)] sm:text-[15px]"
+                  className="w-full resize-none bg-transparent px-2 py-1 text-[15px] leading-7 text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] sm:text-base"
                   placeholder={lang === "ru" ? "Например: найди..." : "For example: find..."}
                   aria-label="Research query"
                 />
@@ -2167,7 +2196,7 @@ export default function Home() {
                   <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => setScenarioAndStay("realEstate")}
-                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
                         scenario === "realEstate"
                           ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
                           : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
@@ -2177,7 +2206,7 @@ export default function Home() {
                     </button>
                     <button
                       onClick={() => setScenarioAndStay("investors")}
-                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
                         scenario === "investors"
                           ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
                           : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
@@ -2187,7 +2216,7 @@ export default function Home() {
                     </button>
                     <button
                       onClick={() => setScenarioAndStay("companies")}
-                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
                         scenario === "companies"
                           ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
                           : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
@@ -2247,7 +2276,7 @@ export default function Home() {
                     <button
                       onClick={startResearch}
                       disabled={running}
-                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold text-black shadow-[0_12px_38px_rgba(212,175,55,.18)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-[13px] font-semibold text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Search size={14} />
                       {running ? startButtonLabel : t.start}
@@ -2332,9 +2361,9 @@ export default function Home() {
             >
               <div className="flex items-center justify-between">
                 <div className="text-xs text-[var(--text-muted)]">{String(label)}</div>
-                <Icon size={17} className="spectrum-icon-text" />
+                <Icon size={16} strokeWidth={1.5} className="spectrum-icon-text" />
               </div>
-              <div className="mt-4 text-3xl font-semibold tracking-tight text-[var(--text)]">
+              <div className="font-display mt-5 text-[44px] font-medium leading-none lining-nums tabular-nums text-[var(--text)]">
                 {String(value)}
               </div>
               <div className="mt-1 text-[11px] text-[var(--text-faint)]">{String(note)}</div>
@@ -2380,7 +2409,7 @@ export default function Home() {
                 <button
                   key={key}
                   onClick={() => setFilter(key)}
-                  className={`rounded-full px-3 py-1.5 text-[10px] transition ${
+                  className={`rounded-full px-3 py-1.5 text-[11.5px] transition ${
                     filter === key
                       ? "bg-[var(--gold)]/12 text-[var(--gold-bright)] ring-1 ring-[var(--gold)]/15"
                       : "bg-white/[.03] text-[var(--text-muted)] hover:bg-white/[.05]"
@@ -2393,7 +2422,7 @@ export default function Home() {
               <button
                 onClick={exportCsv}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Download size={12} />
                 CSV
@@ -2401,21 +2430,21 @@ export default function Home() {
               <button
                 onClick={() => void exportExcel()}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 XLSX
               </button>
               <button
                 onClick={() => void exportPdf()}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 PDF
               </button>
               <button
                 onClick={exportJson}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 JSON
               </button>
@@ -2438,7 +2467,9 @@ export default function Home() {
             ) : shownResults.length === 0 ? (
               <div className="p-8 text-center text-sm text-[var(--text-muted)]">{t.noResults}</div>
             ) : (
-              <table className="mobile-table w-full border-collapse">
+              <>
+              {renderResultCards()}
+              <table className="mobile-table hidden w-full border-collapse md:table">
                 <thead>
                   <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.15em] text-[var(--text-faint)]">
                     <th className="px-6 py-4 font-medium">Result</th>
@@ -2494,6 +2525,7 @@ export default function Home() {
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         </section>
@@ -2579,12 +2611,7 @@ export default function Home() {
                       rel="noreferrer"
                       className="group flex items-center gap-3 rounded-xl border border-[var(--line-soft)] bg-white/[.012] px-3 py-3 hover:border-[var(--line)]"
                     >
-                      <img
-                        src={sourceFavicon(host)}
-                        alt=""
-                        className="h-5 w-5 shrink-0"
-                        referrerPolicy="no-referrer"
-                      />
+                      <SourceIcon src={sourceFavicon(host)} label={host} />
                       <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-soft)]">
                         {host}
                       </span>
@@ -2661,7 +2688,7 @@ export default function Home() {
                     : "The agent does not bypass CAPTCHA or site access controls. It provides a safe manual checkpoint and continues with allowed alternate sources."}
                 </p>
               </div>
-              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[10px] text-[var(--warning)]">
+              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[11.5px] text-[var(--warning)]">
                 {accessCheckpoints.length} {lang === "ru" ? "точек" : "checkpoints"}
               </div>
             </div>
@@ -2697,15 +2724,15 @@ export default function Home() {
           </section>
         ) : null}
 
-<section className="glass rounded-[26px] p-5 sm:p-6">
+<section className="glass rounded-[28px] p-6 sm:p-8">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
-                ONE AGENT.
+              <div className="text-[10px] font-semibold uppercase tracking-[.28em] text-[var(--gold)]">
+                {lang === "ru" ? "Один агент" : "One agent"}
               </div>
-              <div className="mt-1 text-xl font-semibold tracking-tight text-[var(--text)]">
-                {lang === "ru" ? "МНОГО ТИПОВ ИССЛЕДОВАНИЯ." : "MANY RESEARCH TASKS."}
-              </div>
+              <h2 className="mt-2 text-[30px] leading-tight text-[var(--text)]">
+                {lang === "ru" ? "Много типов исследования" : "Many research tasks"}
+              </h2>
             </div>
             <div className="text-xs text-[var(--text-muted)]">{t.scenario}</div>
           </div>
@@ -2744,7 +2771,7 @@ export default function Home() {
           <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
             {t.allTasks}
           </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-[var(--text)]">
+          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
             {lang === "ru" ? "Все исследовательские задачи" : "All research tasks"}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">
@@ -2760,7 +2787,7 @@ export default function Home() {
               key={task.id}
               className={`glass panel-hover rounded-2xl p-5 float-in float-in-delay-${Math.min(index + 1, 3)}`}
             >
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(340px,440px)_auto] lg:items-center lg:gap-8">
                 <div className="flex min-w-0 items-start gap-4">
                   <div className="icon-lift grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[var(--line)] bg-[var(--gold)]/7 text-[var(--gold)]">
                     {task.status === "Running" ? <Activity size={18} /> : task.status === "Completed" ? <Check size={18} /> : <CirclePause size={18} />}
@@ -2771,7 +2798,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 lg:min-w-[420px]">
+                <div className="grid grid-cols-3 gap-4">
                   {[
                     [t.status, statusLabel(task.status)],
                     [t.duration, task.duration],
@@ -2811,7 +2838,7 @@ export default function Home() {
               <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
                 STAGE 1 • SOURCE FEASIBILITY GATE
               </div>
-              <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-[var(--text)]">
+              <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
                 {lang === "ru" ? "20–30 источников недвижимости Мадрида" : "20–30 Madrid land sources"}
               </h1>
               <p className="mt-3 max-w-4xl text-sm leading-6 text-[var(--text-muted)]">
@@ -2831,7 +2858,7 @@ export default function Home() {
           <div className="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--cyan)]">
             LIVE SEARCH SOURCES
           </div>
-          <h2 className="mt-2 text-lg font-semibold text-[var(--text)]">
+          <h2 className="mt-2 text-2xl font-medium text-[var(--text)]">
             {lang === "ru" ? "Источники последнего реального поиска" : "Sources from the latest live search"}
           </h2>
           <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
@@ -2852,7 +2879,7 @@ export default function Home() {
                   href={href}
                   target="_blank"
                   rel="noreferrer"
-                  className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-3 py-1.5 text-[10px] text-[var(--text-muted)] hover:border-[var(--line)] hover:text-[var(--gold-bright)]"
+                  className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] hover:border-[var(--line)] hover:text-[var(--gold-bright)]"
                 >
                   {label}
                 </a>
@@ -2862,7 +2889,8 @@ export default function Home() {
         </div>
 
 <div className="glass overflow-hidden rounded-[26px]">
-          <div className="thin-scroll overflow-x-auto">
+          {renderSourceCards()}
+          <div className="thin-scroll hidden overflow-x-auto md:block">
             <table className="mobile-table w-full border-collapse">
               <thead>
                 <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">
@@ -2887,12 +2915,7 @@ export default function Home() {
                   >
                     <td className="px-4 py-4 align-top">
                       <div className="flex gap-2">
-                        <img
-                          src={sourceFavicon(source.domain)}
-                          alt=""
-                          className="mt-0.5 h-5 w-5 shrink-0"
-                          referrerPolicy="no-referrer"
-                        />
+                        <SourceIcon src={sourceFavicon(source.domain)} label={source.name} className="mt-0.5 h-5 w-5" />
                         <div>
                           <div className="max-w-[230px] text-xs font-semibold text-[var(--text-soft)]">
                             {index + 1}. {source.name}
@@ -2954,7 +2977,7 @@ export default function Home() {
           <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
             Qualified Results
           </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-[var(--text)]">
+          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
             {lang === "ru" ? "Результаты исследования" : "Research results"}
           </h1>
           <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
@@ -2976,7 +2999,7 @@ export default function Home() {
               <button
                 key={key}
                 onClick={() => setFilter(key)}
-                className={`rounded-full px-3 py-1.5 text-[10px] ${
+                className={`rounded-full px-3 py-1.5 text-[11.5px] ${
                   filter === key
                     ? "bg-[var(--gold)]/12 text-[var(--gold-bright)]"
                     : "bg-white/[.03] text-[var(--text-muted)]"
@@ -2988,16 +3011,17 @@ export default function Home() {
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {renderShareActions(true)}
-              <button onClick={exportCsv} disabled={!usingLiveData} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40">
+              <button onClick={exportCsv} disabled={!usingLiveData} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40">
                 <Download size={12} /> CSV
               </button>
-              <button onClick={() => void exportExcel()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Excel</button>
-              <button onClick={() => void exportPdf()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">PDF</button>
-              <button onClick={exportJson} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">JSON</button>
+              <button onClick={() => void exportExcel()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)]">Excel</button>
+              <button onClick={() => void exportPdf()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)]">PDF</button>
+              <button onClick={exportJson} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)]">JSON</button>
             </div>
           </div>
 
-          <div className="thin-scroll overflow-x-auto">
+          {renderResultCards()}
+          <div className="thin-scroll hidden overflow-x-auto md:block">
             <table className="mobile-table w-full border-collapse">
               <thead>
                 <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.15em] text-[var(--text-faint)]">
@@ -3044,6 +3068,78 @@ export default function Home() {
     );
   }
 
+  function renderResultCards() {
+    return (
+      <div className="divide-y divide-[var(--line-soft)] md:hidden">
+        {shownResults.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setSelectedResult(item)}
+            className="flex w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-white/[.015]"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm font-medium leading-5 text-[var(--text-soft)]">{item.title}</div>
+                <span className="shrink-0 rounded-full bg-[var(--success)]/8 px-2.5 py-1 text-[10px] text-[var(--success)]">
+                  {item.match}%
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11.5px] leading-5 text-[var(--text-muted)]">
+                {[item.location, item.area, item.price].filter(Boolean).join(" · ")}
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
+                <span className="truncate text-[var(--gold-bright)]">{item.source}</span>
+                <span className="shrink-0 text-[var(--text-faint)]">{item.status}</span>
+              </div>
+            </div>
+            <ArrowUpRight size={14} className="mt-1 shrink-0 text-[var(--text-faint)]" />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderSourceCards() {
+    return (
+      <div className="divide-y divide-[var(--line-soft)] md:hidden">
+        {sourceRegistry.map((source, index) => (
+          <a
+            key={`${source.name}-${source.url}-card`}
+            href={source.url}
+            target="_blank"
+            rel="noreferrer"
+            className="flex gap-3 px-4 py-4 transition hover:bg-white/[.015]"
+          >
+            <SourceIcon src={sourceFavicon(source.domain)} label={source.name} className="mt-0.5 h-6 w-6" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-[13px] font-semibold leading-5 text-[var(--text-soft)]">
+                  {index + 1}. {source.name}
+                </div>
+                <span className="shrink-0 rounded-full bg-[var(--success)]/8 px-2 py-1 text-[10px] text-[var(--success)]">
+                  {source.quality}%
+                </span>
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">
+                {[source.category, source.access, source.method].filter(Boolean).join(" · ")}
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-[var(--text-faint)]">{source.dataAvailable}</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
+                <span className={`rounded-full px-2 py-0.5 ${source.decision === "Keep" ? "bg-[var(--success)]/8 text-[var(--success)]" : "bg-[var(--warning)]/8 text-[var(--warning)]"}`}>
+                  {source.decision}
+                </span>
+                <span className="text-[var(--warning)]">{source.robotsTerms}</span>
+                <span className="text-[var(--text-faint)]">{source.cost}</span>
+              </div>
+            </div>
+            <ExternalLink size={13} className="mt-1 shrink-0 text-[var(--gold-bright)]" />
+          </a>
+        ))}
+      </div>
+    );
+  }
+
   function renderActiveView() {
     if (activeNav === "tasks") return renderTasks();
     if (activeNav === "sources") return renderSources();
@@ -3066,8 +3162,11 @@ export default function Home() {
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[.34em] text-[var(--gold)]">AURELIUS</div>
-                <div className="mt-1 text-[17px] font-semibold tracking-tight text-[var(--text)]">{t.product}</div>
+                <div className="brand-mark font-display text-[32px] font-semibold leading-none tracking-[.2em]">AURELIUS</div>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
+                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">{t.product}</span>
+                </div>
               </div>
               <button
                 onClick={() => setMobileOpen(false)}
@@ -3107,14 +3206,37 @@ export default function Home() {
               })}
             </nav>
 
-            <div className="glass mt-8 rounded-2xl p-4 panel-hover">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("sources");
+                setMobileOpen(false);
+              }}
+              className="glass panel-hover group mt-8 w-full rounded-2xl p-4 text-left"
+              title={lang === "ru" ? "Открыть источники" : "Open sources"}
+            >
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                 <ShieldCheck size={14} />
                 {t.memory}
+                <ArrowUpRight size={13} className="ml-auto text-[var(--text-faint)] transition group-hover:text-[var(--gold-bright)]" />
               </div>
-              <div className="mt-3 text-2xl font-semibold text-[var(--text)]">12,480</div>
-              <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{t.known}</div>
-            </div>
+              <div className="font-display mt-3 text-[34px] font-medium leading-none lining-nums tabular-nums text-[var(--text)]">
+                {memoryCount === null ? "…" : memoryCount.toLocaleString(lang === "ru" ? "ru-RU" : "en-US")}
+              </div>
+              <div className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+                {memoryCount === 0
+                  ? (lang === "ru" ? "Пополнится после первого поиска" : "Fills up after your first search")
+                  : t.known}
+              </div>
+              <div className="mt-3 flex items-center gap-1.5 text-[10px] text-[var(--text-faint)]">
+                <span className={`h-1.5 w-1.5 rounded-full ${memoryStatus === "persistent" ? "bg-[var(--success)]" : memoryStatus === "local" ? "bg-[var(--gold)]" : "bg-[var(--text-faint)]"}`} />
+                {memoryStatus === "persistent"
+                  ? (lang === "ru" ? "Постоянное хранилище" : "Persistent storage")
+                  : memoryStatus === "local"
+                    ? (lang === "ru" ? "Хранится в этом браузере" : "Stored in this browser")
+                    : (lang === "ru" ? "Проверяю…" : "Checking…")}
+              </div>
+            </button>
 
             <div className="mt-auto space-y-1">
               <button
@@ -3134,7 +3256,7 @@ export default function Home() {
 
               <div className="mt-3 border-t border-[var(--line-soft)] pt-4">
                 <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-[#f0cf63] via-[#d4af37] to-[#765814] text-xs font-bold text-black">
+                  <div className="grid h-9 w-9 place-items-center rounded-full btn-gold text-xs font-bold text-black">
                     TK
                   </div>
                   <div className="min-w-0">
@@ -3166,9 +3288,9 @@ export default function Home() {
                 <PanelLeft size={18} />
               </button>
 
-              <div className="hidden items-center gap-2 text-xs text-[var(--text-faint)] sm:flex">
-                <span>{t.workspace}</span>
-                <span>/</span>
+              <div className="hidden items-center gap-2 whitespace-nowrap text-xs text-[var(--text-faint)] sm:flex">
+                <span className="hidden 2xl:inline">{t.workspace}</span>
+                <span className="hidden 2xl:inline">/</span>
                 <span className="text-[var(--text-soft)]">
                   {lang === "ru"
                     ? nav.find((item) => item.key === activeNav)?.ru
@@ -3177,13 +3299,13 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] md:flex">
+            <div className="flex min-w-0 items-center gap-1.5 sm:gap-2 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
+              <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] 2xl:flex">
                 <Command size={13} /> K
               </div>
 
               <div
-                className={`group relative hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex ${
+                className={`group relative hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] xl:flex ${
                   aiMode === "free"
                     ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
                     : aiMode === "paid"
@@ -3200,7 +3322,7 @@ export default function Home() {
 
               <div
                 className={
-                  "hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] md:flex " +
+                  "hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] 2xl:flex " +
                   (memoryStatus === "persistent"
                     ? "border-[var(--success)]/30 bg-[var(--success)]/7 text-[var(--success)]"
                     : memoryStatus === "local"
@@ -3239,9 +3361,9 @@ export default function Home() {
                   {planInfo.usage ? <span className="opacity-80">{planInfo.usage.used}/{planInfo.usage.limit}</span> : null}
                 </button>
               ) : null}
-              <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-3 py-1.5 text-[11px] text-[var(--gold-bright)]">
+              <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-2.5 py-1.5 text-[11px] text-[var(--gold-bright)] sm:px-3" title={t.live}>
                 <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
-                {t.live}
+                <span className="hidden lg:inline">{t.live}</span>
               </div>
 
               <button
@@ -3251,7 +3373,7 @@ export default function Home() {
                 title={radioPlaying ? radioText("radioOn") : radioText("radioOff")}
               >
                 <RadioIcon size={15} className="shrink-0" />
-                <span className="hidden max-w-[86px] truncate md:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
+                <span className="hidden max-w-[86px] truncate xl:inline">{radioPlaying ? radioText("radioOn") : radioText("radio")}</span>
               </button>
 
               <button
@@ -3266,13 +3388,13 @@ export default function Home() {
               <div className="flex overflow-hidden rounded-xl border border-[var(--line-soft)] bg-[var(--surface)]">
                 <button
                   onClick={() => setLang("ru")}
-                  className={`px-2.5 py-1.5 text-[10px] ${lang === "ru" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
+                  className={`px-2.5 py-1.5 text-[11.5px] ${lang === "ru" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
                 >
                   RU
                 </button>
                 <button
                   onClick={() => setLang("en")}
-                  className={`px-2.5 py-1.5 text-[10px] ${lang === "en" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
+                  className={`px-2.5 py-1.5 text-[11.5px] ${lang === "en" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
                 >
                   EN
                 </button>
@@ -3299,7 +3421,7 @@ export default function Home() {
                 <div className="text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
                   {t.details}
                 </div>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text)]">
+                <h2 className="mt-2 text-3xl font-medium text-[var(--text)]">
                   {selectedResult.title}
                 </h2>
               </div>
@@ -3364,7 +3486,7 @@ export default function Home() {
               href={selectedResult.url}
               target="_blank"
               rel="noreferrer"
-              className="shine-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black"
+              className="shine-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl btn-gold px-4 py-3 text-sm font-semibold text-black"
             >
               <ExternalLink size={15} />
               {t.open}
@@ -3433,7 +3555,7 @@ export default function Home() {
               <button
                 onClick={() => void sendEmailReport()}
                 disabled={emailSendStatus === "sending" || !emailRecipient.trim()}
-                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl btn-gold px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Mail size={15} />
                 {emailSendStatus === "sending"
@@ -3534,7 +3656,7 @@ export default function Home() {
               <button
                 onClick={() => void sendTelegramReport()}
                 disabled={telegramStatus === "sending" || shownResults.length === 0}
-                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl btn-gold px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Send size={15} />
                 {telegramStatus === "sending"
@@ -3697,7 +3819,7 @@ export default function Home() {
         <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
       </audio>
 
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 hidden -translate-x-1/2 rounded-full border md:block border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 hidden -translate-x-1/2 rounded-full border xl:block border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
         <span className="inline-flex items-center gap-2">
           <Sparkles size={12} className="text-[var(--gold)]" />
           {t.voice} • {t.noRealTime}
@@ -3709,7 +3831,7 @@ export default function Home() {
           setActiveNav("research");
           window.scrollTo({ top: 0, behavior: "smooth" });
         }}
-        className="shine-button fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-[#f0cf63] via-[#d4af37] to-[#9d7618] text-black shadow-[0_14px_42px_rgba(212,175,55,.24)] ring-4 ring-[var(--bg)] lg:hidden"
+        className="shine-button fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full btn-gold text-black  ring-4 ring-[var(--bg)] lg:hidden"
         aria-label={t.newResearch}
       >
         <Sparkles size={19} />
