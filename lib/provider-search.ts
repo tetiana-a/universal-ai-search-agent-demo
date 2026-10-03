@@ -385,3 +385,37 @@ export function getSearchProviderCatalog() {
     { id: "openai_web_search", type: "live_web", env: "OPENAI_API_KEY", status: process.env.OPENAI_API_KEY ? "configured" : "required" },
   ];
 }
+
+// Search providers other than Jina that have credentials configured. Used as the
+// fallback chain so that one failing provider never empties a research run.
+export function configuredFallbackProviders(): ProviderName[] {
+  const out: ProviderName[] = [];
+  if (process.env.BRAVE_SEARCH_API_KEY) out.push("brave");
+  if (process.env.TAVILY_API_KEY) out.push("tavily");
+  if (process.env.EXA_API_KEY) out.push("exa");
+  if (process.env.SERPER_API_KEY) out.push("serper");
+  if (process.env.MOJEEK_API_KEY) out.push("mojeek");
+  if (process.env.YANDEX_SEARCH_API_KEY) out.push("yandex");
+  if (process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET) out.push("naver");
+  if (process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD) out.push("dataforseo");
+  return out;
+}
+
+// One query across the configured fallback providers. DataForSEO is limited to a
+// single Google SERP here to keep per-query cost bounded.
+export async function searchFallbackProviders(q: string, languageCode = "en"): Promise<ProviderSearchHit[]> {
+  const location = Number(process.env.DATAFORSEO_LOCATION_CODE || 0) || undefined;
+  const batches = await Promise.allSettled([
+    braveSearch(q, undefined, languageCode),
+    tavilySearch(q),
+    exaSearch(q),
+    serperSearch(q),
+    mojeekSearch(q, undefined, languageCode),
+    yandexSearch(q, languageCode),
+    naverSearch(q),
+    dataForSeoSearch(q, "google", location, languageCode),
+  ]);
+  const results: ProviderSearchHit[] = [];
+  for (const batch of batches) if (batch.status === "fulfilled") results.push(...batch.value);
+  return results;
+}

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createCsvBuffer, createJsonBuffer, createPdfBuffer, createXlsxBuffer } from "@/lib/server-exporters";
 import type { ResearchExportPayload } from "@/lib/research-report";
 import { safeFilenamePart } from "@/lib/research-report";
+import { assertFeature, resolvePlan, type ExportFormat } from "@/lib/plans";
+import { errorBody } from "@/lib/research-errors";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -30,6 +32,15 @@ export async function POST(request: Request) {
   }
   if (!isPayload(payload)) {
     return NextResponse.json({ error: "A research export payload with results is required." }, { status: 400 });
+  }
+  if (payload.results.length > 5000) {
+    return NextResponse.json({ error: "Too many results for one export (max 5000)." }, { status: 413 });
+  }
+  try {
+    assertFeature(resolvePlan(request), ("export:" + format) as `export:${ExportFormat}`);
+  } catch (error) {
+    const e = errorBody(error);
+    return NextResponse.json(e.body, { status: e.status });
   }
 
   try {
@@ -81,7 +92,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Export generation failed." },
+      { error: format.toUpperCase() + " export failed: " + (error instanceof Error ? error.message : "unknown error"), stage: format + "_generation" },
       { status: 500 },
     );
   }

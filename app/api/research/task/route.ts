@@ -5,37 +5,72 @@ import { buildSearchMatrix } from "@/lib/search-matrix";
 import { startBackgroundResearch, retrieveBackgroundResponse, cancelBackgroundResponse, backgroundProgress, normalizeCompletedResearch, type BackgroundResearchRequest } from "@/lib/background-research";
 import { runFreeResearch } from "@/lib/free-research";
 import { getResearchMemoryContext, recordResearchLearning } from "@/lib/memory";
+import { errorBody } from "@/lib/research-errors";
+import { checkResearchQuota, clampToPlan, publicPlanInfo, refundResearchQuota, resolvePlan } from "@/lib/plans";
+import { taskSpecificRules } from "@/lib/research-prompts";
+import { isSafePublicUrl } from "@/lib/url-safety";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Client-supplied source memory is untrusted: keep only public http(s) URLs and plain fields.
+function sanitizeSourceMemory(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 40).flatMap((item: any) => {
+    const url = String(item?.url || "").trim();
+    if (url && !isSafePublicUrl(url)) return [];
+    return [{
+      name: String(item?.name || "").slice(0, 160),
+      url,
+      domain: String(item?.domain || "").slice(0, 120),
+      category: String(item?.category || "").slice(0, 60),
+      quality: Number(item?.quality || 0),
+      lastChecked: String(item?.lastChecked || ""),
+    }];
+  });
+}
+
+async function readJson(request: Request) {
+  try { return { ok: true as const, body: await request.json() }; } catch { return { ok: false as const, body: null }; }
+}
 
 function taskId(responseId: string) { return "AURE-" + responseId.replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase(); }
 
 export async function POST(request: Request) {
   const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
-  const apiKey = process.env.OPENAI_API_KEY;
+  const parsed = await readJson(request);
+  if (!parsed.ok) return NextResponse.json({ error: "Invalid JSON request body.", code: "INVALID_REQUEST" }, { status: 400 });
+  const body: any = parsed.body || {};
+  const query = String(body?.query || "").trim();
+  if (!query) return NextResponse.json({ error: "Query is required.", code: "INVALID_REQUEST" }, { status: 400 });
+  if (query.length > 2000) return NextResponse.json({ error: "Query is too long (max 2000 characters).", code: "INVALID_REQUEST" }, { status: 400 });
+
+  const plan = resolvePlan(request);
+  const quota = await checkResearchQuota(request, plan);
+  if (!quota.allowed) {
+    const e = errorBody(quota.error);
+    return NextResponse.json({ ...e.body, plan: publicPlanInfo(plan), usage: quota.usage }, { status: e.status });
+  }
+  const planInfo = { ...publicPlanInfo(plan), usage: quota.usage };
+  const language = body?.language === "en" ? "en" : "ru";
+  const testMode = body?.testMode === true;
+  const limits = clampToPlan(plan, { depth: testMode ? "Quick" : body?.depth, maxResults: body?.maxResults, maxSources: body?.maxSources, maxPages: body?.maxPages });
+
   if (provider === "free") {
     try {
-      const body = await request.json();
-      const query = String(body?.query || "").trim();
-      if (!query) return NextResponse.json({ error: "Query is required." }, { status: 400 });
-      const language = body?.language === "en" ? "en" : "ru";
-      const testMode = body?.testMode === true;
       const memoryContext = await getResearchMemoryContext(query, 40);
       const input: BackgroundResearchRequest = {
         query,
         language,
-        depth: testMode ? "Quick" : (body?.depth || "Balanced"),
-        maxResults: testMode ? 3 : Math.min(Math.max(Number(body?.maxResults || 8), 3), 15),
-        maxSources: testMode ? 8 : Math.min(Math.max(Number(body?.maxSources || 20), 5), 30),
-        maxPages: testMode ? 20 : Math.min(Math.max(Number(body?.maxPages || 100), 20), 200),
+        depth: limits.depth,
+        maxResults: testMode ? 3 : Math.min(limits.maxResults, 15),
+        maxSources: testMode ? 8 : Math.min(limits.maxSources, 30),
+        maxPages: testMode ? 20 : Math.min(limits.maxPages, 200),
         multilingual: testMode ? false : body?.multilingual !== false,
         followRelatedLinks: testMode ? false : body?.followRelatedLinks !== false,
         testMode,
-        sourceMemory: [
-          ...(Array.isArray(body?.sourceMemory) ? body.sourceMemory.slice(0, 40) : []),
-          ...memoryContext.sources,
-        ].slice(0, 60),
+        deadlineAt: Date.now() + (maxDuration - 6) * 1000,
+        sourceMemory: [...memoryContext.sources, ...sanitizeSourceMemory(body?.sourceMemory)].slice(0, 60),
       };
       const result = await runFreeResearch(input);
       await Promise.race([
@@ -48,33 +83,31 @@ export async function POST(request: Request) {
         }),
         new Promise((resolve) => setTimeout(resolve, 1800)),
       ]);
-      return NextResponse.json({ ...result, memory: { persistent: memoryContext.persistent } }, { status: 200, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ ...result, memory: { persistent: memoryContext.persistent }, plan: planInfo }, { status: 200, headers: { "Cache-Control": "no-store" } });
     } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : "Free research failed." }, { status: 502 });
+      const e = errorBody(error, "Free research failed.");
+      if (e.status >= 500) {
+        await refundResearchQuota(request, plan);
+        planInfo.usage = { ...quota.usage, used: Math.max(0, quota.usage.used - 1), remaining: Math.min(quota.usage.limit, quota.usage.remaining + 1) };
+      }
+      return NextResponse.json({ ...e.body, plan: planInfo }, { status: e.status, headers: { "Cache-Control": "no-store" } });
     }
   }
-  if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured." }, { status: 503 });
-  let body: BackgroundResearchRequest;
-  try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 }); }
-  const query = String(body.query || "").trim();
-  if (!query) return NextResponse.json({ error: "Query is required." }, { status: 400 });
-  const language = body.language === "en" ? "en" : "ru";
-  const testMode = body.testMode === true;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured.", code: "AI_PROVIDER_NOT_CONFIGURED" }, { status: 503 });
   const memoryContext = await getResearchMemoryContext(query, 40);
   const input: BackgroundResearchRequest = {
     query,
     language,
-    depth: testMode ? "Quick" : (body.depth || "Deep"),
-    maxResults: testMode ? 3 : Math.min(Math.max(Number(body.maxResults || 12), 4), 30),
-    maxSources: testMode ? 8 : Math.min(Math.max(Number(body.maxSources || 50), 5), 120),
-    maxPages: testMode ? 20 : Math.min(Math.max(Number(body.maxPages || 150), 20), 1500),
+    depth: limits.depth,
+    maxResults: testMode ? 3 : Math.max(4, limits.maxResults),
+    maxSources: testMode ? 8 : limits.maxSources,
+    maxPages: testMode ? 20 : limits.maxPages,
     multilingual: testMode ? false : body.multilingual !== false,
     followRelatedLinks: testMode ? false : body.followRelatedLinks !== false,
     testMode,
-    sourceMemory: [
-      ...(Array.isArray(body.sourceMemory) ? body.sourceMemory.slice(0, 40) : []),
-      ...memoryContext.sources,
-    ].slice(0, 60),
+    sourceMemory: [...memoryContext.sources, ...sanitizeSourceMemory(body.sourceMemory)].slice(0, 60),
   };
   const providerCatalog = getSearchProviderCatalog();
   const searchMatrix = buildSearchMatrix(query, language);
@@ -87,16 +120,16 @@ export async function POST(request: Request) {
       ]);
     } catch { providerHints = []; }
   }
-  const basePrompt = language === "ru" ? UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU : UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN;
+  const basePrompt = (language === "ru" ? UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU : UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN) + taskSpecificRules(query, language);
   const prompt = basePrompt + "\n\nSupplemental provider candidates:\n" + JSON.stringify(providerHints).slice(0, 20000);
   try {
     const response = await startBackgroundResearch(apiKey, input, prompt, providerCatalog, searchMatrix);
     const id = String(response?.id || ""); if (!id) throw new Error("OpenAI did not return a background response id.");
     const p = backgroundProgress(String(response?.status || "queued"));
-    return NextResponse.json({ live: true, task: { id: taskId(id), responseId: id, status: String(response?.status || "queued"), progress: p.progress, stage: p.stage, createdAt: new Date().toISOString() }, pollAfterMs: 2500 }, { status: 202, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ live: true, task: { id: taskId(id), responseId: id, status: String(response?.status || "queued"), progress: p.progress, stage: p.stage, createdAt: new Date().toISOString() }, pollAfterMs: 2500, plan: planInfo }, { status: 202, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start background research.";
-    return NextResponse.json({ error: message, stage: "background_start", live: false }, { status: 502 });
+    return NextResponse.json({ error: message, code: "SEARCH_PROVIDERS_FAILED", stage: "background_start", live: false }, { status: 502 });
   }
 }
 

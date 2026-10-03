@@ -435,6 +435,18 @@ const labels = {
   },
 } as const;
 
+const PLAN_KEY_STORAGE = "aurelius-plan-key-v1";
+
+function readPlanKey() {
+  try { return window.localStorage.getItem(PLAN_KEY_STORAGE) || ""; } catch { return ""; }
+}
+
+// Adds the Pro access key (if the user saved one in Settings) to API requests.
+function planHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const key = readPlanKey();
+  return key ? { ...extra, "x-aurelius-plan-key": key } : extra;
+}
+
 function readSourceMemoryFromStorage() {
   try {
     const raw = window.localStorage.getItem("aurelius-source-memory-v1");
@@ -490,6 +502,10 @@ export default function Home() {
   });
   const [searchPlan, setSearchPlan] = useState("");
   const [liveError, setLiveError] = useState("");
+  const [exportError, setExportError] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [planInfo, setPlanInfo] = useState<any>(null);
+  const [planKeyDraft, setPlanKeyDraft] = useState("");
   const [selectedResult, setSelectedResult] = useState<Result | null>(null);
   const [filter, setFilter] = useState<ResultFilter>("All");
   const [audioState, setAudioState] = useState<AudioState>("idle");
@@ -573,6 +589,32 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  function refreshPlan() {
+    fetch("/api/plan", { cache: "no-store", headers: planHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => { if (data?.plan) setPlanInfo(data); })
+      .catch(() => undefined);
+  }
+
+  useEffect(() => {
+    setPlanKeyDraft(readPlanKey());
+    refreshPlan();
+  }, []);
+
+  useEffect(() => {
+    if (!exportError) return;
+    const timer = window.setTimeout(() => setExportError(""), 9000);
+    return () => window.clearTimeout(timer);
+  }, [exportError]);
+
+  function savePlanKey(value: string) {
+    try {
+      if (value.trim()) window.localStorage.setItem(PLAN_KEY_STORAGE, value.trim());
+      else window.localStorage.removeItem(PLAN_KEY_STORAGE);
+    } catch { return; }
+    refreshPlan();
+  }
 
   useEffect(() => {
     if (!radioOpen) return;
@@ -731,7 +773,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/telegram/send", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: planHeaders({ "content-type": "application/json" }),
         body: JSON.stringify({
           title: "AURELIUS — " + query.slice(0, 100),
           payload: buildExportPayload(),
@@ -744,15 +786,18 @@ export default function Home() {
 
       const data = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(String(data?.error || t.telegramNotConfigured));
+        throw new Error(String(data?.error || t.telegramNotConfigured) + (data?.hint ? " " + String(data.hint) : ""));
       }
 
       setTelegramStatus("sent");
       setTelegramDiagnostics(data);
-      window.setTimeout(() => {
-        setTelegramStatus("idle");
-        setTelegramModalOpen(false);
-      }, 1500);
+      // Keep the dialog open when something was only partly delivered, so the warning is visible.
+      if (!data?.partial) {
+        window.setTimeout(() => {
+          setTelegramStatus("idle");
+          setTelegramModalOpen(false);
+        }, 1500);
+      }
     } catch (error) {
       setTelegramStatus("error");
       setTelegramDiagnostics({ error: error instanceof Error ? error.message : "Telegram delivery failed." });
@@ -770,10 +815,11 @@ export default function Home() {
 
   async function sendEmailReport() {
     setEmailSendStatus("sending");
+    setEmailError("");
     try {
       const response = await fetch("/api/email/send", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: planHeaders({ "content-type": "application/json" }),
         body: JSON.stringify({
           to: emailRecipient.trim(),
           subject: "AURELIUS research: " + query.slice(0, 100),
@@ -789,7 +835,7 @@ export default function Home() {
       }, 1500);
     } catch (error) {
       setEmailSendStatus("error");
-      setLiveError(error instanceof Error ? error.message : "Email delivery failed.");
+      setEmailError(error instanceof Error ? error.message : "Email delivery failed.");
     }
   }
 
@@ -1080,7 +1126,7 @@ export default function Home() {
       setLiveError(error instanceof Error ? error.message : "Live research failed.");
       setRunning(false);
       setCompletedSearch(false);
-      setLiveResults([]);
+      setLiveResults(null);
       clearActiveTask();
     } finally {
       if (pollingTaskRef.current === task.responseId) pollingTaskRef.current = null;
@@ -1165,7 +1211,7 @@ export default function Home() {
 
       const response = await fetch("/api/research/task", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: planHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
       const raw = await response.text();
@@ -1173,8 +1219,12 @@ export default function Home() {
       try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
 
       if (!response.ok) {
-        throw new Error(data?.error || ("Unable to start research task (HTTP " + response.status + ")."));
+        const fallback = response.status === 504
+          ? (lang === "ru" ? "Сервер не успел завершить исследование (таймаут 504). Попробуйте режим Quick или повторите запрос." : "The server did not finish in time (HTTP 504). Try Quick mode or retry.")
+          : ("Unable to start research task (HTTP " + response.status + ").");
+        throw new Error(data?.error || fallback);
       }
+      if (data?.plan) setPlanInfo((previous: any) => ({ ...(previous || {}), plan: data.plan, usage: data.plan.usage }));
 
       const task = {
         ...(data?.task ?? null),
@@ -1199,8 +1249,9 @@ export default function Home() {
       setLiveError(error instanceof Error ? error.message : "Live research failed.");
       setRunning(false);
       setCompletedSearch(false);
-      setLiveResults([]);
+      setLiveResults(null);
       clearActiveTask();
+      refreshPlan();
     }
   }
 
@@ -1219,7 +1270,7 @@ export default function Home() {
 
   function exportCsv() {
     void exportCsvFile(buildExportPayload()).catch((error) => {
-      setLiveError(error instanceof Error ? error.message : "CSV export failed.");
+      setExportError(error instanceof Error ? error.message : "CSV export failed.");
     });
   }
 
@@ -1227,7 +1278,7 @@ export default function Home() {
     try {
       await exportExcelFile(buildExportPayload());
     } catch (error) {
-      setLiveError(error instanceof Error ? error.message : "Excel export failed.");
+      setExportError(error instanceof Error ? error.message : "Excel export failed.");
     }
   }
 
@@ -1235,13 +1286,13 @@ export default function Home() {
     try {
       await exportPdfFile(buildExportPayload());
     } catch (error) {
-      setLiveError(error instanceof Error ? error.message : "PDF export failed.");
+      setExportError(error instanceof Error ? error.message : "PDF export failed.");
     }
   }
 
   function exportJson() {
     void exportJsonFile(buildExportPayload()).catch((error) => {
-      setLiveError(error instanceof Error ? error.message : "JSON export failed.");
+      setExportError(error instanceof Error ? error.message : "JSON export failed.");
     });
   }
 
@@ -1642,6 +1693,33 @@ export default function Home() {
                     onChange={(value) => updateSetting("autoOpenResults", value)}
                   />
                 </SettingSection>
+                <SettingSection
+                  title={lang === "ru" ? "Тариф" : "Plan"}
+                  icon={<Sparkles size={18} />}
+                  description={lang === "ru" ? "Бесплатный тариф: ограниченное число задач в день, CSV/JSON. Pro: глубокий поиск, больше источников, XLSX/PDF, Telegram и e-mail." : "Free: a few tasks per day, CSV/JSON. Pro: deep search, more sources, XLSX/PDF, Telegram and e-mail."}
+                >
+                  {planInfo?.plan ? (
+                    <div className="grid gap-2 text-xs text-[var(--text-muted)] sm:grid-cols-2">
+                      <div>{lang === "ru" ? "Текущий тариф" : "Current plan"}: <b className="text-[var(--text-soft)]">{planInfo.plan.label}</b></div>
+                      <div>{lang === "ru" ? "Задач сегодня" : "Tasks today"}: <b className="text-[var(--text-soft)]">{planInfo.usage?.used ?? 0} / {planInfo.plan.limits.dailyTasks}</b></div>
+                      <div>{lang === "ru" ? "Источников / результатов" : "Sources / results"}: {planInfo.plan.limits.maxSources} / {planInfo.plan.limits.maxResults}</div>
+                      <div>{lang === "ru" ? "Экспорт" : "Exports"}: {planInfo.plan.features.exports.join(", ").toUpperCase()}{planInfo.plan.features.telegram ? " · Telegram" : ""}</div>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={planKeyDraft}
+                      onChange={(event) => setPlanKeyDraft(event.target.value)}
+                      placeholder={lang === "ru" ? "Ключ доступа Pro" : "Pro access key"}
+                      className="min-w-0 flex-1 rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-soft)] outline-none"
+                    />
+                    <button onClick={() => savePlanKey(planKeyDraft)} className="panel-hover rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-4 py-2 text-xs text-[var(--text-soft)]">
+                      {lang === "ru" ? "Применить" : "Apply"}
+                    </button>
+                  </div>
+                </SettingSection>
               </>
             )}
 
@@ -1890,12 +1968,6 @@ export default function Home() {
             style={{ width: `${progress}%` }}
           />
         </div>
-
-        {liveAttempted && !running && !usingLiveData && liveError ? (
-          <div className="mt-3 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-3 text-xs leading-5 text-[var(--warning)]">
-            Live search reached the API, but the response was not converted into the structured result contract. No demo metrics are being counted as real results.
-          </div>
-        ) : null}
 
         {(searchPlan || liveError) && (
           <div className="mt-4 grid gap-3 lg:grid-cols-[1.5fr_.7fr]">
@@ -3152,6 +3224,21 @@ export default function Home() {
                       : "Memory • checking"}
                 </span>
               </div>
+              {planInfo?.plan ? (
+                <button
+                  onClick={() => { setActiveNav("settings"); setSettingsTab("general"); }}
+                  className={
+                    "hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] 2xl:flex " +
+                    (planInfo.plan.id === "pro"
+                      ? "border-[var(--gold)]/30 bg-[var(--gold)]/8 text-[var(--gold-bright)]"
+                      : "border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]")
+                  }
+                  title={lang === "ru" ? "Тариф и лимиты" : "Plan and limits"}
+                >
+                  <span>{planInfo.plan.label}</span>
+                  {planInfo.usage ? <span className="opacity-80">{planInfo.usage.used}/{planInfo.usage.limit}</span> : null}
+                </button>
+              ) : null}
               <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--gold)]/6 px-3 py-1.5 text-[11px] text-[var(--gold-bright)]">
                 <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
                 {t.live}
@@ -3286,6 +3373,15 @@ export default function Home() {
         </div>
       )}
 
+      {exportError ? (
+        <div role="alert" className="fixed bottom-4 left-1/2 z-[80] w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-xl border border-[var(--danger)]/30 bg-[var(--surface)] p-4 text-xs leading-5 text-[var(--danger)] shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <span>{exportError}</span>
+            <button onClick={() => setExportError("")} className="text-[var(--text-muted)]" aria-label="Close">×</button>
+          </div>
+        </div>
+      ) : null}
+
       {shareEmailFallback && (
         <div
           className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4 backdrop-blur-md"
@@ -3364,9 +3460,9 @@ export default function Home() {
               </a>
             </div>
 
-            {emailSendStatus === "error" && liveError ? (
+            {emailSendStatus === "error" && emailError ? (
               <div className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/6 p-3 text-xs leading-5 text-[var(--danger)]">
-                {liveError}
+                {emailError}
               </div>
             ) : null}
           </div>
@@ -3452,6 +3548,18 @@ export default function Home() {
             {telegramStatus === "error" && telegramDiagnostics?.error ? (
               <div className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/6 p-4 text-xs leading-5 text-[var(--danger)]">
                 {String(telegramDiagnostics.error)}
+              </div>
+            ) : null}
+
+            {telegramStatus === "sent" && telegramDiagnostics?.partial ? (
+              <div className="mt-4 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/6 p-4 text-xs leading-5 text-[var(--warning)]">
+                {lang === "ru" ? "Отчёт отправлен частично:" : "Report partly delivered:"}
+                <ul className="mt-1 list-disc pl-4">
+                  {[...(telegramDiagnostics.failed || []).map((f: any) => f.chatId + ": " + f.error + (f.hint ? " " + f.hint : "")),
+                    ...(telegramDiagnostics.attachmentErrors || []).map((a: any) => a.stage + ": " + a.error)].slice(0, 6).map((line: string) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 
@@ -3589,7 +3697,7 @@ export default function Home() {
         <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
       </audio>
 
-      <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 hidden -translate-x-1/2 rounded-full border md:block border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
         <span className="inline-flex items-center gap-2">
           <Sparkles size={12} className="text-[var(--gold)]" />
           {t.voice} • {t.noRealTime}

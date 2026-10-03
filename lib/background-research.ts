@@ -1,6 +1,7 @@
 import { accessEscalationSummary, buildAccessEscalationPlan, type AccessEscalationPlan } from "@/lib/access-escalation";
 import type { AccessEvent, LiveSourceRecord, ResearchQueryUnderstanding } from "@/lib/research-contract";
-import { filterResearchResults } from "@/lib/relevance-gate";
+import { filterResearchResults, type RelevanceRejection } from "@/lib/relevance-gate";
+import { applyQualityGate, dedupeResults } from "@/lib/result-quality";
 
 export type BackgroundResearchRequest = {
   query: string;
@@ -12,6 +13,8 @@ export type BackgroundResearchRequest = {
   multilingual: boolean;
   followRelatedLinks: boolean;
   testMode?: boolean;
+  // Epoch ms by which the request must finish (keeps work inside the Vercel function limit).
+  deadlineAt?: number;
   sourceMemory?: Array<{ name?: string; url?: string; domain?: string; category?: string; quality?: number; lastChecked?: string }>;
 };
 
@@ -51,16 +54,6 @@ export const BACKGROUND_RESEARCH_SCHEMA = {
   required: ["query_understanding","search_plan","search_branches","search_summary","candidates_seen","duplicates_removed","access_events","source_registry","results"],
 } as const;
 
-function normalize(value: unknown) {
-  let text = "";
-  if (value === null || value === undefined) text = "";
-  else if (typeof value === "string") text = value;
-  else if (typeof value === "number" || typeof value === "boolean") text = String(value);
-  else {
-    try { text = JSON.stringify(value); } catch { text = ""; }
-  }
-  return text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9а-яёіїєґ]+/gi, " ").trim();
-}
 function normalizeUrl(value: unknown) { const raw = String(value ?? "").trim(); try { const u = new URL(raw); u.hash = ""; u.searchParams.sort(); return u.toString().replace(/\/$/, ""); } catch { return raw.replace(/\/$/, ""); } }
 function getDomain(value: unknown) { try { return new URL(String(value ?? "")).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
 function unique<T>(items: T[]) { return Array.from(new Set(items)); }
@@ -95,18 +88,6 @@ function parseResearchJson(text: string) {
     try { return JSON.parse(unfenced.slice(first, last + 1)); } catch {}
   }
   throw new Error("Background research returned invalid JSON.");
-}
-
-function dedupeResults(items: any[]) {
-  const groups = new Map<string, any[]>();
-  for (const item of items) {
-    const identity = [normalize(item?.title), normalize(item?.location), normalize(item?.area)].join("|");
-    const key = identity || normalizeUrl(item?.url);
-    const bucket = groups.get(key) ?? []; bucket.push(item); groups.set(key, bucket);
-  }
-  const out: any[] = []; let removed = 0;
-  for (const bucket of groups.values()) { bucket.sort((a,b) => Number(b?.confidence ?? 0) - Number(a?.confidence ?? 0)); out.push(bucket[0]); removed += Math.max(0, bucket.length - 1); }
-  return { out, removed };
 }
 
 // NOSONAR - source traversal intentionally handles multiple Responses output shapes.
@@ -217,8 +198,17 @@ export function backgroundProgress(status: string) {
   return { progress: 55, stage: 4, label: "researching" };
 }
 
+export type NormalizeExtras = {
+  // Normalized URL -> text retrieved for that page; enables quote grounding checks.
+  sourceText?: Map<string, string>;
+  // Candidates already rejected upstream (reported, never shown as results).
+  rejected?: RelevanceRejection[];
+  // Results were already relevance-filtered upstream.
+  preFiltered?: boolean;
+};
+
 // NOSONAR - this function is a deterministic normalization pipeline with several required validation stages.
-export function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest) {
+export function normalizeCompletedResearch(response: any, input: BackgroundResearchRequest, extras: NormalizeExtras = {}) {
   const text = outputText(response);
   if (!text) {
     const outputTypes = Array.isArray(response?.output)
@@ -231,78 +221,65 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   const retrievedSources = collectWebSources(response);
   const searchResults = collectWebSearchResults(response);
   const sourceUrls = new Set(retrievedSources.map((s) => s.url));
-  const searchPlanText =
-    typeof parsed.search_plan === "string"
-      ? parsed.search_plan
-      : JSON.stringify(parsed.search_plan ?? {});
+  const searchPlanText = typeof parsed.search_plan === "string" ? parsed.search_plan : JSON.stringify(parsed.search_plan ?? {});
+  const geography = Array.isArray(parsed?.query_understanding?.geography) ? parsed.query_understanding.geography.map(String) : [];
 
   let rawResults = Array.isArray(parsed.results) ? parsed.results : [];
+  let usedSearchFallback = false;
   if (rawResults.length === 0) {
     const fallbackRows = searchResults.length
       ? searchResults
-      : retrievedSources.map((source) => ({
-          url: source.url,
-          title: source.title,
-          domain: source.domain,
-          snippet: "",
-        }));
-
-    if (fallbackRows.length > 0) {
-      const geography = Array.isArray(parsed?.query_understanding?.geography)
-        ? parsed.query_understanding.geography.join(", ")
-        : "";
-
-      rawResults = fallbackRows.slice(0, input.maxResults).map((row, index) => ({
-        title: row.title || row.domain || ("Search candidate " + (index + 1)),
-        organization: "",
-        specialization: "",
-        geography,
-        contact: "",
-        investment_type: "",
-        stage: "",
-        ticket: "",
-        location: geography,
-        area: "",
-        price: "",
-        match: row.snippet ? 60 : 40,
-        confidence: row.snippet ? 55 : 35,
-        evidence: row.snippet || "Source discovered by live search; page-level evidence was not returned in the structured response.",
-        evidence_quote: row.snippet || "",
-        status: "Manual review",
-        source: row.domain || "Web search",
-        source_type: row.snippet ? "web_search_candidate" : "web_search_source",
-        url: row.url,
-        why: row.snippet
-          ? "Candidate discovered by live web search; manual verification is required."
-          : "Source discovered by live research, but structured extraction was incomplete; manual review is required.",
-        retrieved_at: new Date().toISOString(),
-        freshness_days: 0,
-        independent_verification: false,
-      }));
-    }
+      : retrievedSources.map((source) => ({ url: source.url, title: source.title, domain: source.domain, snippet: "" }));
+    usedSearchFallback = fallbackRows.length > 0;
+    rawResults = fallbackRows.slice(0, input.maxResults * 2).map((row, index) => ({
+      title: row.title || row.domain || ("Search candidate " + (index + 1)),
+      organization: "", specialization: "", geography: geography.join(", "), contact: "", investment_type: "", stage: "", ticket: "",
+      location: geography.join(", "), area: "", price: "",
+      match: row.snippet ? 50 : 35, confidence: row.snippet ? 45 : 30,
+      evidence: row.snippet || "Source discovered by live search; page-level evidence was not returned in the structured response.",
+      evidence_quote: row.snippet || "",
+      status: "Manual review",
+      source: row.domain || "Web search",
+      source_type: row.snippet ? "web_search_candidate" : "web_search_source",
+      url: row.url,
+      why: "Candidate discovered by live web search; structured extraction returned nothing, so manual verification is required.",
+      retrieved_at: new Date().toISOString(),
+      freshness_days: 0,
+      independent_verification: false,
+    }));
   }
-  const relevance = filterResearchResults(rawResults, input.query);
-  rawResults = relevance.accepted;
-  const filtered = rawResults.filter((item: any) => { const url = normalizeUrl(item?.url); return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url))); });
-  const deduped = dedupeResults(filtered); const now = new Date().toISOString();
+
+  const relevance = extras.preFiltered
+    ? { kept: rawResults, rejected: [] as RelevanceRejection[] }
+    : filterResearchResults(rawResults, input.query, { geography });
+  const rejectedCandidates = [...(extras.rejected || []), ...relevance.rejected].slice(0, 50);
+  const recordsExtracted = rawResults.length;
+  const filtered = relevance.kept.filter((item: any) => {
+    const url = normalizeUrl(item?.url);
+    return Boolean(url) && (sourceUrls.size === 0 || sourceUrls.has(url) || retrievedSources.some((s) => s.domain === getDomain(url)));
+  });
+  const deduped = dedupeResults(filtered, input.query);
+  const now = new Date().toISOString();
   const results = deduped.out.slice(0, input.maxResults).map((item: any, i: number) => ({
     id: i + 1, title: String(item?.title || "Untitled result"),
     organization: String(item?.organization || ""),
     specialization: String(item?.specialization || ""),
     geography: String(item?.geography || item?.location || ""),
     contact: String(item?.contact || ""),
-    investmentType: String(item?.investment_type || ""),
+    investmentType: String(item?.investment_type || item?.investmentType || ""),
     stage: String(item?.stage || ""),
     ticket: String(item?.ticket || ""),
     location: String(item?.location || item?.geography || "not specified"),
     area: String(item?.area || item?.specialization || item?.profile || "not specified"),
     price: String(item?.price || item?.ticket || item?.stage || "not specified"),
     match: Math.max(0, Math.min(100, Number(item?.match || 0))), confidence: Math.max(0, Math.min(100, Number(item?.confidence || 0))),
-    evidence: String(item?.evidence || ""), evidenceQuote: String(item?.evidence_quote || ""),
+    evidence: String(item?.evidence || ""), evidenceQuote: String(item?.evidence_quote ?? item?.evidenceQuote ?? ""),
     status: ["Verified","Reviewed","Manual review"].includes(item?.status) ? item.status : "Reviewed",
-    source: String(item?.source || "Web source"), sourceType: String(item?.source_type || "web"), sourceDomain: getDomain(item?.url),
-    url: normalizeUrl(item?.url), why: String(item?.why || ""), retrievedAt: String(item?.retrieved_at || now),
-    freshnessDays: Math.max(0, Number(item?.freshness_days || 0)), independentVerification: Boolean(item?.independent_verification),
+    source: String(item?.source || "Web source"), sourceType: String(item?.source_type || item?.sourceType || "web"), sourceDomain: getDomain(item?.url),
+    url: normalizeUrl(item?.url), why: String(item?.why || ""), retrievedAt: String(item?.retrieved_at || item?.retrievedAt || now),
+    freshnessDays: Math.max(0, Number(item?.freshness_days ?? item?.freshnessDays ?? 0)), independentVerification: Boolean(item?.independent_verification ?? item?.independentVerification),
+    relevanceTier: String(item?.relevanceTier || "accept"), relevanceScore: Number(item?.relevanceScore ?? 60), relevanceReason: String(item?.relevanceReason || ""),
+    alternateUrls: Array.isArray(item?.alternateUrls) ? item.alternateUrls : [],
   }));
   const sourcePlans: AccessEscalationPlan[] = [];
   const sourceRegistry: LiveSourceRecord[] = (Array.isArray(parsed.source_registry) ? parsed.source_registry : []).slice(0, input.maxSources).map((s: any) => {
@@ -318,52 +295,43 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   const accessEvents: AccessEvent[] = (Array.isArray(parsed.access_events) ? parsed.access_events : []).slice(0, 120).map((e: any) => ({
     url: normalizeUrl(e?.url), status: String(e?.status || "partial"), method: String(e?.method || "web_search"), reason: String(e?.reason || ""), fallback: String(e?.fallback || "alternate_source"),
   }));
-  const queryText = normalize(input.query);
-  const isPropertyTask = /(land|plot|property|real estate|apartment|house|недвиж|участ|квартир|дом)/i.test(queryText);
-  const gated = results.map((result: any) => {
-    const genericStructuredValue = [result.organization, result.specialization, result.geography, result.contact, result.investmentType, result.stage, result.ticket, result.area, result.price]
-      .some((value) => Boolean(value && value !== "not specified"));
-    const checks = {
-      sourceUrl: Boolean(result.url),
-      sourceName: Boolean(result.source),
-      evidence: Boolean(result.evidence),
-      evidenceQuote: Boolean(result.evidenceQuote),
-      title: Boolean(result.title && result.title !== "Untitled result"),
-      location: isPropertyTask
-        ? Boolean(result.location && result.location !== "not specified")
-        : Boolean(result.geography || result.location),
-      structuredValue: isPropertyTask
-        ? Boolean((result.area && result.area !== "not specified") || (result.price && result.price !== "not specified"))
-        : genericStructuredValue,
-      confidence: result.confidence >= 70,
-      sourceCaptured: sourceUrls.size === 0 || sourceUrls.has(result.url) || sourceRegistry.some((s) => s.url === result.url || s.domain === result.sourceDomain),
-      statusAllowed: ["Verified","Reviewed","Manual review"].includes(result.status),
-      relevance: true,
-    };
-    const passed = Object.values(checks).filter(Boolean).length; const total = Object.keys(checks).length; const gate = passed === total ? "PASS" : passed >= Math.ceil(total * 0.75) ? "REVIEW" : "FAIL";
-    return { ...result, qualityGate: { gate, passed, total, checks, independentVerification: result.independentVerification } };
-  });
-  const pass = gated.filter((r: any) => r.qualityGate.gate === "PASS").length; const review = gated.filter((r: any) => r.qualityGate.gate === "REVIEW").length; const fail = gated.filter((r: any) => r.qualityGate.gate === "FAIL").length;
-  const evidence = gated.filter((r: any) => r.qualityGate.checks.evidence && r.qualityGate.checks.evidenceQuote).length;
+
+  // Paid mode: build page text from provider search results so quotes can still be checked where possible.
+  let sourceText = extras.sourceText;
+  if (!sourceText && searchResults.some((r) => r.snippet)) {
+    sourceText = new Map(searchResults.map((r) => [r.url, r.snippet]));
+  }
+  const knownUrls = new Set<string>([...sourceUrls, ...sourceRegistry.map((s) => s.url)]);
+  const knownDomains = new Set<string>([...retrievedSources.map((s) => s.domain), ...sourceRegistry.map((s) => s.domain)].filter(Boolean));
+  const gate = applyQualityGate(results, { query: input.query, knownUrls, knownDomains, sourceText });
+  const gated = gate.results;
+
   const queryUnderstanding: ResearchQueryUnderstanding = {
     intent: String(parsed?.query_understanding?.intent || "research"), entityType: String(parsed?.query_understanding?.entity_type || "unknown"),
-    geography: Array.isArray(parsed?.query_understanding?.geography) ? parsed.query_understanding.geography.map(String) : [], languages: Array.isArray(parsed?.query_understanding?.languages) ? parsed.query_understanding.languages.map(String) : [],
+    geography, languages: Array.isArray(parsed?.query_understanding?.languages) ? parsed.query_understanding.languages.map(String) : [],
     criteria: Array.isArray(parsed?.query_understanding?.criteria) ? parsed.query_understanding.criteria.map(String) : [], exclusions: Array.isArray(parsed?.query_understanding?.exclusions) ? parsed.query_understanding.exclusions.map(String) : [],
     requiredFields: Array.isArray(parsed?.query_understanding?.required_fields) ? parsed.query_understanding.required_fields.map(String) : [], sourceClasses: Array.isArray(parsed?.query_understanding?.source_classes) ? parsed.query_understanding.source_classes.map(String) : [],
   };
   const escalation = accessEscalationSummary(sourcePlans); const accessCheckpoints = sourcePlans.flatMap((p) => p.checkpoint?.required ? [p.checkpoint] : []);
-  const sourceDomains = unique([...sourceRegistry.map((s) => s.domain), ...results.map((r) => r.sourceDomain)].filter(Boolean));
-  return { live: true, partial: false, status: "completed", query: input.query, generatedAt: now, searchPlan: searchPlanText || "Search plan generated from live web research.", summary: String(parsed?.search_summary || ""),
+  const sourceDomains = unique([...sourceRegistry.map((s) => s.domain), ...gated.map((r: any) => r.sourceDomain)].filter(Boolean));
+  const summary = [String(parsed?.search_summary || ""), usedSearchFallback && gated.length ? "Structured extraction returned no results; live search candidates are kept for Manual review." : ""].filter(Boolean).join(" ");
+  return { live: true, partial: false, status: "completed", query: input.query, generatedAt: now, searchPlan: searchPlanText || "Search plan generated from live web research.", summary,
     queryUnderstanding, searchBranches: Array.isArray(parsed?.search_branches) ? parsed.search_branches.map(String).slice(0, 40) : [], sourceRegistry, accessEvents, accessCheckpoints, results: gated,
-    sourceUrls: unique([...retrievedSources.map((s) => s.url), ...sourceRegistry.map((s) => s.url), ...results.map((r) => r.url)].filter(Boolean)), sourceDomains,
+    rejectedCandidates,
+    sourceUrls: unique([...retrievedSources.map((s) => s.url), ...sourceRegistry.map((s) => s.url), ...gated.map((r: any) => r.url)].filter(Boolean)), sourceDomains,
     stats: { sourcesFound: sourceDomains.length, sourcesChecked: sourceRegistry.filter((s) => s.accessStatus === "checked").length,
       sourcesBlocked: sourceRegistry.filter((s) => ["blocked","policy_restricted","captcha_required"].includes(s.accessStatus)).length,
+      sourcesUnavailable: sourceRegistry.filter((s) => ["unavailable","not_automatable"].includes(s.accessStatus)).length,
       sourcesManualReview: sourceRegistry.filter((s) => ["auth_required","partial","captcha_required","rate_limited"].includes(s.accessStatus)).length,
-      pagesProcessed: unique(results.map((r) => r.url).filter(Boolean)).length, recordsExtracted: rawResults.length, duplicatesRemoved: Math.max(Number(parsed?.duplicates_removed || 0), deduped.removed), relevanceRejected: relevance.rejected.length,
-      qualified: pass + review, evidenceCoverage: gated.length ? Math.round((evidence / gated.length) * 100) : 0, averageConfidence: gated.length ? Math.round(gated.reduce((sum: number, r: any) => sum + r.confidence, 0) / gated.length) : 0 },
-    accessEscalation: escalation, qualityGate: { total: gated.length, pass, review, fail, independentVerification: gated.some((r: any) => r.independentVerification),
-      ruleSet: ["source URL present","source name present","evidence summary present","evidence quote present","title present","location present","area or price present","confidence >= 70","source captured","allowed verification status","intent relevance"] },
+      pagesProcessed: sourceRegistry.filter((s) => s.accessStatus === "checked").length || unique(gated.map((r: any) => r.url).filter(Boolean)).length,
+      recordsExtracted, duplicatesRemoved: Math.max(Number(parsed?.duplicates_removed || 0), deduped.removed), relevanceRejected: rejectedCandidates.length,
+      qualified: gate.summary.pass + gate.summary.review, verified: gated.filter((r: any) => r.status === "Verified").length,
+      evidenceCoverage: gated.length ? Math.round((gate.summary.evidenceCount / gated.length) * 100) : 0,
+      evidenceGrounded: gate.summary.groundedCount,
+      averageConfidence: gated.length ? Math.round(gated.reduce((sum: number, r: any) => sum + r.confidence, 0) / gated.length) : 0 },
+    accessEscalation: escalation,
+    qualityGate: { total: gate.summary.total, pass: gate.summary.pass, review: gate.summary.review, fail: gate.summary.fail, independentVerification: gate.summary.independentVerification, ruleSet: gate.summary.ruleSet },
     billing: { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.5", billable: true, webSearchCalls: Array.isArray(response?.output) ? response.output.filter((x: any) => x?.type === "web_search_call").length : 0, usage: response?.usage ?? null, background: true },
     task: { id: response?.id ? "AURE-" + String(response.id).replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase() : "", responseId: String(response?.id || ""), providerStatus: String(response?.status || "") },
-  };
+  } as any;
 }

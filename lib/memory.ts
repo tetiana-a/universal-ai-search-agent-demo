@@ -1,3 +1,7 @@
+import { inferResearchKind } from "@/lib/relevance-gate";
+
+export type SourceHealth = "healthy" | "degraded" | "failing" | "unknown";
+
 export type SourceMemoryRecord = {
   id: string;
   name: string;
@@ -19,6 +23,12 @@ export type SourceMemoryRecord = {
   languages: string[];
   taskTypes: string[];
   queryExamples: string[];
+  // Source Health: consecutive failed reads demote a source; a successful read restores it.
+  healthStatus?: SourceHealth;
+  consecutiveFailures?: number;
+  failedChecks?: number;
+  lastError?: string;
+  sampleUrls?: string[];
 };
 
 export type ResearchLearningInput = {
@@ -48,7 +58,7 @@ export function persistentMemoryConfigured() {
   return Boolean(redisUrl() && redisToken());
 }
 
-async function redisCommand<T = any>(command: string, args: Array<string | number> = []): Promise<T | null> {
+export async function redisCommand<T = any>(command: string, args: Array<string | number> = []): Promise<T | null> {
   const base = redisUrl();
   const token = redisToken();
   if (!base || !token) return null;
@@ -72,7 +82,7 @@ async function redisCommand<T = any>(command: string, args: Array<string | numbe
   }
 }
 
-async function redisPipeline(commands: Array<[string, ...Array<string | number>]>): Promise<any[]> {
+export async function redisPipeline(commands: Array<[string, ...Array<string | number>]>): Promise<any[]> {
   const base = redisUrl();
   const token = redisToken();
   if (!base || !token || !commands.length) return [];
@@ -154,16 +164,17 @@ function scoreSource(source: SourceMemoryRecord) {
 function sourceFromRegistry(item: any, query: string): SourceMemoryRecord | null {
   const url = String(item?.url || "").trim();
   const domain = String(item?.domain || safeDomain(url)).trim().toLowerCase();
-  if (!url && !domain) return null;
+  if (!domain) return null;
 
-  const id = stableId(url || domain);
-  const taskType = String(item?.category || "web").trim();
+  // One record per domain: different pages of the same site are the same source.
+  const id = stableId("domain:" + domain);
+  const kind = inferResearchKind(query);
   return {
     id,
-    name: String(item?.name || domain || url),
+    name: String(item?.name || domain),
     url,
     domain,
-    category: taskType,
+    category: String(item?.category || "web").trim(),
     quality: clamp(Number(item?.quality || 0)),
     checks: 0,
     successfulChecks: 0,
@@ -176,9 +187,22 @@ function sourceFromRegistry(item: any, query: string): SourceMemoryRecord | null
     captchaCount: 0,
     lastChecked: String(item?.lastChecked || new Date().toISOString()),
     languages: [],
-    taskTypes: [taskType],
+    taskTypes: [kind],
     queryExamples: [query].filter(Boolean),
+    healthStatus: "unknown",
+    consecutiveFailures: 0,
+    failedChecks: 0,
+    sampleUrls: url ? [url] : [],
   };
+}
+
+const FAILED_ACCESS = new Set(["unavailable", "blocked", "auth_required", "policy_restricted", "captcha_required", "rate_limited", "not_automatable"]);
+
+export function healthFor(source: Pick<SourceMemoryRecord, "consecutiveFailures" | "successfulChecks" | "checks">): SourceHealth {
+  const failures = Number(source.consecutiveFailures || 0);
+  if (failures >= 3) return "failing";
+  if (failures > 0) return "degraded";
+  return source.successfulChecks > 0 ? "healthy" : "unknown";
 }
 
 async function loadAllSources(): Promise<SourceMemoryRecord[]> {
@@ -267,11 +291,16 @@ function querySimilarity(query: string, source: SourceMemoryRecord) {
 
 export async function getResearchMemoryContext(query: string, limit = 40) {
   const sources = await loadAllSources();
+  const kind = inferResearchKind(query);
   const ranked = sources
-    .map((source) => ({
-      source,
-      rank: querySimilarity(query, source) * 0.55 + Number(source.quality || 0) / 100 * 0.45,
-    }))
+    .filter((source) => (source.healthStatus || "unknown") !== "failing")
+    .map((source) => {
+      const similarity = querySimilarity(query, source);
+      const sameKind = Array.isArray(source.taskTypes) && source.taskTypes.includes(kind) && kind !== "general";
+      return { source, similarity, sameKind, rank: similarity * 0.5 + (sameKind ? 0.2 : 0) + Number(source.quality || 0) / 100 * 0.3 };
+    })
+    // Only reuse sources that are related to this task; unrelated high-quality sources only add noise.
+    .filter((entry) => entry.similarity > 0 || entry.sameKind)
     .sort((a, b) => b.rank - a.rank)
     .slice(0, Math.max(1, Math.min(limit, 80)));
 
@@ -285,6 +314,7 @@ export async function getResearchMemoryContext(query: string, limit = 40) {
       quality: source.quality,
       lastChecked: source.lastChecked,
       taskTypes: source.taskTypes,
+      healthStatus: source.healthStatus || "unknown",
     })),
   };
 }
@@ -305,7 +335,20 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
   const byId = new Map(existing.map((source) => [source.id, source]));
   let learnedSources = 0;
 
+  // Collapse a run's registry to one entry per domain; the best access outcome wins.
+  const statusRank = (item: any) => {
+    const status = String(item?.accessStatus || item?.access_status || "partial");
+    return status === "checked" ? 0 : FAILED_ACCESS.has(status) ? 2 : 1;
+  };
+  const perDomain = new Map<string, any>();
   for (const item of registry) {
+    const domain = String(item?.domain || safeDomain(item?.url)).trim().toLowerCase();
+    if (!domain) continue;
+    const previous = perDomain.get(domain);
+    if (!previous || statusRank(item) < statusRank(previous)) perDomain.set(domain, item);
+  }
+
+  for (const item of perDomain.values()) {
     const candidate = sourceFromRegistry(item, query);
     if (!candidate) continue;
 
@@ -320,8 +363,20 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
     const review = sourceResults.filter((result) => String(result?.status || "").toLowerCase() === "manual review" || String(result?.status || "").toLowerCase() === "reviewed");
     const gatePass = sourceResults.filter((result) => String(result?.qualityGate?.gate || "") === "PASS");
 
-    current.checks += 1;
-    if (accessStatus === "checked" || Boolean(item?.evidenceAvailable || item?.evidence_available)) current.successfulChecks += 1;
+    const readSucceeded = accessStatus === "checked";
+    const readFailed = FAILED_ACCESS.has(accessStatus);
+    // "partial" means the page was discovered but not read: it is neither a success nor a failure.
+    if (readSucceeded || readFailed) current.checks += 1;
+    if (readSucceeded) {
+      current.successfulChecks += 1;
+      current.consecutiveFailures = 0;
+      current.lastError = undefined;
+    } else if (readFailed) {
+      current.failedChecks = Number(current.failedChecks || 0) + 1;
+      current.consecutiveFailures = Number(current.consecutiveFailures || 0) + 1;
+      current.lastError = accessStatus + (item?.reason ? ": " + String(item.reason).slice(0, 160) : "");
+    }
+    current.healthStatus = healthFor(current);
     if (Boolean(item?.evidenceAvailable || item?.evidence_available) || sourceResults.some((result) => result?.evidence || result?.evidenceQuote)) current.evidenceCount += 1;
     current.resultCount += sourceResults.length;
     current.verifiedCount += verified.length + gatePass.length;
@@ -333,8 +388,12 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
     if (sourceResults.length || accessStatus === "checked") current.lastSuccessfulAt = now;
     current.quality = scoreSource(current);
     current.queryExamples = Array.from(new Set([...current.queryExamples, query].filter(Boolean))).slice(-12);
-    current.taskTypes = Array.from(new Set([...current.taskTypes, candidate.category].filter(Boolean))).slice(-12);
+    current.taskTypes = Array.from(new Set([...(current.taskTypes || []), ...candidate.taskTypes].filter(Boolean))).slice(-12);
     current.name = current.name || candidate.name;
+    if (candidate.url && (readSucceeded || sourceResults.length)) {
+      current.sampleUrls = Array.from(new Set([candidate.url, ...(current.sampleUrls || [])])).slice(0, 5);
+      current.url = candidate.url;
+    }
     current.url = current.url || candidate.url;
     current.domain = current.domain || candidate.domain;
     current.category = current.category || candidate.category;
@@ -363,9 +422,13 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
 }
 
 export async function getMemoryHealth() {
+  const sources = await loadAllSources();
+  const health = { healthy: 0, degraded: 0, failing: 0, unknown: 0 } as Record<SourceHealth, number>;
+  for (const source of sources) health[source.healthStatus || "unknown"] += 1;
   return {
     persistent: persistentMemoryConfigured(),
-    sourceCount: (await loadAllSources()).length,
+    sourceCount: sources.length,
+    health,
     backend: persistentMemoryConfigured() ? "upstash-redis-rest" : "process-memory-fallback",
   };
 }
