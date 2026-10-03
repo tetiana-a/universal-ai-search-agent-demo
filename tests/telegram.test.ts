@@ -29,14 +29,6 @@ describe("Telegram delivery", () => {
     expect((await response.json()).error).toContain("TELEGRAM_BOT_TOKEN");
   });
 
-  it("is a Pro feature when plans are enforced", async () => {
-    vi.stubEnv("PLAN_ENFORCEMENT", "on");
-    vi.stubEnv("DEFAULT_PLAN", "free");
-    const response = await send();
-    expect(response.status).toBe(403);
-    expect((await response.json()).code).toBe("PLAN_FEATURE_UNAVAILABLE");
-  });
-
   it("rejects recipients outside the allowlist", async () => {
     const response = await POST(postJson("http://localhost/api/telegram/send", { ...body, chatIds: ["999"] }));
     expect(response.status).toBe(403);
@@ -88,5 +80,19 @@ describe("Telegram delivery", () => {
     ]);
     const data = await (await send()).json();
     expect(data).toMatchObject({ ok: true, partial: false, attachments: { xlsx: true, pdf: true } });
+  });
+});
+
+describe("Telegram on the Free plan", () => {
+  it("is open to Free users unless FREE_TELEGRAM=off, and still checks the allowlist", async () => {
+    vi.stubEnv("PLAN_ENFORCEMENT", "on");
+    vi.stubEnv("PRO_ACCESS_KEYS", "");
+    const open = await POST(postJson("http://localhost/api/telegram/send", { ...body, chatIds: ["999"] }));
+    expect(open.status).toBe(403);
+    expect((await open.json()).stage).toBe("allowlist");
+    vi.stubEnv("FREE_TELEGRAM", "off");
+    const closed = await send();
+    expect(closed.status).toBe(403);
+    expect((await closed.json()).code).toBe("PLAN_FEATURE_UNAVAILABLE");
   });
 });

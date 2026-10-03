@@ -24,7 +24,9 @@
 - платные поисковые API, если заданы (`BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`, `SERPER_API_KEY`, …);
 - более сильная модель через OpenRouter: `PRO_OPENROUTER_MODEL` (например `anthropic/claude-sonnet-4.5` или `openai/gpt-5-mini`), или `PRO_GEMINI_MODEL`;
 - если задан `OPENAI_API_KEY`, Pro-задачи идут в OpenAI deep research с web search (фоновые задачи);
-- экспорт XLSX/PDF, Telegram и e-mail.
+- экспорт XLSX/PDF и e-mail.
+
+Отправка в Telegram сейчас открыта и в Free (получатели всё равно ограничены `TELEGRAM_ALLOWED_CHAT_IDS`). Чтобы снова сделать её только для Pro, задайте `FREE_TELEGRAM=off`.
 
 ## Переменные окружения
 
