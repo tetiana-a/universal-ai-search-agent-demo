@@ -9,6 +9,7 @@
 @theme {
   --font-sans: var(--font-sans), "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: var(--font-display), "Cormorant Garamond", "Times New Roman", serif;
+  --font-accent: var(--font-accent), "Tenor Sans", var(--font-sans);
 }
 
 :root {
@@ -417,6 +418,183 @@ html.light .brand-mark {
 @keyframes brand-sheen {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
+}
+
+/* ---------- Gold cursor (fine pointers only; see components/gold-cursor.tsx) ---------- */
+@property --cursor-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+html.has-gold-cursor,
+html.has-gold-cursor * {
+  cursor: none !important;
+}
+
+.gold-cursor {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
+html.gold-cursor-visible .gold-cursor {
+  opacity: 1;
+}
+
+.gold-cursor-dot,
+.gold-cursor-ring,
+.gold-cursor-trail span {
+  position: fixed;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.gold-cursor-dot {
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fffaf0, #f1d48e 45%, #b8873a);
+  box-shadow: 0 0 10px rgba(241, 212, 142, .9), 0 0 22px rgba(201, 169, 106, .45);
+}
+
+.gold-cursor-ring {
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 999px;
+  padding: 1.2px;
+  background: conic-gradient(from var(--cursor-angle), #f6e3b0, #c9a96a, #fff4d6, #b98a3e, #ffd9a0, #f6e3b0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  filter: drop-shadow(0 0 6px rgba(232, 196, 120, .45));
+  animation: cursor-spin 5s linear infinite, cursor-hue 12s ease-in-out infinite alternate;
+  transition: width 260ms cubic-bezier(.22,1,.36,1), height 260ms cubic-bezier(.22,1,.36,1), margin 260ms cubic-bezier(.22,1,.36,1), border-radius 260ms ease, opacity 200ms ease;
+}
+
+.gold-cursor-ring[data-mode="hover"] {
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  background: conic-gradient(from var(--cursor-angle), #ffd60a, #ff9500, #ff375f, #af52de, #0a84ff, #00c7be, #34c759, #ffd60a);
+  filter: drop-shadow(0 0 10px rgba(255, 214, 120, .5));
+}
+
+.gold-cursor-ring[data-mode="text"] {
+  width: 3px;
+  height: 26px;
+  margin: -13px 0 0 -1.5px;
+  border-radius: 2px;
+  padding: 0;
+  -webkit-mask: none;
+  mask: none;
+}
+
+.gold-cursor-ring.is-pressed {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+}
+
+.gold-cursor-trail span {
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 999px;
+  background: radial-gradient(circle, #ffe9b8, rgba(201, 169, 106, 0));
+}
+
+body:has(.radio-live) .gold-cursor-ring {
+  background: conic-gradient(from var(--cursor-angle), #ffd60a, #ff9500, #ff375f, #af52de, #0a84ff, #00c7be, #34c759, #ffd60a);
+  animation-duration: 1.6s, 4s;
+}
+
+body:has(.radio-live) .gold-cursor-trail span {
+  background: radial-gradient(circle, #f0b4ff, rgba(10, 132, 255, 0));
+}
+
+html.light .gold-cursor-dot {
+  background: radial-gradient(circle at 35% 30%, #fff4d6, #c99b45 45%, #7a5520);
+  box-shadow: 0 0 8px rgba(169, 132, 74, .6);
+}
+
+html.light .gold-cursor-ring:not([data-mode="hover"]) {
+  background: conic-gradient(from var(--cursor-angle), #a9844a, #e3c27c, #6e5428, #d8b46c, #a9844a);
+}
+
+@keyframes cursor-spin {
+  to { --cursor-angle: 360deg; }
+}
+
+@keyframes cursor-hue {
+  0% { filter: drop-shadow(0 0 6px rgba(232, 196, 120, .45)) hue-rotate(0deg); }
+  100% { filter: drop-shadow(0 0 8px rgba(255, 190, 150, .5)) hue-rotate(-24deg); }
+}
+
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .gold-cursor { display: none; }
+}
+
+/* ---------- Foil icons and accent type ---------- */
+.icon-foil {
+  stroke: url(#aurelius-foil);
+}
+
+.font-accent {
+  font-family: var(--font-accent);
+  font-weight: 400;
+}
+
+svg.lucide {
+  stroke-width: 1.4;
+}
+
+/* Small-caps labels (eyebrows, table heads) set in the accent face. Unlayered on purpose so
+   it wins over font-weight utilities; Tenor Sans has a single weight. */
+.uppercase[class*="tracking-"] {
+  font-family: var(--font-accent);
+  font-weight: 400;
+  font-synthesis: none;
+}
+
+/* Last word of the hero headline in gold italic */
+.hero-accent {
+  font-style: italic;
+  font-weight: 500;
+  background: linear-gradient(100deg, #b8924f 0%, #f3dca4 30%, #fff8e4 45%, #e6c47e 60%, #b8924f 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  padding-right: .06em;
+  animation: brand-sheen 8s ease-in-out infinite;
+}
+
+html.light .hero-accent {
+  background-image: linear-gradient(100deg, #6e5428 0%, #a9844a 35%, #d8b46c 50%, #8f6f35 70%, #5e4720 100%);
+}
+
+.radio-live .hero-accent {
+  background-image: linear-gradient(100deg, #ffd60a, #ff9500, #ff375f, #af52de, #0a84ff, #00c7be, #34c759, #ffd60a);
+  background-size: 320% 100%;
+  animation-duration: 4s;
+}
+
+/* Developer signature in the sidebar */
+.dev-badge-ring {
+  background: conic-gradient(from var(--cursor-angle), #f6e3b0, #c9a96a, #fff4d6, #b98a3e, #f6e3b0);
+  animation: cursor-spin 6s linear infinite;
+}
+
+body:has(.radio-live) .dev-badge-ring {
+  background: conic-gradient(from var(--cursor-angle), #ffd60a, #ff9500, #ff375f, #af52de, #0a84ff, #00c7be, #34c759, #ffd60a);
+  animation-duration: 2s;
 }
 
 @keyframes float-in {
