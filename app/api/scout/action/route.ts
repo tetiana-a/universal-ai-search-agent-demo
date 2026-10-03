@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { importComments } from "@/lib/scout/bot";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
 import { googleCalendarLink, newMeeting, parseMeetingCommand } from "@/lib/scout/calendar";
-import { DEFAULT_SETTINGS, saveSettings } from "@/lib/scout/config";
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "@/lib/scout/config";
 import { matchCountries, detectGoals, detectSegments, classifyInvestorKind } from "@/lib/scout/extract";
 import { addToStopList, decideDraft, forgetContact, markSent } from "@/lib/scout/outreach";
 import { advanceDialog, GREETING, questionFor } from "@/lib/scout/qualification";
@@ -11,8 +11,7 @@ import { runScan } from "@/lib/scout/scan";
 import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
 import { getOne, logAction, putMany, putOne } from "@/lib/scout/store";
-import { detectLang, nowIso, parseBudget, randomId, stableId } from "@/lib/scout/text";
-import { loadSettings } from "@/lib/scout/config";
+import { asText, detectLang, nowIso, parseBudget, randomId, stableId } from "@/lib/scout/text";
 import type { Collection } from "@/lib/scout/store";
 import type { InvestorCard, Lang, Lead, ScoutSettings, WatchKind } from "@/lib/scout/types";
 
@@ -24,7 +23,7 @@ const STATE_COLLECTIONS: Partial<Record<string, Collection>> = { object: "object
 const LANGS = new Set(["ru", "en", "es", "uk"]);
 
 function str(value: unknown, max = 2000) {
-  return String(value ?? "").trim().slice(0, max);
+  return asText(value).trim().slice(0, max);
 }
 
 // Only known settings fields, with types checked, are saved.

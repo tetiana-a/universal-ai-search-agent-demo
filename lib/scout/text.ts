@@ -4,8 +4,15 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
+// Converts only primitives; objects become "" instead of "[object Object]".
+export function asText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  return "";
+}
+
 export function normalize(value: unknown) {
-  return String(value ?? "")
+  return asText(value)
     .toLowerCase()
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
@@ -30,7 +37,7 @@ export function randomId(prefix: string) {
 
 export function domainOf(url: unknown) {
   try {
-    return new URL(String(url || "")).hostname.replace(/^www\./, "").toLowerCase();
+    return new URL(asText(url)).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return "";
   }
@@ -95,7 +102,7 @@ function toNumber(raw: string) {
   if (/^\d{1,3}([.,]\d{3})+$/.test(s)) s = s.replace(/[.,]/g, "");
   else s = s.replace(",", ".");
   const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
+  return Number.isFinite(n) ? n : Number.NaN;
 }
 
 const NUM = "(\\d{1,3}(?:[\\s\\u00a0\\u202f.,']\\d{3})+|\\d+(?:[.,]\\d+)?)";
@@ -172,7 +179,7 @@ export function formatMoney(amount?: number, currency = "EUR") {
 }
 
 export function escapeHtml(value: unknown) {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return asText(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export function clamp(value: number, min = 0, max = 100) {

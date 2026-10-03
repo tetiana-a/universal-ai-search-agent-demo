@@ -98,7 +98,7 @@ export const defaultSearch: SearchFn = async (queries, lang, deadlineAt) => {
     const ok = outcomes.find((o) => o.ok);
     results.push(ok ? ok.hits.map((h) => ({ title: h.title, url: h.url, snippet: h.snippet, domain: h.domain })) : []);
     if (!ok) {
-      errors.push(outcomes.map((o) => o.message).filter(Boolean)[0] || "search failed");
+      errors.push(outcomes.map((o) => o.message).find(Boolean) || "search failed");
       // A keyless engine asking for a human check will keep refusing: stop instead of hammering it.
       if (outcomes.some((o) => o.status === "rate_limited") && !process.env.SEARXNG_URL) break;
     }
@@ -164,7 +164,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
     const posts = await readTelegramChannel(handle);
     const fresh = posts.filter((p) => !item.lastHitAt || (p.at && Date.parse(p.at) > Date.parse(item.lastHitAt)));
     stats.watchPosts += fresh.length;
-    for (const post of fresh) for (const target of settings.targets) { const card = extractObject(postToHit(post), { ...target, city: undefined }); if (card && card.city) { objectCandidates.push(card); break; } }
+    for (const post of fresh) for (const target of settings.targets) { const card = extractObject(postToHit(post), { ...target, city: undefined }); if (card?.city) { objectCandidates.push(card); break; } }
     if (fresh.length) watchUpdates.push({ ...item, hits: item.hits + fresh.length, lastHitAt: fresh.map((p) => p.at || "").sort((a, b) => a.localeCompare(b)).pop() || nowIso() });
   }
   stats.adapters.telegram_public = watch.some((w) => telegramHandle(w.value)) ? "posts: " + stats.watchPosts : "нет каналов в watchlist";
@@ -246,7 +246,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
 
 function channelFor(contact?: string): DraftChannel {
   if (!contact) return "other";
-  if (/@/.test(contact) && !/^@/.test(contact)) return "email";
+  if (contact.includes("@") && !contact.startsWith("@")) return "email";
   if (contact.startsWith("@") || contact.includes("t.me/")) return "telegram";
   if (/linkedin\.com/.test(contact)) return "linkedin";
   if (/^\+?\d[\d\s-]{8,}$/.test(contact)) return "whatsapp";

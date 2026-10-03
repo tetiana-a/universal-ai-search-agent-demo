@@ -93,7 +93,7 @@ export async function readFeeds(urls: string[]): Promise<RawHit[]> {
 }
 
 export function configuredFeeds() {
-  return String(process.env.SCOUT_FEEDS || "").split(",").map((s) => s.trim()).filter((s) => /^https:\/\//.test(s));
+  return String(process.env.SCOUT_FEEDS || "").split(",").map((s) => s.trim()).filter((s) => s.startsWith("https://"));
 }
 
 // ---- Idealista official API -------------------------------------------------

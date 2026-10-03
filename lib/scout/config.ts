@@ -82,10 +82,10 @@ export async function loadSettings(): Promise<ScoutSettings> {
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
-    dailyLimits: { ...DEFAULT_SETTINGS.dailyLimits, ...(saved.dailyLimits || {}) },
-    unsubscribeText: { ...DEFAULT_SETTINGS.unsubscribeText, ...(saved.unsubscribeText || {}) },
-    templates: { ...DEFAULT_TEMPLATES, ...(saved.templates || {}) },
-    marketPricePerM2: { ...DEFAULT_SETTINGS.marketPricePerM2, ...(saved.marketPricePerM2 || {}) },
+    dailyLimits: { ...DEFAULT_SETTINGS.dailyLimits, ...saved.dailyLimits },
+    unsubscribeText: { ...DEFAULT_SETTINGS.unsubscribeText, ...saved.unsubscribeText },
+    templates: { ...DEFAULT_TEMPLATES, ...saved.templates },
+    marketPricePerM2: { ...DEFAULT_SETTINGS.marketPricePerM2, ...saved.marketPricePerM2 },
   };
 }
 

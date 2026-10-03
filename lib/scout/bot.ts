@@ -285,7 +285,7 @@ async function handleCallback(query: any): Promise<BotResult> {
         const row = result.link && /^https:/.test(result.link) ? [{ text: "📨 Открыть и отправить", url: result.link }] : [];
         keyboard.push([...row, { text: "✔ Отправлено", callback_data: "d:sent:" + id }]);
       }
-      const status = !result.ok ? "⚠️ " + result.message : action === "send" ? "✅ Одобрено — " + escapeHtml(by) + (result.link && !/^https:/.test(result.link) ? "\nОтправьте: " + escapeHtml(result.link.slice(0, 300)) : "") : "✖️ Отклонено — " + escapeHtml(by);
+      const status = !result.ok ? "⚠️ " + result.message : action === "send" ? "✅ Одобрено — " + escapeHtml(by) + (result.link && !result.link.startsWith("https:") ? "\nОтправьте: " + escapeHtml(result.link.slice(0, 300)) : "") : "✖️ Отклонено — " + escapeHtml(by);
       await editMessage(chatId, messageId, draftText(result.draft) + "\n\n" + status, result.ok ? keyboard : draftKeyboard(result.draft));
     }
     return {};

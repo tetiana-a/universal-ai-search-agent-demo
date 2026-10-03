@@ -57,8 +57,8 @@ export function scoreInvestor(investor: InvestorCard, settings: ScoutSettings): 
   if (investor.comment?.level === "explicit") score += 40;
   else if (investor.comment?.level === "general") score += 20;
   if (investor.interest.budgetMin || investor.interest.budgetMax) score += 15;
-  const targetCountries = settings.targets.map((t) => t.country);
-  if (investor.interest.geography.some((g) => targetCountries.includes(g))) score += 15;
+  const targetCountries = new Set(settings.targets.map((t) => t.country));
+  if (investor.interest.geography.some((g) => targetCountries.has(g))) score += 15;
   if (investor.interest.goals.length) score += 5;
   if (investor.channel) score += 5;
   return { ...investor, score: Math.round(clamp(score)) };
