@@ -1,189 +1,227 @@
 @import "tailwindcss";
 
+/*
+ * Aurelius visual system: warm onyx, champagne gold, editorial serif headlines.
+ * Base resets live in @layer base and components in @layer components so that
+ * Tailwind utilities (text sizes, borders) are never overridden by them.
+ */
+
+@theme {
+  --font-sans: var(--font-sans), "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-display), "Cormorant Garamond", "Times New Roman", serif;
+}
+
 :root {
-  --bg: #050505;
-  --bg-soft: #0a0a09;
-  --surface: rgba(18, 17, 14, 0.62);
-  --surface-strong: rgba(20, 19, 15, 0.84);
-  --surface-hover: rgba(255, 255, 255, 0.045);
-  --line: rgba(212, 175, 55, 0.17);
-  --line-soft: rgba(255, 255, 255, 0.075);
-  --text: #f6eedc;
-  --text-soft: rgba(246, 238, 220, 0.72);
-  --text-muted: rgba(246, 238, 220, 0.39);
-  --text-faint: rgba(246, 238, 220, 0.22);
-  --gold: #d4af37;
-  --gold-bright: #f1d36c;
-  --success: #8fd9a5;
-  --warning: #e0c16d;
-  --danger: #df877e;
-  --shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
+  --bg: #0a0908;
+  --bg-soft: #100f0c;
+  --surface: rgba(24, 22, 18, 0.66);
+  --surface-strong: rgba(18, 16, 13, 0.94);
+  --surface-hover: rgba(255, 246, 228, 0.035);
+  --line: rgba(201, 169, 106, 0.18);
+  --line-soft: rgba(255, 246, 228, 0.07);
+  --text: #f3ece0;
+  --text-soft: rgba(243, 236, 224, 0.78);
+  --text-muted: rgba(243, 236, 224, 0.50);
+  --text-faint: rgba(243, 236, 224, 0.30);
+  --gold: #c9a96a;
+  --gold-bright: #e4cd9c;
+  --gold-deep: #8a6c3a;
+  --cyan: #a3b6c4;
+  --success: #a3c4a5;
+  --warning: #d9bc7c;
+  --danger: #d4938a;
+  --shadow: 0 1px 0 rgba(255, 246, 228, 0.03) inset, 0 30px 80px -30px rgba(0, 0, 0, 0.7);
   color-scheme: dark;
 }
 
 html.light {
-  --bg: #f4f1e8;
-  --bg-soft: #ece8dd;
-  --surface: rgba(255, 255, 255, 0.72);
-  --surface-strong: rgba(255, 255, 255, 0.90);
-  --surface-hover: rgba(25, 22, 16, 0.045);
-  --line: rgba(160, 124, 21, 0.22);
-  --line-soft: rgba(30, 25, 16, 0.10);
-  --text: #1a1814;
-  --text-soft: rgba(26, 24, 20, 0.76);
-  --text-muted: rgba(26, 24, 20, 0.50);
-  --text-faint: rgba(26, 24, 20, 0.30);
-  --gold: #a98216;
-  --gold-bright: #c79a20;
-  --success: #2f8a58;
-  --warning: #9c7410;
-  --danger: #b1473f;
-  --shadow: 0 24px 80px rgba(77, 65, 26, 0.13);
+  --bg: #f6f2ea;
+  --bg-soft: #efe9de;
+  --surface: rgba(255, 253, 249, 0.78);
+  --surface-strong: rgba(255, 253, 249, 0.96);
+  --surface-hover: rgba(40, 32, 20, 0.035);
+  --line: rgba(143, 111, 53, 0.22);
+  --line-soft: rgba(40, 32, 20, 0.09);
+  --text: #1c1915;
+  --text-soft: rgba(28, 25, 21, 0.78);
+  --text-muted: rgba(28, 25, 21, 0.54);
+  --text-faint: rgba(28, 25, 21, 0.34);
+  --gold: #8f6f35;
+  --gold-bright: #a9844a;
+  --gold-deep: #6e5428;
+  --cyan: #4f6b80;
+  --success: #3f7a52;
+  --warning: #8f6a1c;
+  --danger: #a5463d;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 30px 70px -34px rgba(70, 54, 24, 0.28);
   color-scheme: light;
 }
 
-* {
-  box-sizing: border-box;
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    min-height: 100%;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-height: 100%;
+    margin: 0;
+    background:
+      radial-gradient(1200px 520px at 78% -12%, color-mix(in srgb, var(--gold) 9%, transparent), transparent 70%),
+      radial-gradient(900px 600px at -10% 10%, rgba(255, 246, 228, 0.025), transparent 70%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+    transition: background 420ms ease, color 320ms ease;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--gold) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--gold) 30%, transparent);
+    color: var(--text);
+  }
 }
 
-html {
-  min-height: 100%;
-  scroll-behavior: smooth;
-}
-
-body {
-  min-height: 100%;
-  margin: 0;
-  background:
-    radial-gradient(circle at 86% -10%, color-mix(in srgb, var(--gold) 14%, transparent), transparent 32%),
-    radial-gradient(circle at 0% 18%, rgba(255,255,255,0.035), transparent 24%),
-    var(--bg);
-  color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  overflow-x: hidden;
-  transition: background 420ms ease, color 320ms ease;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
-button {
-  -webkit-tap-highlight-color: transparent;
-}
-
-::selection {
-  background: color-mix(in srgb, var(--gold) 28%, transparent);
-  color: var(--text);
+@layer components {
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-variant-numeric: lining-nums;
 }
 
 .app-grid {
   background-image:
-    linear-gradient(color-mix(in srgb, var(--gold) 5%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--gold) 5%, transparent) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,.62) 50%, transparent 100%);
+    linear-gradient(color-mix(in srgb, var(--gold) 3%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--gold) 3%, transparent) 1px, transparent 1px);
+  background-size: 96px 96px;
+  mask-image: radial-gradient(ellipse at 60% 0%, black 0%, rgba(0,0,0,.35) 45%, transparent 75%);
 }
 
 .glass {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, transparent), color-mix(in srgb, var(--surface) 72%, transparent));
-  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 246, 228, 0.022), transparent 40%),
+    color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1px solid var(--line-soft);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(24px) saturate(120%);
+  backdrop-filter: blur(22px) saturate(115%);
 }
 
 .glass-soft {
-  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
   border: 1px solid var(--line-soft);
-  backdrop-filter: blur(18px) saturate(115%);
+  backdrop-filter: blur(16px) saturate(110%);
 }
 
 .gold-text {
-  background: linear-gradient(112deg, #fff5c6 0%, var(--gold-bright) 38%, var(--gold) 68%, #8b6710 100%);
+  background: linear-gradient(112deg, #f4e6c6 0%, var(--gold-bright) 40%, var(--gold) 72%, var(--gold-deep) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
 html.light .gold-text {
-  background: linear-gradient(112deg, #d8a830 0%, #a98216 62%, #72530a 100%);
+  background: linear-gradient(112deg, #b8955a 0%, #8f6f35 62%, #5e4720 100%);
   -webkit-background-clip: text;
   background-clip: text;
 }
 
 .glow {
+  border-color: var(--line);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--gold) 16%, transparent),
-    0 0 55px color-mix(in srgb, var(--gold) 10%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--gold) 6%, transparent),
+    0 40px 120px -50px color-mix(in srgb, var(--gold) 22%, transparent),
     var(--shadow);
 }
 
+/* Kept for markup compatibility; constant motion reads as cheap, so it is static. */
 .ambient {
-  animation: ambient 9s ease-in-out infinite;
   transform-origin: center;
 }
 
 .float-in {
-  animation: float-in 560ms cubic-bezier(.22,1,.36,1) both;
+  animation: float-in 700ms cubic-bezier(.22,1,.36,1) both;
 }
 
 .float-in-delay-1 {
-  animation-delay: 80ms;
+  animation-delay: 70ms;
 }
 
 .float-in-delay-2 {
-  animation-delay: 150ms;
+  animation-delay: 140ms;
 }
 
 .float-in-delay-3 {
-  animation-delay: 220ms;
+  animation-delay: 210ms;
 }
 
 .shimmer {
   background: linear-gradient(
-    100deg,
-    transparent 20%,
-    color-mix(in srgb, var(--gold) 10%, transparent) 45%,
-    transparent 70%
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--gold) 55%, transparent) 50%,
+    transparent 100%
   );
-  background-size: 220% 100%;
-  animation: shimmer 5s linear infinite;
+  opacity: .5;
 }
 
 .pulse-dot {
-  animation: pulse-dot 2.2s ease-in-out infinite;
+  animation: pulse-dot 2.8s ease-in-out infinite;
 }
 
 .progress-glow {
-  box-shadow: 0 0 22px color-mix(in srgb, var(--gold) 46%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--gold) 30%, transparent);
 }
 
 .icon-lift {
-  transition: transform 220ms cubic-bezier(.22,1,.36,1), color 220ms ease, background 220ms ease;
+  transition: transform 260ms cubic-bezier(.22,1,.36,1), color 220ms ease, background 220ms ease;
 }
 
 .group:hover .icon-lift {
-  transform: translateY(-2px) scale(1.03);
+  transform: translateX(1px);
 }
 
 .panel-hover {
   transition:
-    transform 260ms cubic-bezier(.22,1,.36,1),
-    border-color 220ms ease,
-    background 220ms ease,
-    box-shadow 260ms ease;
+    border-color 260ms ease,
+    background 260ms ease,
+    box-shadow 300ms ease,
+    color 220ms ease;
 }
 
 .panel-hover:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--gold) 29%, var(--line-soft));
+  border-color: color-mix(in srgb, var(--gold) 26%, var(--line-soft));
   background: var(--surface-hover);
-  box-shadow:
-    0 18px 60px rgba(0,0,0,.18),
-    0 0 0 1px color-mix(in srgb, var(--gold) 8%, transparent);
 }
 
 .shine-button {
@@ -195,9 +233,9 @@ html.light .gold-text {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(120deg, transparent 36%, rgba(255,255,255,.26) 50%, transparent 64%);
+  background: linear-gradient(120deg, transparent 38%, rgba(255,255,255,.22) 50%, transparent 62%);
   transform: translateX(-120%);
-  transition: transform 620ms cubic-bezier(.22,1,.36,1);
+  transition: transform 900ms cubic-bezier(.22,1,.36,1);
 }
 
 .shine-button:hover::after {
@@ -205,12 +243,12 @@ html.light .gold-text {
 }
 
 .soft-focus {
-  animation: soft-focus 900ms cubic-bezier(.22,1,.36,1) both;
+  animation: soft-focus 700ms cubic-bezier(.22,1,.36,1) both;
 }
 
 .thin-scroll::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 
 .thin-scroll::-webkit-scrollbar-track {
@@ -218,62 +256,84 @@ html.light .gold-text {
 }
 
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text) 14%, transparent);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 999px;
+}
+
+/*
+ * The "spectrum" classes used to be a rainbow system. They now render a quiet
+ * champagne-gold treatment; the names are kept so markup did not have to move.
+ */
+.spectrum-line {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--gold) 70%, transparent) 30%, var(--gold-bright) 50%, color-mix(in srgb, var(--gold) 70%, transparent) 70%, transparent);
+  height: 1px !important;
+  opacity: .8;
+}
+
+.spectrum-progress {
+  background: linear-gradient(90deg, var(--gold-deep), var(--gold) 55%, var(--gold-bright));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--gold) 28%, transparent);
+}
+
+.spectrum-button {
+  background: linear-gradient(180deg, #ecd8ab 0%, #c9a96a 55%, #a88a4f 100%);
+  color: #17130c !important;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.45) inset,
+    0 -1px 0 rgba(0,0,0,.18) inset,
+    0 14px 34px -14px rgba(201,169,106,.55) !important;
+  letter-spacing: .02em;
+}
+
+html.light .spectrum-button {
+  background: linear-gradient(180deg, #2a241a 0%, #17130c 100%);
+  color: #f3e6c8 !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 14px 30px -14px rgba(40,30,10,.55) !important;
+}
+
+.spectrum-icon {
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+  color: var(--gold-bright);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 22%, transparent) inset;
+}
+
+.spectrum-icon-text {
+  color: var(--gold);
+}
+
+.btn-gold {
+  background: linear-gradient(180deg, #ecd8ab 0%, #c9a96a 55%, #a88a4f 100%);
+  color: #17130c;
+  box-shadow: 0 1px 0 rgba(255,255,255,.45) inset, 0 14px 34px -14px rgba(201,169,106,.55);
+}
 }
 
 @keyframes float-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(.985);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
-}
-
-@keyframes ambient {
-  0%, 100% {
-    transform: translate3d(0, 0, 0) scale(1);
-    opacity: .95;
-  }
-  50% {
-    transform: translate3d(0, 8px, 0) scale(1.02);
-    opacity: 1;
-  }
-}
-
-@keyframes shimmer {
-  from { background-position: 220% 0; }
-  to { background-position: -220% 0; }
 }
 
 @keyframes pulse-dot {
   0%, 100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 0%, transparent);
-    transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--success) 10%, transparent);
-    transform: scale(1.05);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 14%, transparent);
   }
 }
 
 @keyframes soft-focus {
   from {
     opacity: 0;
-    filter: blur(3px);
   }
   to {
     opacity: 1;
-    filter: blur(0);
-  }
-}
-
-@media (max-width: 1023px) {
-  .app-grid {
-    background-size: 36px 36px;
   }
 }
 
@@ -281,95 +341,6 @@ html.light .gold-text {
   .mobile-table {
     min-width: 920px;
   }
-}
-
-
-.spectrum-line,
-.spectrum-progress {
-  background: linear-gradient(
-    90deg,
-    #ff3b30 0%,
-    #ff9500 12%,
-    #ffd60a 24%,
-    #34c759 38%,
-    #00c7be 50%,
-    #0a84ff 63%,
-    #5856d6 74%,
-    #af52de 86%,
-    #ff2d55 100%
-  );
-  background-size: 360% 100%;
-  animation: spectrum-flow 8s linear infinite;
-}
-
-.spectrum-line {
-  box-shadow: 0 0 28px rgba(10, 132, 255, .18), 0 0 22px rgba(175, 82, 222, .16);
-}
-
-.spectrum-progress {
-  box-shadow:
-    0 0 20px rgba(10, 132, 255, .20),
-    0 0 24px rgba(175, 82, 222, .16),
-    0 0 28px rgba(52, 199, 89, .14);
-}
-
-.spectrum-button {
-  background: linear-gradient(
-    110deg,
-    #ffd60a,
-    #ff9500,
-    #ff375f,
-    #af52de,
-    #0a84ff,
-    #00c7be,
-    #34c759,
-    #ffd60a
-  );
-  background-size: 320% 320%;
-  animation: spectrum-flow 8s linear infinite, spectrum-breathe 3.6s ease-in-out infinite;
-}
-
-.spectrum-icon {
-  background: linear-gradient(140deg, rgba(255,214,10,.22), rgba(10,132,255,.18), rgba(175,82,222,.18));
-  color: #fff;
-  animation: spectrum-icon-cycle 7s linear infinite;
-}
-
-.spectrum-icon-text {
-  animation: spectrum-icon-color 7s linear infinite;
-}
-
-.spectrum-shell .spectrum-glow {
-  animation: spectrum-breathe 4.2s ease-in-out infinite;
-}
-
-@keyframes spectrum-flow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@keyframes spectrum-breathe {
-  0%, 100% { filter: saturate(1); transform: translateZ(0) scale(1); }
-  50% { filter: saturate(1.18); transform: translateZ(0) scale(1.012); }
-}
-
-@keyframes spectrum-icon-cycle {
-  0% { box-shadow: 0 0 0 1px rgba(255,214,10,.22), 0 0 22px rgba(255,214,10,.10); }
-  25% { box-shadow: 0 0 0 1px rgba(52,199,89,.22), 0 0 22px rgba(52,199,89,.10); }
-  50% { box-shadow: 0 0 0 1px rgba(10,132,255,.24), 0 0 22px rgba(10,132,255,.11); }
-  75% { box-shadow: 0 0 0 1px rgba(175,82,222,.24), 0 0 22px rgba(175,82,222,.11); }
-  100% { box-shadow: 0 0 0 1px rgba(255,214,10,.22), 0 0 22px rgba(255,214,10,.10); }
-}
-
-@keyframes spectrum-icon-color {
-  0% { color: #ffd60a; }
-  18% { color: #ff9500; }
-  36% { color: #34c759; }
-  54% { color: #00c7be; }
-  72% { color: #0a84ff; }
-  86% { color: #af52de; }
-  100% { color: #ffd60a; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -982,7 +982,7 @@ export default function Home() {
               disabled={action.disabled}
               title={action.label}
               className={
-                "panel-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] transition " +
+                "panel-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11.5px] transition " +
                 (action.disabled
                   ? "cursor-not-allowed border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-faint)] opacity-60"
                   : action.accent
@@ -1606,7 +1606,7 @@ export default function Home() {
               <div className="text-[10px] font-semibold uppercase tracking-[.24em] text-[var(--gold)]">
                 AURELIUS • SYSTEM CONFIG
               </div>
-              <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-[var(--text)] sm:text-4xl">
+              <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-5xl">
                 {t.settingsTitle}
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
@@ -1629,7 +1629,7 @@ export default function Home() {
               </button>
               <button
                 onClick={saveSettings}
-                className="shine-button inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-2.5 text-xs font-semibold text-black"
+                className="shine-button inline-flex items-center gap-2 rounded-xl btn-gold px-4 py-2.5 text-xs font-semibold text-black"
               >
                 <CheckCircle2 size={14} />
                 {t.apply}
@@ -1957,7 +1957,7 @@ export default function Home() {
             </div>
           </div>
           <div className="text-left lg:text-right">
-            <div className="text-3xl font-semibold tracking-[-.04em] text-[var(--text)]">{progress}%</div>
+            <div className="font-display text-5xl font-medium leading-none lining-nums tabular-nums text-[var(--text)]">{progress}%</div>
             <div className="mt-1 text-[10px] uppercase tracking-[.16em] text-[var(--text-faint)]">{stage[lang === "ru" ? "ru" : "en"]}</div>
           </div>
         </div>
@@ -2134,7 +2134,7 @@ export default function Home() {
   function renderResearch() {
     return (
       <>
-        <section className="glass glow ambient relative overflow-hidden rounded-[30px] p-5 sm:p-7 lg:p-9 float-in">
+        <section className="glass glow relative overflow-hidden rounded-[32px] p-6 sm:p-9 lg:p-12 float-in">
           <div className="absolute -right-28 -top-32 h-80 w-80 rounded-full bg-[color:color-mix(in_srgb,var(--gold)_10%,transparent)] blur-3xl" />
           <div className="absolute inset-x-0 top-0 h-px shimmer opacity-70" />
 
@@ -2144,21 +2144,21 @@ export default function Home() {
               {t.product}
             </div>
 
-            <h1 className="mt-4 max-w-4xl text-3xl font-semibold tracking-[-.045em] text-[var(--text)] sm:text-4xl lg:text-[54px]">
+            <h1 className="font-display mt-5 max-w-4xl text-[40px] font-medium leading-[1.02] tracking-[-.012em] text-[var(--text)] sm:text-[52px] lg:text-[68px]">
               {t.tell}
             </h1>
 
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-[var(--text-muted)] sm:text-base">
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--text-muted)] sm:text-[15px]">
               {t.sub}
             </p>
 
-            <div className="mt-7 rounded-[22px] border border-[var(--line)] bg-black/20 p-2.5 backdrop-blur-xl">
+            <div className="mt-9 rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-2 backdrop-blur-xl">
               <div className="rounded-[17px] border border-[var(--line-soft)] bg-[var(--surface-strong)] p-3 shadow-2xl">
                 <textarea
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   rows={4}
-                  className="w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-[var(--text-soft)] outline-none placeholder:text-[var(--text-faint)] sm:text-[15px]"
+                  className="w-full resize-none bg-transparent px-2 py-1 text-[15px] leading-7 text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] sm:text-base"
                   placeholder={lang === "ru" ? "Например: найди..." : "For example: find..."}
                   aria-label="Research query"
                 />
@@ -2167,7 +2167,7 @@ export default function Home() {
                   <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => setScenarioAndStay("realEstate")}
-                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
                         scenario === "realEstate"
                           ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
                           : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
@@ -2177,7 +2177,7 @@ export default function Home() {
                     </button>
                     <button
                       onClick={() => setScenarioAndStay("investors")}
-                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
                         scenario === "investors"
                           ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
                           : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
@@ -2187,7 +2187,7 @@ export default function Home() {
                     </button>
                     <button
                       onClick={() => setScenarioAndStay("companies")}
-                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
                         scenario === "companies"
                           ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
                           : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
@@ -2247,7 +2247,7 @@ export default function Home() {
                     <button
                       onClick={startResearch}
                       disabled={running}
-                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold text-black shadow-[0_12px_38px_rgba(212,175,55,.18)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-[13px] font-semibold text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Search size={14} />
                       {running ? startButtonLabel : t.start}
@@ -2332,9 +2332,9 @@ export default function Home() {
             >
               <div className="flex items-center justify-between">
                 <div className="text-xs text-[var(--text-muted)]">{String(label)}</div>
-                <Icon size={17} className="spectrum-icon-text" />
+                <Icon size={16} strokeWidth={1.5} className="spectrum-icon-text opacity-80" />
               </div>
-              <div className="mt-4 text-3xl font-semibold tracking-tight text-[var(--text)]">
+              <div className="font-display mt-5 text-[44px] font-medium leading-none lining-nums tabular-nums text-[var(--text)]">
                 {String(value)}
               </div>
               <div className="mt-1 text-[11px] text-[var(--text-faint)]">{String(note)}</div>
@@ -2380,7 +2380,7 @@ export default function Home() {
                 <button
                   key={key}
                   onClick={() => setFilter(key)}
-                  className={`rounded-full px-3 py-1.5 text-[10px] transition ${
+                  className={`rounded-full px-3 py-1.5 text-[11.5px] transition ${
                     filter === key
                       ? "bg-[var(--gold)]/12 text-[var(--gold-bright)] ring-1 ring-[var(--gold)]/15"
                       : "bg-white/[.03] text-[var(--text-muted)] hover:bg-white/[.05]"
@@ -2393,7 +2393,7 @@ export default function Home() {
               <button
                 onClick={exportCsv}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Download size={12} />
                 CSV
@@ -2401,21 +2401,21 @@ export default function Home() {
               <button
                 onClick={() => void exportExcel()}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 XLSX
               </button>
               <button
                 onClick={() => void exportPdf()}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 PDF
               </button>
               <button
                 onClick={exportJson}
                 disabled={!usingLiveData}
-                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 JSON
               </button>
@@ -2661,7 +2661,7 @@ export default function Home() {
                     : "The agent does not bypass CAPTCHA or site access controls. It provides a safe manual checkpoint and continues with allowed alternate sources."}
                 </p>
               </div>
-              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[10px] text-[var(--warning)]">
+              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[11.5px] text-[var(--warning)]">
                 {accessCheckpoints.length} {lang === "ru" ? "точек" : "checkpoints"}
               </div>
             </div>
@@ -2697,15 +2697,15 @@ export default function Home() {
           </section>
         ) : null}
 
-<section className="glass rounded-[26px] p-5 sm:p-6">
+<section className="glass rounded-[28px] p-6 sm:p-8">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[.2em] text-[var(--gold)]">
-                ONE AGENT.
+              <div className="text-[10px] font-semibold uppercase tracking-[.28em] text-[var(--gold)]">
+                {lang === "ru" ? "Один агент" : "One agent"}
               </div>
-              <div className="mt-1 text-xl font-semibold tracking-tight text-[var(--text)]">
-                {lang === "ru" ? "МНОГО ТИПОВ ИССЛЕДОВАНИЯ." : "MANY RESEARCH TASKS."}
-              </div>
+              <h2 className="mt-2 text-[30px] leading-tight text-[var(--text)]">
+                {lang === "ru" ? "Много типов исследования" : "Many research tasks"}
+              </h2>
             </div>
             <div className="text-xs text-[var(--text-muted)]">{t.scenario}</div>
           </div>
@@ -2744,7 +2744,7 @@ export default function Home() {
           <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
             {t.allTasks}
           </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-[var(--text)]">
+          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
             {lang === "ru" ? "Все исследовательские задачи" : "All research tasks"}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">
@@ -2811,7 +2811,7 @@ export default function Home() {
               <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
                 STAGE 1 • SOURCE FEASIBILITY GATE
               </div>
-              <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-[var(--text)]">
+              <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
                 {lang === "ru" ? "20–30 источников недвижимости Мадрида" : "20–30 Madrid land sources"}
               </h1>
               <p className="mt-3 max-w-4xl text-sm leading-6 text-[var(--text-muted)]">
@@ -2852,7 +2852,7 @@ export default function Home() {
                   href={href}
                   target="_blank"
                   rel="noreferrer"
-                  className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-3 py-1.5 text-[10px] text-[var(--text-muted)] hover:border-[var(--line)] hover:text-[var(--gold-bright)]"
+                  className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] hover:border-[var(--line)] hover:text-[var(--gold-bright)]"
                 >
                   {label}
                 </a>
@@ -2954,7 +2954,7 @@ export default function Home() {
           <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
             Qualified Results
           </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-[var(--text)]">
+          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
             {lang === "ru" ? "Результаты исследования" : "Research results"}
           </h1>
           <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
@@ -2976,7 +2976,7 @@ export default function Home() {
               <button
                 key={key}
                 onClick={() => setFilter(key)}
-                className={`rounded-full px-3 py-1.5 text-[10px] ${
+                className={`rounded-full px-3 py-1.5 text-[11.5px] ${
                   filter === key
                     ? "bg-[var(--gold)]/12 text-[var(--gold-bright)]"
                     : "bg-white/[.03] text-[var(--text-muted)]"
@@ -2988,12 +2988,12 @@ export default function Home() {
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {renderShareActions(true)}
-              <button onClick={exportCsv} disabled={!usingLiveData} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40">
+              <button onClick={exportCsv} disabled={!usingLiveData} className="panel-hover inline-flex items-center gap-1.5 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-40">
                 <Download size={12} /> CSV
               </button>
-              <button onClick={() => void exportExcel()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">Excel</button>
-              <button onClick={() => void exportPdf()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">PDF</button>
-              <button onClick={exportJson} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">JSON</button>
+              <button onClick={() => void exportExcel()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)]">Excel</button>
+              <button onClick={() => void exportPdf()} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)]">PDF</button>
+              <button onClick={exportJson} className="panel-hover rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)]">JSON</button>
             </div>
           </div>
 
@@ -3066,8 +3066,8 @@ export default function Home() {
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[.34em] text-[var(--gold)]">AURELIUS</div>
-                <div className="mt-1 text-[17px] font-semibold tracking-tight text-[var(--text)]">{t.product}</div>
+                <div className="font-display gold-text text-[26px] font-medium leading-none tracking-[.22em]">AURELIUS</div>
+                <div className="mt-2 text-[11px] leading-4 tracking-[.04em] text-[var(--text-muted)]">{t.product}</div>
               </div>
               <button
                 onClick={() => setMobileOpen(false)}
@@ -3134,7 +3134,7 @@ export default function Home() {
 
               <div className="mt-3 border-t border-[var(--line-soft)] pt-4">
                 <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-[#f0cf63] via-[#d4af37] to-[#765814] text-xs font-bold text-black">
+                  <div className="grid h-9 w-9 place-items-center rounded-full btn-gold text-xs font-bold text-black">
                     TK
                   </div>
                   <div className="min-w-0">
@@ -3177,7 +3177,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 [&>*]:whitespace-nowrap">
               <div className="hidden items-center gap-2 rounded-full border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-faint)] md:flex">
                 <Command size={13} /> K
               </div>
@@ -3266,13 +3266,13 @@ export default function Home() {
               <div className="flex overflow-hidden rounded-xl border border-[var(--line-soft)] bg-[var(--surface)]">
                 <button
                   onClick={() => setLang("ru")}
-                  className={`px-2.5 py-1.5 text-[10px] ${lang === "ru" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
+                  className={`px-2.5 py-1.5 text-[11.5px] ${lang === "ru" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
                 >
                   RU
                 </button>
                 <button
                   onClick={() => setLang("en")}
-                  className={`px-2.5 py-1.5 text-[10px] ${lang === "en" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
+                  className={`px-2.5 py-1.5 text-[11.5px] ${lang === "en" ? "bg-[var(--gold)]/10 text-[var(--gold-bright)]" : "text-[var(--text-muted)]"}`}
                 >
                   EN
                 </button>
@@ -3364,7 +3364,7 @@ export default function Home() {
               href={selectedResult.url}
               target="_blank"
               rel="noreferrer"
-              className="shine-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black"
+              className="shine-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl btn-gold px-4 py-3 text-sm font-semibold text-black"
             >
               <ExternalLink size={15} />
               {t.open}
@@ -3433,7 +3433,7 @@ export default function Home() {
               <button
                 onClick={() => void sendEmailReport()}
                 disabled={emailSendStatus === "sending" || !emailRecipient.trim()}
-                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl btn-gold px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Mail size={15} />
                 {emailSendStatus === "sending"
@@ -3534,7 +3534,7 @@ export default function Home() {
               <button
                 onClick={() => void sendTelegramReport()}
                 disabled={telegramStatus === "sending" || shownResults.length === 0}
-                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f0cf63] via-[#d4af37] to-[#9d7618] px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="shine-button inline-flex items-center justify-center gap-2 rounded-xl btn-gold px-4 py-3 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Send size={15} />
                 {telegramStatus === "sending"
@@ -3709,7 +3709,7 @@ export default function Home() {
           setActiveNav("research");
           window.scrollTo({ top: 0, behavior: "smooth" });
         }}
-        className="shine-button fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-[#f0cf63] via-[#d4af37] to-[#9d7618] text-black shadow-[0_14px_42px_rgba(212,175,55,.24)] ring-4 ring-[var(--bg)] lg:hidden"
+        className="shine-button fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full btn-gold text-black  ring-4 ring-[var(--bg)] lg:hidden"
         aria-label={t.newResearch}
       >
         <Sparkles size={19} />
