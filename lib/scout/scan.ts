@@ -162,7 +162,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
     const handle = telegramHandle(item.value);
     if (!handle) continue;
     const posts = await readTelegramChannel(handle);
-    const fresh = posts.filter((p) => !item.lastHitAt || (p.at && p.at > item.lastHitAt));
+    const fresh = posts.filter((p) => !item.lastHitAt || (p.at && Date.parse(p.at) > Date.parse(item.lastHitAt)));
     stats.watchPosts += fresh.length;
     for (const post of fresh) for (const target of settings.targets) { const card = extractObject(postToHit(post), { ...target, city: undefined }); if (card && card.city) { objectCandidates.push(card); break; } }
     if (fresh.length) watchUpdates.push({ ...item, hits: item.hits + fresh.length, lastHitAt: fresh.map((p) => p.at || "").sort((a, b) => a.localeCompare(b)).pop() || nowIso() });
@@ -247,7 +247,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanStats> {
 function channelFor(contact?: string): DraftChannel {
   if (!contact) return "other";
   if (/@/.test(contact) && !/^@/.test(contact)) return "email";
-  if (/^@|t\.me\//.test(contact)) return "telegram";
+  if (contact.startsWith("@") || contact.includes("t.me/")) return "telegram";
   if (/linkedin\.com/.test(contact)) return "linkedin";
   if (/^\+?\d[\d\s-]{8,}$/.test(contact)) return "whatsapp";
   return "other";

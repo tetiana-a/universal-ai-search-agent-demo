@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Building2, CalendarPlus, Check, Database, Flame, Handshake, KeyRound, Landmark, Link2, MapPin, MessageSquare, Pencil, Play, Plug,
+  Building2, CalendarPlus, Check, Database, Flame, Handshake, KeyRound, Landmark, Link2, MapPin, MessageSquare, Pencil, Plug,
   Radar, RefreshCw, ScrollText, Send, Settings2, ShieldCheck, Sparkles, Telescope, Trash2, Upload, Users, X,
 } from "lucide-react";
 import type { AgencyCard, Draft, InvestorCard, Lead, LogEntry, Match, Meeting, ObjectCard, ScanStats, ScoutSettings, ScoutSource, WatchItem } from "@/lib/scout/types";
