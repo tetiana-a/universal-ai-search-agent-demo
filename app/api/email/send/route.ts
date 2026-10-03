@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { buildEmailHtml, buildPlainTextReport, safeFilenamePart, type ResearchExportPayload } from "@/lib/research-report";
 import { createPdfBuffer, createXlsxBuffer } from "@/lib/server-exporters";
+import { assertFeature, resolvePlan } from "@/lib/plans";
+import { errorBody } from "@/lib/research-errors";
 
 export const runtime = "nodejs";
 export const maxDuration = 35;
@@ -31,6 +33,12 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  try {
+    assertFeature(resolvePlan(request), "email");
+  } catch (error) {
+    const e = errorBody(error);
+    return NextResponse.json(e.body, { status: e.status });
+  }
   if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
     return NextResponse.json(
       { error: "Email delivery is not configured. Add RESEND_API_KEY and EMAIL_FROM in Vercel." },
@@ -52,7 +60,7 @@ export async function POST(request: Request) {
   if (!isPayload(payload)) {
     return NextResponse.json({ error: "A research export payload is required." }, { status: 400 });
   }
-  if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(to)) {
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
     return NextResponse.json({ error: "Enter a valid recipient email address." }, { status: 400 });
   }
   if (!isAllowedRecipient(to)) {

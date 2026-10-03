@@ -133,13 +133,14 @@ export function buildPlainTextReport(payload: ResearchExportPayload, maxResults 
 }
 
 function resultHtml(item: ReportResult, index: number) {
-  const title = escapeHtml(resultLabel(item));
-  const location = escapeHtml(valueOrDash(item.geography, item.location));
-  const profile = escapeHtml(valueOrDash(item.specialization, item.area));
-  const source = escapeHtml(valueOrDash(item.source, item.sourceDomain));
-  const evidence = escapeHtml(valueOrDash(item.evidenceQuote, item.evidence));
+  const title = escapeHtml(compactText(resultLabel(item), 200));
+  const location = escapeHtml(compactText(valueOrDash(item.geography, item.location), 200));
+  const profile = escapeHtml(compactText(valueOrDash(item.specialization, item.area), 240));
+  const source = escapeHtml(compactText(valueOrDash(item.source, item.sourceDomain), 120));
+  const evidence = escapeHtml(compactText(valueOrDash(item.evidenceQuote, item.evidence), 600));
   const status = escapeHtml(valueOrDash(item.status));
-  const link = item.url ? '<a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.url) + "</a>" : "—";
+  const safeLink = item.url && /^https?:\/\//i.test(String(item.url));
+  const link = safeLink ? '<a href="' + escapeHtml(item.url) + '">' + escapeHtml(compactText(item.url, 300)) + "</a>" : "—";
 
   return [
     "<b>" + (index + 1) + ". " + title + "</b>",
@@ -153,21 +154,37 @@ function resultHtml(item: ReportResult, index: number) {
   ].join("\n");
 }
 
+export const TELEGRAM_MESSAGE_LIMIT = 3900;
+
+// Telegram allows 4096 characters per message. Result blocks are packed into as few
+// messages as possible (fewer API calls, less rate limiting) without splitting a block.
 export function buildTelegramMessages(payload: ResearchExportPayload, maxResults = 12) {
   const results = payload.results.slice(0, maxResults);
   const stats = Object.entries(payload.stats || {}).slice(0, 8);
   const summary = [
     "<b>AURELIUS • RESEARCH REPORT</b>",
-    "<b>Query:</b> " + escapeHtml(payload.query || "—"),
+    "<b>Query:</b> " + escapeHtml(compactText(payload.query || "—", 500)),
     payload.generatedAt ? "<b>Generated:</b> " + escapeHtml(payload.generatedAt) : "",
     payload.searchSummary ? "<b>Summary:</b> " + escapeHtml(compactText(payload.searchSummary, 500)) : "",
-    stats.length ? "<b>Stats:</b> " + escapeHtml(stats.map(function(entry) { return entry[0] + "=" + String(entry[1] ?? "—"); }).join(" · ")) : "",
-    "<b>Results:</b> " + results.length,
+    stats.length ? "<b>Stats:</b> " + escapeHtml(compactText(stats.map(function(entry) { return entry[0] + "=" + String(entry[1] ?? "—"); }).join(" · "), 600)) : "",
+    "<b>Results:</b> " + results.length + (payload.results.length > results.length ? " of " + payload.results.length + " (full list in the attached XLSX)" : ""),
   ].filter(Boolean).join("\n");
 
   const messages = [summary];
-  for (let i = 0; i < results.length; i += 1) messages.push(resultHtml(results[i], i));
-  if (!results.length) messages.push("<i>No structured results were returned; review the source registry.</i>");
+  if (!results.length) {
+    messages.push("<i>No structured results were returned; review the source registry.</i>");
+    return messages;
+  }
+  let current = "";
+  for (let i = 0; i < results.length; i += 1) {
+    const block = resultHtml(results[i], i);
+    if (current && current.length + 2 + block.length > TELEGRAM_MESSAGE_LIMIT) {
+      messages.push(current);
+      current = "";
+    }
+    current = current ? current + "\n\n" + block : block;
+  }
+  if (current) messages.push(current);
   return messages;
 }
 

@@ -166,3 +166,20 @@ Free mode uses Jina Search/Reader plus OpenRouter free-model inference. Jina Sea
 - For multiple Telegram users, each user must first open the bot and press Start; add their resulting Chat IDs to the allowlist.
 - Email delivery uses the Resend REST API, with a styled HTML report and XLSX/PDF attachments. Configure \`RESEND_API_KEY\`, \`EMAIL_FROM\` and \`EMAIL_ALLOWED_RECIPIENTS\`.
 - Gmail/Outlook compose links remain available as a client-side fallback.
+
+
+## v2.3 — Production hardening
+
+- **No more silent zero results.** Missing `JINA_API_KEY` → `503 JINA_API_KEY_MISSING`; every provider failing → `502 SEARCH_PROVIDERS_FAILED` with per-provider HTTP status; a real "nothing found" → `200` with `outcome: "no_candidates"` and an explanation. Every error has a stable `code`.
+- **Provider fallback.** Any configured Brave/Tavily/Exa/Serper/Mojeek/Yandex/Naver/DataForSEO key is used automatically when Jina fails, is rate limited or returns fewer than 5 candidates.
+- **Manual Review instead of empty output.** If AI extraction fails, times out or confirms nothing, live candidates are kept as `Manual review` (`outcome: "candidates_for_review"`).
+- **Investor relevance.** Events, conferences, networking, jobs, IPO/stock and news pages are rejected; directory pages and investors without confirmed geography/sector go to review. The old Cyprus/SaaS hard-coding is gone: geography and sector come from the query.
+- **Evidence.** `Verified` is only granted when the quote is found in page text the app retrieved itself; AI results with URLs that were never retrieved are dropped.
+- **Quality Gate** scores four independent dimensions (relevance, evidence, source validity, confidence). `REVIEW` keeps the result visible.
+- **Deduplication** resolves organisations across URLs (legal suffixes, own domain, LinkedIn/Crunchbase aware).
+- **Source Registry** stores one record per domain with health (`healthy/degraded/failing`), reuses only related sources and stops reusing sources that failed three times.
+- **Telegram**: precise diagnostics (invalid token, chat not found, bot blocked, no rights), messages packed under the 4096-char limit, retry on 429, and a failed XLSX/PDF no longer blocks the report.
+- **Exports**: XLSX no longer crashes when results exist (exceljs table error), CSV/XLSX formula-injection guard, export errors are shown separately from research errors.
+- **Free / Pro plans** — see `docs/PLANS_AND_BILLING.md` (includes the n8n decision).
+- **Security**: SSRF guard for all URLs read on the server, client-supplied source memory is sanitized, e-mail validation regex fixed.
+- **Tests**: `npm test` (Vitest, 44 regression tests), `npm run typecheck`; CI runs both before `next build`.

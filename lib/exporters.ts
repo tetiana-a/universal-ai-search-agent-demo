@@ -23,9 +23,13 @@ function safePart(value: string) {
 }
 
 async function downloadRemote(format: "csv" | "xlsx" | "pdf" | "json", payload: ResearchExportPayload) {
+  let planKey = "";
+  try { planKey = window.localStorage.getItem("aurelius-plan-key-v1") || ""; } catch {}
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (planKey) headers["x-aurelius-plan-key"] = planKey;
   const response = await fetch("/api/export", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({ format, payload }),
   });
 
