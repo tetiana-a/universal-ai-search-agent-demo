@@ -22,7 +22,7 @@ beforeEach(() => {
   resetMemoryStore();
   vi.stubEnv("KV_REST_API_URL", "");
   vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
-  vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:abc");
+  vi.stubEnv("TELEGRAM_BOT_TOKEN", "test-bot-token");
   vi.stubEnv("TELEGRAM_CHAT_ID", "-5415363237");
   vi.stubEnv("TELEGRAM_ALLOWED_CHAT_IDS", "-5415363237,8213865630");
   vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "");
@@ -124,7 +124,7 @@ describe("scout qualification dialogue", () => {
   it("fills several checklist items from one reply and asks the next missing one", () => {
     const { lead, reply, event } = advanceDialog(start(), "Бюджет 300-500 тыс евро, интересует квартира в Испании под сдачу");
     expect(event).toBe("question");
-    expect(Object.keys(lead.answers).sort()).toEqual(["budget", "geography", "goal", "type"]);
+    expect(Object.keys(lead.answers).sort((a, b) => a.localeCompare(b))).toEqual(["budget", "geography", "goal", "type"]);
     expect(reply).toBe("Когда планируете сделку и насколько это срочно?");
   });
 
@@ -238,7 +238,7 @@ describe("scout daily run and report", () => {
 
 describe("scout Telegram bot", () => {
   function botFetch() {
-    return mockFetch([{ match: (url) => url.startsWith("https://api.telegram.org/bot123:abc/"), respond: () => json({ ok: true, result: { message_id: 7 } }) }]);
+    return mockFetch([{ match: (url) => url.startsWith("https://api.telegram.org/bottest-bot-token/"), respond: () => json({ ok: true, result: { message_id: 7 } }) }]);
   }
   const sent = (calls: Array<{ url: string; init?: RequestInit }>) => calls.filter((c) => c.url.endsWith("/sendMessage")).map((c) => JSON.parse(String(c.init?.body)));
 

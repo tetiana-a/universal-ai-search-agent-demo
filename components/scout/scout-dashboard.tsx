@@ -70,6 +70,37 @@ function parseCsv(text: string): Record<string, string>[] {
   return header ? body.map((r) => Object.fromEntries(header.map((h, i) => [h.trim(), (r[i] || "").trim()]))) : [];
 }
 
+// Only web and mail links from stored data are rendered as links.
+function safeHref(url?: string) {
+  return url && /^(https?:\/\/|mailto:)/i.test(url) ? url : undefined;
+}
+
+function unescapeHtml(text: string) {
+  return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+}
+
+// Renders the Telegram report HTML (only <b> and <a> tags) as React elements, without innerHTML.
+function ReportView({ html }: { html: string }) {
+  return (
+    <>
+      {html.split("\n").map((line, lineIndex) => {
+        const parts: ReactNode[] = [];
+        const re = /<b>([\s\S]*?)<\/b>|<a href="([^"]*)">([\s\S]*?)<\/a>/g;
+        let last = 0;
+        for (const m of line.matchAll(re)) {
+          const at = m.index ?? 0;
+          if (at > last) parts.push(unescapeHtml(line.slice(last, at)));
+          if (m[1] !== undefined) parts.push(<b key={at}>{unescapeHtml(m[1])}</b>);
+          else parts.push(<a key={at} href={safeHref(unescapeHtml(m[2]))} target="_blank" rel="noreferrer">{unescapeHtml(m[3])}</a>);
+          last = at + m[0].length;
+        }
+        if (last < line.length) parts.push(unescapeHtml(line.slice(last)));
+        return <div key={lineIndex} className="min-h-[1.4em]">{parts}</div>;
+      })}
+    </>
+  );
+}
+
 function ScoreBadge({ score }: { score: number }) {
   const color = score >= 70 ? "#34c759" : score >= 50 ? "var(--gold-bright)" : "var(--text-muted)";
   return <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-sm font-semibold tabular-nums" style={{ color, borderColor: color }}>{score}</span>;
@@ -268,9 +299,9 @@ function ReportTab({ state, act, busy, headers, setToast }: { state: State; act:
       </div>
       <div className="grid gap-5 lg:grid-cols-[1.25fr_1fr]">
         <Panel title={"Отчёт за " + d.date} icon={Sparkles} color="#ffd60a" actions={<Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("report.send", {}, "report")}><Send size={14} />{busy === "report" ? "Отправляю…" : "Отправить в Telegram"}</Button>}>
-          <div className="rounded-2xl border border-[var(--line-soft)] bg-[var(--surface-strong)] p-4 text-sm leading-relaxed [&_a]:text-[#0a84ff] [&_a]:underline-offset-2 hover:[&_a]:underline"
-            // The report HTML is built server-side with every value escaped (lib/scout/report.ts).
-            dangerouslySetInnerHTML={{ __html: state.report.html.split("\n").join("<br/>") }} />
+          <div className="rounded-2xl border border-[var(--line-soft)] bg-[var(--surface-strong)] p-4 text-sm leading-relaxed [&_a]:text-[#0a84ff] [&_a]:underline-offset-2 hover:[&_a]:underline">
+            <ReportView html={state.report.html} />
+          </div>
           <p className="mt-2 text-xs text-[var(--text-faint)]">Автоматически каждый день в 06:00 UTC (08:00 по Мадриду летом) — Vercel Cron.</p>
         </Panel>
         <div className="space-y-5">
@@ -328,7 +359,7 @@ function ObjectsTab({ state, act, focusId, place, query, setQuery }: { state: St
               <div className="flex items-start gap-3">
                 <ScoreBadge score={o.score} />
                 <div className="min-w-0 flex-1">
-                  <a href={o.url} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium hover:underline">{o.title}</a>
+                  <a href={safeHref(o.url)} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium hover:underline">{o.title}</a>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     <Chip><MapPin size={11} />{[o.city, o.district].filter(Boolean).join(", ") || o.country}</Chip>
                     <Chip tone="blue">{TYPE_RU[o.type]}</Chip>
@@ -371,7 +402,7 @@ function InvestorsTab({ state, act, focusId }: { state: State; act: Act; focusId
               <div key={i.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center">
                 <ScoreBadge score={i.score} />
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium">{i.channel && /^https?:/.test(i.channel) ? <a href={i.channel} target="_blank" rel="noreferrer" className="hover:underline">{i.name}</a> : i.name}{i.role ? <span className="text-[var(--text-muted)]"> · {i.role}</span> : null}</div>
+                  <div className="font-medium">{i.channel && /^https?:/.test(i.channel) ? <a href={safeHref(i.channel)} target="_blank" rel="noreferrer" className="hover:underline">{i.name}</a> : i.name}{i.role ? <span className="text-[var(--text-muted)]"> · {i.role}</span> : null}</div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     <Chip tone="gold">{KIND_RU[i.kind]}</Chip>
                     {i.interest.geography.map((g) => <Chip key={g}><MapPin size={11} />{g}</Chip>)}
@@ -379,7 +410,7 @@ function InvestorsTab({ state, act, focusId }: { state: State; act: Act; focusId
                     {i.interest.segments.slice(0, 3).map((s) => <Chip key={s} tone="blue">{TYPE_RU[s]}</Chip>)}
                     {i.comment && <Chip tone={i.comment.level === "explicit" ? "red" : "violet"}>💬 {i.comment.level === "explicit" ? "явный интерес" : "интерес"}</Chip>}
                   </div>
-                  {i.comment && <p className="mt-1 text-xs text-[var(--text-muted)]">«{i.comment.text}» — <a className="underline" href={i.comment.postUrl} target="_blank" rel="noreferrer">пост</a></p>}
+                  {i.comment && <p className="mt-1 text-xs text-[var(--text-muted)]">«{i.comment.text}» — <a className="underline" href={safeHref(i.comment.postUrl)} target="_blank" rel="noreferrer">пост</a></p>}
                   <div className="mt-1 text-xs text-[var(--text-faint)]">{i.source} · {when(i.firstSeenAt)} · {i.state}</div>
                 </div>
                 <div className="flex gap-2">
@@ -418,7 +449,7 @@ function AgenciesTab({ state, act }: { state: State; act: Act }) {
           {state.agencies.map((a) => (
             <div key={a.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1">
-                <div className="font-medium">{a.website ? <a href={a.website} target="_blank" rel="noreferrer" className="hover:underline">{a.name}</a> : a.name}</div>
+                <div className="font-medium">{a.website ? <a href={safeHref(a.website)} target="_blank" rel="noreferrer" className="hover:underline">{a.name}</a> : a.name}</div>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {a.city && <Chip><MapPin size={11} />{a.city}</Chip>}
                   {a.network && <Chip tone="gold">{a.network}</Chip>}
@@ -545,7 +576,7 @@ function DraftsTab({ state, act }: { state: State; act: Act }) {
           <Button disabled={edits[d.id] === undefined || edits[d.id] === d.text} onClick={() => void decide(d, "edit")}><Pencil size={13} />Изменить</Button>
           <Button variant="danger" onClick={() => void decide(d, "reject")}><X size={13} />Отклонить</Button>
         </> : <>
-          {(links[d.id] || "").length > 0 && <a className="spectrum-button inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium text-white" href={links[d.id]} target="_blank" rel="noreferrer"><Send size={13} />Открыть и отправить</a>}
+          {(links[d.id] || "").length > 0 && <a className="spectrum-button inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium text-white" href={safeHref(links[d.id])} target="_blank" rel="noreferrer"><Send size={13} />Открыть и отправить</a>}
           <Button onClick={() => { void navigator.clipboard?.writeText(d.text); }}>Скопировать текст</Button>
           <Button onClick={() => void act("draft.sent", { id: d.id })}><Check size={13} />Отправлено</Button>
         </>}
@@ -580,7 +611,7 @@ function IntelTab({ state, act }: { state: State; act: Act }) {
                 <div className="space-y-2">
                   {list.map((s) => (
                     <div key={s.id} className="glass-soft rounded-2xl p-3">
-                      <div className="flex flex-wrap items-center gap-2"><a href={s.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">{s.name}</a><Chip tone="blue">{s.kind}</Chip>{s.country && <Chip>{s.country}</Chip>}{s.members ? <Chip tone="gold">{s.members.toLocaleString("ru-RU")} чел.</Chip> : null}{s.hasApi && <Chip tone="green">API</Chip>}{s.recommendation && <Chip tone="violet">{s.recommendation === "join" ? "вступить" : s.recommendation === "connect" ? "подключить" : "игнорировать"}</Chip>}</div>
+                      <div className="flex flex-wrap items-center gap-2"><a href={safeHref(s.url)} target="_blank" rel="noreferrer" className="font-medium hover:underline">{s.name}</a><Chip tone="blue">{s.kind}</Chip>{s.country && <Chip>{s.country}</Chip>}{s.members ? <Chip tone="gold">{s.members.toLocaleString("ru-RU")} чел.</Chip> : null}{s.hasApi && <Chip tone="green">API</Chip>}{s.recommendation && <Chip tone="violet">{s.recommendation === "join" ? "вступить" : s.recommendation === "connect" ? "подключить" : "игнорировать"}</Chip>}</div>
                       {s.summary && <p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{s.summary}</p>}
                       {st === "approved" && <p className="mt-1 text-xs text-[var(--text-faint)]">Полезных результатов: {s.usefulCount} · последний: {when(s.lastUsefulAt)}</p>}
                       <div className="mt-2 flex gap-2">
@@ -688,7 +719,7 @@ function SettingsTab({ state, act }: { state: State; act: Act }) {
       </Panel>
       <Panel title="Встречи" icon={CalendarPlus} color="#0a84ff">
         <div className="flex gap-2"><input className={inputClass} placeholder="18.10 11:00 Zoom — Engel & Völkers Valencia" value={meet} onChange={(e) => setMeet(e.target.value)} /><Button variant="spectrum" disabled={!meet} onClick={() => void act("meeting.create", { text: meet }).then((r) => { if (r?.ok) { setMeet(""); setMeetLink(r.google); } })}>Создать</Button></div>
-        {meetLink && <a href={meetLink} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-[#0a84ff] underline">Добавить в Google Календарь</a>}
+        {meetLink && <a href={safeHref(meetLink)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-[#0a84ff] underline">Добавить в Google Календарь</a>}
         <ul className="mt-3 divide-y divide-[var(--line-soft)] text-sm">
           {state.meetings.map((m) => <li key={m.id} className="flex items-center justify-between gap-2 py-2"><span>{when(m.startsAt)} — {m.where}, {m.with}</span><a className="text-xs text-[#0a84ff] underline" href={"/api/scout/ics?id=" + m.id}>.ics</a></li>)}
           {!state.meetings.length && <li className="py-2 text-xs text-[var(--text-faint)]">Встреч нет.</li>}

@@ -25,7 +25,7 @@ export function stableId(prefix: string, value: string) {
 }
 
 export function randomId(prefix: string) {
-  return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  return prefix + "_" + Date.now().toString(36) + globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 }
 
 export function domainOf(url: unknown) {
