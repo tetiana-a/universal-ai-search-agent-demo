@@ -53,6 +53,11 @@ export type ResearchExportPayload = {
   billing?: Record<string, unknown>;
   results: ReportResult[];
   sourceRegistry?: ReportSource[];
+  // Optional run metadata; exports fall back to stats and the query when absent.
+  language?: "ru" | "en";
+  taskKind?: string;
+  fieldSchema?: Array<{ key: string; ru: string; en: string }>;
+  progressCounters?: Partial<Record<string, number>>;
 };
 
 export function safeFilenamePart(value: string) {
@@ -130,62 +135,6 @@ export function buildPlainTextReport(payload: ResearchExportPayload, maxResults 
     statText ? "Stats: " + statText : "",
     results.map(function(item, index) { return reportResultText(item, index); }).join("\n\n"),
   ].filter(Boolean).join("\n\n");
-}
-
-function resultHtml(item: ReportResult, index: number) {
-  const title = escapeHtml(compactText(resultLabel(item), 200));
-  const location = escapeHtml(compactText(valueOrDash(item.geography, item.location), 200));
-  const profile = escapeHtml(compactText(valueOrDash(item.specialization, item.area), 240));
-  const source = escapeHtml(compactText(valueOrDash(item.source, item.sourceDomain), 120));
-  const evidence = escapeHtml(compactText(valueOrDash(item.evidenceQuote, item.evidence), 600));
-  const status = escapeHtml(valueOrDash(item.status));
-  const safeLink = item.url && /^https?:\/\//i.test(String(item.url));
-  const link = safeLink ? '<a href="' + escapeHtml(item.url) + '">' + escapeHtml(compactText(item.url, 300)) + "</a>" : "—";
-
-  return [
-    "<b>" + (index + 1) + ". " + title + "</b>",
-    "📍 <b>Location:</b> " + location,
-    "🧩 <b>Profile:</b> " + profile,
-    "🎯 <b>Match:</b> " + pct(item.match) + " · <b>Confidence:</b> " + pct(item.confidence),
-    "✅ <b>Status:</b> " + status,
-    "🔎 <b>Source:</b> " + source,
-    "🔗 " + link,
-    "🧾 <b>Evidence:</b> " + evidence,
-  ].join("\n");
-}
-
-export const TELEGRAM_MESSAGE_LIMIT = 3900;
-
-// Telegram allows 4096 characters per message. Result blocks are packed into as few
-// messages as possible (fewer API calls, less rate limiting) without splitting a block.
-export function buildTelegramMessages(payload: ResearchExportPayload, maxResults = 12) {
-  const results = payload.results.slice(0, maxResults);
-  const stats = Object.entries(payload.stats || {}).slice(0, 8);
-  const summary = [
-    "<b>AURELIUS • RESEARCH REPORT</b>",
-    "<b>Query:</b> " + escapeHtml(compactText(payload.query || "—", 500)),
-    payload.generatedAt ? "<b>Generated:</b> " + escapeHtml(payload.generatedAt) : "",
-    payload.searchSummary ? "<b>Summary:</b> " + escapeHtml(compactText(payload.searchSummary, 500)) : "",
-    stats.length ? "<b>Stats:</b> " + escapeHtml(compactText(stats.map(function(entry) { return entry[0] + "=" + String(entry[1] ?? "—"); }).join(" · "), 600)) : "",
-    "<b>Results:</b> " + results.length + (payload.results.length > results.length ? " of " + payload.results.length + " (full list in the attached XLSX)" : ""),
-  ].filter(Boolean).join("\n");
-
-  const messages = [summary];
-  if (!results.length) {
-    messages.push("<i>No structured results were returned; review the source registry.</i>");
-    return messages;
-  }
-  let current = "";
-  for (let i = 0; i < results.length; i += 1) {
-    const block = resultHtml(results[i], i);
-    if (current && current.length + 2 + block.length > TELEGRAM_MESSAGE_LIMIT) {
-      messages.push(current);
-      current = "";
-    }
-    current = current ? current + "\n\n" + block : block;
-  }
-  if (current) messages.push(current);
-  return messages;
 }
 
 export function buildEmailHtml(payload: ResearchExportPayload, maxResults = 20) {

@@ -1329,6 +1329,9 @@ export default function Home() {
       billing: liveBilling,
       results: shownResults,
       sourceRegistry: liveSourceRegistry,
+      language: lang === "ru" ? "ru" : "en",
+      fieldSchema: researchSession?.fieldSchema?.length ? researchSession.fieldSchema : undefined,
+      progressCounters: researchSession ? researchSession.counters : undefined,
     };
   }
 
@@ -3722,6 +3725,15 @@ export default function Home() {
             {telegramStatus === "error" && telegramDiagnostics?.error ? (
               <div className="mt-4 rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/6 p-4 text-xs leading-5 text-[var(--danger)]">
                 {String(telegramDiagnostics.error)}
+              </div>
+            ) : null}
+
+            {telegramStatus === "sent" && telegramDiagnostics?.migrations?.length ? (
+              <div className="mt-4 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/6 p-4 text-xs leading-5 text-[var(--warning)]">
+                {lang === "ru"
+                  ? "Группа стала супергруппой, отчёт ушёл по новому ID. Замените в Vercel: "
+                  : "The group became a supergroup; the report went to its new ID. Update Vercel: "}
+                {telegramDiagnostics.migrations.map((m: any) => m.from + " → " + m.to).join(", ")}
               </div>
             ) : null}
 
