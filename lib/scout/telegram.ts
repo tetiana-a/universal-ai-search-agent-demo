@@ -11,8 +11,8 @@ export function botToken() {
   return String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
 }
 
-export function splitIds(value: unknown) {
-  return String(value || "").split(",").map((s) => s.trim()).filter(Boolean);
+export function splitIds(value: string | number | undefined | null) {
+  return String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 // Who may control the agent: the configured group(s) and personal ids.
