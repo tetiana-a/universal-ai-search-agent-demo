@@ -59,19 +59,21 @@ type State = {
 type Tab = "report" | "tasks" | "health" | "objects" | "investors" | "agencies" | "matches" | "leads" | "drafts" | "intel" | "settings" | "log";
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Radar; color: string }> = [
-  { id: "report", label: "Отчёт", icon: Sparkles, color: "#ffd60a" },
-  { id: "tasks", label: "Задачи", icon: ListChecks, color: "#64d2ff" },
-  { id: "health", label: "Health", icon: Activity, color: "#30d158" },
+  { id: "report", label: "Главная", icon: Sparkles, color: "#ffd60a" },
+  { id: "tasks", label: "Поиски", icon: ListChecks, color: "#64d2ff" },
   { id: "objects", label: "Объекты", icon: Building2, color: "#ff9500" },
   { id: "investors", label: "Инвесторы", icon: Landmark, color: "#34c759" },
-  { id: "agencies", label: "Агентства", icon: Handshake, color: "#00c7be" },
-  { id: "matches", label: "Пары", icon: Link2, color: "#0a84ff" },
-  { id: "leads", label: "Диалоги", icon: MessageSquare, color: "#5856d6" },
-  { id: "drafts", label: "На одобрение", icon: Send, color: "#af52de" },
-  { id: "intel", label: "Разведка", icon: Telescope, color: "#ff2d55" },
+  { id: "drafts", label: "Сообщения", icon: Send, color: "#af52de" },
   { id: "settings", label: "Настройки", icon: Settings2, color: "#a3b6c4" },
+  { id: "agencies", label: "Агентства", icon: Handshake, color: "#00c7be" },
+  { id: "matches", label: "Подбор", icon: Link2, color: "#0a84ff" },
+  { id: "leads", label: "Диалоги", icon: MessageSquare, color: "#5856d6" },
+  { id: "intel", label: "Источники", icon: Telescope, color: "#ff2d55" },
+  { id: "health", label: "Проверка", icon: Activity, color: "#30d158" },
   { id: "log", label: "Журнал", icon: ScrollText, color: "#c9a96a" },
 ];
+
+const SIMPLE_TABS = new Set<Tab>(["report", "tasks", "objects", "investors", "drafts", "settings"]);
 
 const TYPE_RU: Record<string, string> = { land: "земля", house: "дом", villa: "вилла", apartment: "квартира", penthouse: "пентхаус", commercial: "коммерция", hotel: "отель", other: "другое" };
 const STATUS_RU: Record<string, string> = { auction: "торги", urgent: "срочно", off_market: "off-market", bank: "банк", regular: "" };
@@ -210,6 +212,7 @@ export default function ScoutDashboard() {
   const [needKey, setNeedKey] = useState(false);
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState("");
+  const [advanced, setAdvanced] = useState(false);
 
   useEffect(() => {
     try {
@@ -218,7 +221,10 @@ export default function ScoutDashboard() {
     } catch {}
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as Tab | null;
-    if (t && TABS.some((x) => x.id === t)) setTab(t);
+    if (t && TABS.some((x) => x.id === t)) {
+      setTab(t);
+      if (!SIMPLE_TABS.has(t)) setAdvanced(true);
+    }
     setFocusId(params.get("id") || "");
     setPlace(params.get("place") || "");
   }, []);
@@ -257,6 +263,14 @@ export default function ScoutDashboard() {
     window.history.replaceState(null, "", "/scout?tab=" + next);
   };
 
+  const visibleTabs = advanced ? TABS : TABS.filter((item) => SIMPLE_TABS.has(item.id));
+
+  const toggleAdvanced = () => {
+    const next = !advanced;
+    setAdvanced(next);
+    if (!next && !SIMPLE_TABS.has(tab)) changeTab("report");
+  };
+
   const counts: Partial<Record<Tab, number>> = state ? {
     drafts: state.drafts.filter((d) => d.state === "pending").length,
     leads: state.leads.filter((l) => l.state === "qualified" || l.state === "escalated").length,
@@ -277,12 +291,13 @@ export default function ScoutDashboard() {
           </a>
           <div className="flex items-center gap-2">
             <Button onClick={() => void load()} title="Обновить"><RefreshCw size={14} /></Button>
-            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("scan", {}, "scan")}><Radar size={14} /><span className="hidden whitespace-nowrap sm:inline">{busy === "scan" ? "Запуск…" : "Обход сейчас"}</span></Button>
+            <Button onClick={toggleAdvanced}>{advanced ? "Простой режим" : "Ещё"}</Button>
+            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("scan", {}, "scan")}><Radar size={14} /><span className="hidden whitespace-nowrap sm:inline">{busy === "scan" ? "Обновляю…" : "Обновить данные"}</span></Button>
           </div>
         </div>
         <div className="spectrum-line h-[2px] w-full opacity-70" />
         <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 py-2 sm:px-5" aria-label="Разделы">
-          {TABS.map(({ id, label, icon: Icon, color }) => (
+          {visibleTabs.map(({ id, label, icon: Icon, color }) => (
             <button key={id} type="button" onClick={() => changeTab(id)}
               className={"flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition " + (tab === id ? "bg-[var(--surface-strong)] text-[var(--text)] shadow" : "text-[var(--text-muted)] hover:text-[var(--text)]")}>
               <Icon size={14} style={{ color }} />{label}
@@ -805,6 +820,15 @@ function taskTone(state: string): ChipTone {
   return "blue";
 }
 
+function taskLabel(state: string) {
+  if (state === "clarifying") return "Жду уточнение";
+  if (state === "running") return "Ищу";
+  if (state === "done") return "Готово";
+  if (state === "stopped") return "Остановлено";
+  if (state === "failed") return "Ошибка";
+  return state;
+}
+
 function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
   const tasks = state.researchTasks || [];
   const active = tasks.filter((task) => task.state === "running" || task.state === "clarifying");
@@ -819,29 +843,23 @@ function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
         <Kpi label="Ошибки" value={failed.length} color="#ff375f" />
         <Kpi label="Всего сохранено" value={tasks.length} color="#ffd60a" />
       </div>
-      <Panel title="Research jobs" icon={ListChecks} color="#64d2ff">
-        {!tasks.length ? <Empty>Задач пока нет. Запустите поиск через Telegram /find или обычным сообщением администратору.</Empty> : (
+      <Panel title="Мои поиски" icon={ListChecks} color="#64d2ff">
+        {!tasks.length ? <Empty>Поисков пока нет. Напишите боту в Telegram, что нужно найти.</Empty> : (
           <div className="space-y-3">
             {tasks.map((task) => (
               <article key={task.id} className="glass-soft rounded-2xl p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-[var(--text-faint)]">{task.id}</span>
-                    <Chip tone={taskTone(task.state)}>{task.state}</Chip>
-                    <Chip tone="blue">{task.stage || task.state}</Chip>
-                    <Chip>attempt {task.attempt || 0}</Chip>
-                    <Chip>round {task.round}</Chip>
+                    <Chip tone={taskTone(task.state)}>{taskLabel(task.state)}</Chip>
                   </div>
                   <span className="text-xs text-[var(--text-faint)]">{when(task.updatedAt)}</span>
                 </div>
                 <p className="mt-2 text-sm text-[var(--text)]">{task.query}</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
-                  <div><span className="text-[var(--text-faint)]">Источники</span><div className="text-lg tabular-nums">{task.counters.sourcesChecked}</div></div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <div><span className="text-[var(--text-faint)]">Проверено источников</span><div className="text-lg tabular-nums">{task.counters.sourcesChecked}</div></div>
                   <div><span className="text-[var(--text-faint)]">Найдено</span><div className="text-lg tabular-nums">{task.counters.afterDedupe}</div></div>
-                  <div><span className="text-[var(--text-faint)]">Verified</span><div className="text-lg tabular-nums text-[#34c759]">{task.counters.matchingCriteria}</div></div>
-                  <div><span className="text-[var(--text-faint)]">Review</span><div className="text-lg tabular-nums text-[#ffd60a]">{task.counters.needsReview}</div></div>
-                  <div><span className="text-[var(--text-faint)]">Quality</span><div className="text-lg tabular-nums">{task.quality?.score ?? 0}%</div></div>
-                  <div><span className="text-[var(--text-faint)]">Evidence</span><div className="text-lg tabular-nums">{task.quality?.evidenceCoverage ?? 0}%</div></div>
+                  <div><span className="text-[var(--text-faint)]">Подтверждено</span><div className="text-lg tabular-nums text-[#34c759]">{task.counters.matchingCriteria}</div></div>
+                  <div><span className="text-[var(--text-faint)]">Нужно проверить</span><div className="text-lg tabular-nums text-[#ffd60a]">{task.counters.needsReview}</div></div>
                 </div>
                 {task.error && <p className="mt-2 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-2 text-xs text-[#ff7a93]">{task.error}</p>}
                 {(task.state === "running" || task.state === "clarifying") && (

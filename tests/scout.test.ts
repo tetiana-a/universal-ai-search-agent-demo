@@ -307,10 +307,10 @@ describe("scout Telegram bot", () => {
     await callback("find", "find");
 
     const messages = sent(calls).map((m) => String(m.text || ""));
-    expect(messages.some((text) => text.includes("Задач пока нет"))).toBe(true);
+    expect(messages.some((text) => text.includes("Поисков пока нет"))).toBe(true);
     expect(messages.some((text) => text.includes("Результатов пока нет"))).toBe(true);
     expect(messages.some((text) => text.includes("AURELIUS · диагностика"))).toBe(true);
-    expect(messages.some((text) => text.includes("Напишите одним сообщением"))).toBe(true);
+    expect(messages.some((text) => text.includes("Что найти?"))).toBe(true);
     expect(calls.filter((call) => call.url.endsWith("/answerCallbackQuery"))).toHaveLength(4);
   });
 
