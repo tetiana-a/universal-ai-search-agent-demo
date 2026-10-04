@@ -129,10 +129,9 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
     });
   }
 
-  // Strict zero-cost mode must never fall through to a provider whose selected
-  // model could become billable. Deterministic extraction remains the fallback.
-  if (zeroCost) return out;
-
+  // Gemini (Google AI Studio key) and Groq both have free tiers and are the fallback once
+  // the OpenRouter free quota is used up. Strict zero-cost mode keeps them on their free
+  // models and ignores the Pro model overrides.
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
   if (geminiKey) {
     out.push({
@@ -140,7 +139,7 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       label: "Google Gemini",
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       key: geminiKey,
-      model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: (!zeroCost && edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
     });
   }
 

@@ -85,3 +85,16 @@ describe("Scout production health", () => {
     expect(data.checks.find((item: any) => item.id === "admin")?.detail).toContain("Public shared dashboard");
   });
 });
+
+describe("free AI chain", () => {
+  it("keeps Gemini and Groq after OpenRouter in strict zero-cost mode", async () => {
+    const { configuredAiProviders } = await import("@/lib/free-ai");
+    vi.stubEnv("OPENROUTER_API_KEY", "or_key");
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    vi.stubEnv("GROQ_API_KEY", "gq_key");
+    vi.stubEnv("PRO_GEMINI_MODEL", "gemini-2.5-pro");
+    const providers = configuredAiProviders("pro").map((p) => p.id + ":" + p.model);
+    expect(providers[0]).toMatch(/^openrouter:/);
+    expect(providers.slice(1)).toEqual(["gemini:gemini-2.5-flash", "groq:llama-3.3-70b-versatile"]);
+  });
+});
