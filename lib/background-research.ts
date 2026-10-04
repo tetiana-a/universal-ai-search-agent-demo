@@ -1,7 +1,8 @@
 import { accessEscalationSummary, buildAccessEscalationPlan, type AccessEscalationPlan } from "@/lib/access-escalation";
 import type { AccessEvent, LiveSourceRecord, ResearchQueryUnderstanding } from "@/lib/research-contract";
-import { filterResearchResults, type RelevanceRejection } from "@/lib/relevance-gate";
+import { filterResearchResults, inferResearchKind, type RelevanceRejection } from "@/lib/relevance-gate";
 import { applyQualityGate, dedupeResults } from "@/lib/result-quality";
+import { fieldSchemaFor } from "@/lib/task-profile";
 
 export type BackgroundResearchRequest = {
   query: string;
@@ -16,6 +17,12 @@ export type BackgroundResearchRequest = {
   // Epoch ms by which the request must finish (keeps work inside the Vercel function limit).
   deadlineAt?: number;
   sourceMemory?: Array<{ name?: string; url?: string; domain?: string; category?: string; quality?: number; lastChecked?: string }>;
+  // Free edition uses only free services; Pro gets larger budgets and stronger models.
+  edition?: "free" | "pro";
+  // Follow-up round of an earlier task: skip URLs already seen and use later search branches.
+  continuation?: { round: number; excludeUrls: string[] };
+  // Size of the accumulated source base relevant to this task (for progress counters).
+  knownSourceCount?: number;
 };
 
 export const BACKGROUND_RESEARCH_SCHEMA = {
@@ -280,9 +287,10 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
     freshnessDays: Math.max(0, Number(item?.freshness_days ?? item?.freshnessDays ?? 0)), independentVerification: Boolean(item?.independent_verification ?? item?.independentVerification),
     relevanceTier: String(item?.relevanceTier || "accept"), relevanceScore: Number(item?.relevanceScore ?? 60), relevanceReason: String(item?.relevanceReason || ""),
     alternateUrls: Array.isArray(item?.alternateUrls) ? item.alternateUrls : [],
+    pageType: String(item?.page_type || item?.pageType || "entity"),
   }));
   const sourcePlans: AccessEscalationPlan[] = [];
-  const sourceRegistry: LiveSourceRecord[] = (Array.isArray(parsed.source_registry) ? parsed.source_registry : []).slice(0, input.maxSources).map((s: any) => {
+  const sourceRegistry: LiveSourceRecord[] = (Array.isArray(parsed.source_registry) ? parsed.source_registry : []).slice(0, Math.max(input.maxSources, 200)).map((s: any) => {
     const url = normalizeUrl(s?.url); const plan = buildAccessEscalationPlan({
       url, status: String(s?.access_status || "partial"), requiresAuth: String(s?.access_status || "").toLowerCase() === "auth_required",
       rateLimited: String(s?.access_status || "").toLowerCase() === "rate_limited", captcha: String(s?.access_status || "").toLowerCase() === "captcha_required",
@@ -315,7 +323,9 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
   const escalation = accessEscalationSummary(sourcePlans); const accessCheckpoints = sourcePlans.flatMap((p) => p.checkpoint?.required ? [p.checkpoint] : []);
   const sourceDomains = unique([...sourceRegistry.map((s) => s.domain), ...gated.map((r: any) => r.sourceDomain)].filter(Boolean));
   const summary = [String(parsed?.search_summary || ""), usedSearchFallback && gated.length ? "Structured extraction returned no results; live search candidates are kept for Manual review." : ""].filter(Boolean).join(" ");
-  return { live: true, partial: false, status: "completed", query: input.query, generatedAt: now, searchPlan: searchPlanText || "Search plan generated from live web research.", summary,
+  const taskKind = inferResearchKind(input.query);
+  const counters = progressCounters({ discovered: Math.max(Number(parsed?.candidates_seen || 0), sourceRegistry.length, retrievedSources.length), knownSources: Number(input.knownSourceCount || 0), registry: sourceRegistry, recordsExtracted, afterDedupe: deduped.out.length, results: gated });
+  return { live: true, partial: false, status: "completed", query: input.query, generatedAt: now, taskKind, fieldSchema: fieldSchemaFor(taskKind), progressCounters: counters, searchPlan: searchPlanText || "Search plan generated from live web research.", summary,
     queryUnderstanding, searchBranches: Array.isArray(parsed?.search_branches) ? parsed.search_branches.map(String).slice(0, 40) : [], sourceRegistry, accessEvents, accessCheckpoints, results: gated,
     rejectedCandidates,
     sourceUrls: unique([...retrievedSources.map((s) => s.url), ...sourceRegistry.map((s) => s.url), ...gated.map((r: any) => r.url)].filter(Boolean)), sourceDomains,
@@ -334,4 +344,24 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
     billing: { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.5", billable: true, webSearchCalls: Array.isArray(response?.output) ? response.output.filter((x: any) => x?.type === "web_search_call").length : 0, usage: response?.usage ?? null, background: true },
     task: { id: response?.id ? "AURE-" + String(response.id).replace(/[^a-zA-Z0-9]/g, "").slice(-10).toUpperCase() : "", responseId: String(response?.id || ""), providerStatus: String(response?.status || "") },
   } as any;
+}
+
+// Counters in the shape the product spec asks for: discovered, checked, unavailable,
+// found, after de-duplication, matching the main criteria.
+export function progressCounters(input: { discovered: number; knownSources: number; registry: any[]; recordsExtracted: number; afterDedupe: number; results: any[]; filteredOut?: number }) {
+  const registry = Array.isArray(input.registry) ? input.registry : [];
+  const results = Array.isArray(input.results) ? input.results : [];
+  const unavailableStatuses = new Set(["unavailable", "blocked", "auth_required", "policy_restricted", "captcha_required", "rate_limited", "not_automatable"]);
+  return {
+    sourcesDiscovered: Math.max(input.discovered, registry.length),
+    sourcesInBase: input.knownSources,
+    sourcesChecked: registry.filter((s) => s?.accessStatus === "checked").length,
+    sourcesUnavailable: registry.filter((s) => unavailableStatuses.has(String(s?.accessStatus))).length,
+    sourcesNotReached: registry.filter((s) => s?.accessStatus === "partial").length,
+    resultsFound: Math.max(input.recordsExtracted, results.length),
+    afterDedupe: Math.max(results.length, input.afterDedupe),
+    ...(input.filteredOut !== undefined ? { filteredOut: input.filteredOut } : {}),
+    matchingCriteria: results.filter((r) => (r?.status === "Verified" || r?.status === "Reviewed") && (r?.pageType || "entity") === "entity").length,
+    needsReview: results.filter((r) => r?.status === "Manual review").length,
+  };
 }

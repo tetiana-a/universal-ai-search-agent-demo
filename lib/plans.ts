@@ -40,7 +40,8 @@ export function getPlans(): Record<PlanId, Plan> {
       maxPages: 40,
       depths: ["Quick", "Balanced"],
       exports: ["csv", "json"],
-      telegram: false,
+      // Open to everyone for now; recipients are still limited by TELEGRAM_ALLOWED_CHAT_IDS.
+      telegram: process.env.FREE_TELEGRAM !== "off",
       email: false,
     },
     pro: {

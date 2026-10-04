@@ -1,23 +1,24 @@
 import { NextResponse } from "next/server";
+import { editionCapabilities } from "@/lib/editions";
+import { resolvePlan } from "@/lib/plans";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const provider = (process.env.RESEARCH_AI_PROVIDER || "free").toLowerCase();
-  const isFree = provider === "free";
-  const model = isFree
-    ? (process.env.OPENROUTER_MODEL || "openrouter/free")
-    : (process.env.OPENAI_MODEL || "paid-model");
-
+// Which edition this visitor is on and what each edition can use on this deployment.
+export async function GET(request: Request) {
+  const plan = resolvePlan(request);
+  const editions = editionCapabilities();
+  const current = plan.id === "pro" ? editions.pro : editions.free;
+  const isFree = current.pipeline === "free";
   return NextResponse.json(
     {
       provider: isFree ? "free" : "paid",
-      model,
-      billing: isFree ? "free" : "paid",
-      label: isFree ? "Free AI" : "Paid AI",
+      model: current.ai[0]?.model || "rules",
+      billing: isFree && plan.id === "free" ? "free" : "paid",
+      label: plan.id === "pro" ? "Pro" : "Free",
+      edition: plan.id,
+      editions,
     },
-    {
-      headers: { "Cache-Control": "no-store" },
-    },
+    { headers: { "Cache-Control": "no-store" } },
   );
 }

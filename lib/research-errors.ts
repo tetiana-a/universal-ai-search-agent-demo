@@ -7,6 +7,7 @@ export type ResearchErrorCode =
   | "JINA_API_KEY_MISSING"
   | "SEARCH_PROVIDER_NOT_CONFIGURED"
   | "SEARCH_PROVIDERS_FAILED"
+  | "SEARCH_RATE_LIMITED"
   | "AI_PROVIDER_NOT_CONFIGURED"
   | "UPSTREAM_TIMEOUT"
   | "PLAN_LIMIT_REACHED"
@@ -15,7 +16,7 @@ export type ResearchErrorCode =
 
 export type ProviderDiagnostic = {
   provider: string;
-  status: "ok" | "empty" | "error" | "not_configured" | "skipped";
+  status: "ok" | "empty" | "error" | "not_configured" | "skipped" | "rate_limited";
   httpStatus?: number;
   hits?: number;
   message?: string;

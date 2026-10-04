@@ -153,7 +153,7 @@ For the global-search layer, also see `docs/GLOBAL_SEARCH_AND_PUBLIC_COMMUNITIES
 
 ### Required free-research configuration
 
-Free mode uses Jina Search/Reader plus OpenRouter free-model inference. Jina Search requires a suitable Jina API-key/rate-limit configuration for reliable production use; OpenRouter's `openrouter/free` routes to currently available free models.
+Free mode uses Jina Search/Reader plus OpenRouter free-model verification of every read page (models picked from the live free-model list; check with `GET /api/research/ai-check`). Jina Search requires a suitable Jina API-key/rate-limit configuration for reliable production use; OpenRouter's `openrouter/free` routes to currently available free models.
 
 
 ## v2.2 — Production exports and outbound delivery
@@ -170,7 +170,8 @@ Free mode uses Jina Search/Reader plus OpenRouter free-model inference. Jina Sea
 
 ## v2.3 — Production hardening
 
-- **No more silent zero results.** Missing `JINA_API_KEY` → `503 JINA_API_KEY_MISSING`; every provider failing → `502 SEARCH_PROVIDERS_FAILED` with per-provider HTTP status; a real "nothing found" → `200` with `outcome: "no_candidates"` and an explanation. Every error has a stable `code`.
+- **Free and Pro editions.** The Free edition needs no paid key: keyless DuckDuckGo search, keyless Jina Reader with a robots-aware direct-read fallback, and free-tier AI (OpenRouter → Gemini → Groq) or rule-based extraction. See `docs/FREE_AND_PRO_EDITIONS.md`.
+- **No more silent zero results.** Keyless search switched off (`KEYLESS_SEARCH=off`) with no search key → `503 JINA_API_KEY_MISSING`; every provider failing → `502 SEARCH_PROVIDERS_FAILED` with per-provider HTTP status; a real "nothing found" → `200` with `outcome: "no_candidates"` and an explanation. Every error has a stable `code`.
 - **Provider fallback.** Any configured Brave/Tavily/Exa/Serper/Mojeek/Yandex/Naver/DataForSEO key is used automatically when Jina fails, is rate limited or returns fewer than 5 candidates.
 - **Manual Review instead of empty output.** If AI extraction fails, times out or confirms nothing, live candidates are kept as `Manual review` (`outcome: "candidates_for_review"`).
 - **Investor relevance.** Events, conferences, networking, jobs, IPO/stock and news pages are rejected; directory pages and investors without confirmed geography/sector go to review. The old Cyprus/SaaS hard-coding is gone: geography and sector come from the query.

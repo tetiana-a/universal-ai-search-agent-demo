@@ -37,9 +37,28 @@ describe("exports on empty, small and large data sets", () => {
 
   it("neutralizes spreadsheet formulas in CSV cells", () => {
     const data = payload(1);
-    data.results[0].title = "=cmd|' /C calc'!A0";
+    data.results[0].organization = "=cmd|' /C calc'!A0";
     const csv = createCsvBuffer(data).toString("utf8");
     expect(csv).toContain("\"'=cmd");
+  });
+});
+
+describe("report layout", () => {
+  it("names CSV columns after the task type, in the query's language, with readable statuses", () => {
+    const csv = createCsvBuffer(payload(2)).toString("utf8");
+    const header = csv.replace(/^\uFEFF/, "").split("\r\n")[0];
+    expect(header).toContain("Имя / фонд");
+    expect(header).toContain("Чек / стадия");
+    expect(header).toContain("Подтверждение со страницы");
+    expect(csv).toContain("Частично проверено");
+  });
+
+  it("uses English labels and the given field schema for an English report", () => {
+    const data = { ...payload(1), query: "Apartments in Lisbon", language: "en" as const, taskKind: "real_estate",
+      fieldSchema: [{ key: "title", ru: "Объект", en: "Listing" }, { key: "price", ru: "Цена", en: "Price" }, { key: "bad key!", ru: "x", en: "x" }] };
+    data.results[0].price = "€450,000";
+    const header = createCsvBuffer(data).toString("utf8").replace(/^\uFEFF/, "").split("\r\n")[0];
+    expect(header).toBe('"#";"Listing";"Price";"Match";"Status";"Source";"Link";"Evidence from the page"');
   });
 });
 

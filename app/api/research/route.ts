@@ -11,6 +11,7 @@ import { applyQualityGate, dedupeResults } from "@/lib/result-quality";
 import { errorBody } from "@/lib/research-errors";
 import { checkResearchQuota, resolvePlan, clampToPlan } from "@/lib/plans";
 import { taskSpecificRules } from "@/lib/research-prompts";
+import { editionFor, pipelineFor } from "@/lib/editions";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -38,7 +39,7 @@ export async function POST(request:Request){
  const quota=await checkResearchQuota(request,plan);
  if(!quota.allowed){const e=errorBody(quota.error);return NextResponse.json({...e.body,plan:plan.id,usage:quota.usage},{status:e.status});}
  const limits=clampToPlan(plan,{depth:body.depth,maxResults:body.maxResults,maxSources:body.maxSources,maxPages:body.maxPages});
- if((process.env.RESEARCH_AI_PROVIDER||"free").toLowerCase()==="free"){
+ if(pipelineFor(plan)==="free"){
    try{
      const memoryContext=await getResearchMemoryContext(query,40);
      const result=await runFreeResearch({
@@ -53,6 +54,8 @@ export async function POST(request:Request){
        testMode:limits.depth==="Quick",
        deadlineAt:Date.now()+52_000,
        sourceMemory:memoryContext.sources,
+       edition:editionFor(plan),
+       knownSourceCount:memoryContext.sources.length,
      });
      await Promise.race([
        recordResearchLearning({

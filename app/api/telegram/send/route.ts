@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { buildTelegramMessages, escapeHtml, type ResearchExportPayload } from "@/lib/research-report";
+import { escapeHtml, type ResearchExportPayload } from "@/lib/research-report";
+import { buildTelegramMessages } from "@/lib/telegram-report";
 import { createPdfBuffer, createXlsxBuffer } from "@/lib/server-exporters";
 import { assertFeature, resolvePlan } from "@/lib/plans";
 import { errorBody } from "@/lib/research-errors";
@@ -45,6 +46,7 @@ export function telegramHint(description: string) {
   if (d.includes("chat not found")) return "Chat ID not found. The recipient must open the bot and press Start; check the Chat ID.";
   if (d.includes("bot was blocked")) return "The recipient blocked the bot. They must unblock it and press Start.";
   if (d.includes("not enough rights") || d.includes("have no rights")) return "The bot has no permission to post in this group/channel. Make it an admin.";
+  if (d.includes("upgraded to a supergroup")) return "The group became a supergroup and got a new ID. Replace the old ID in TELEGRAM_CHAT_ID and TELEGRAM_ALLOWED_CHAT_IDS in Vercel.";
   if (d.includes("can't parse entities")) return "Telegram rejected the message formatting (HTML).";
   if (d.includes("too many requests")) return "Telegram rate limit reached. Retry in a minute.";
   if (d.includes("request entity too large") || d.includes("file is too big")) return "Attachment is larger than Telegram allows (50 MB).";
@@ -52,7 +54,14 @@ export function telegramHint(description: string) {
 }
 
 class TelegramError extends Error {
-  constructor(message: string, readonly stage: string, readonly hint: string) { super(message); }
+  constructor(message: string, readonly stage: string, readonly hint: string, readonly migrateTo = "") { super(message); }
+}
+
+// A basic group that became a supergroup gets a new "-100…" id; Telegram answers
+// with migrate_to_chat_id, and the old id stops working.
+function migrationTarget(data: any) {
+  const id = data?.parameters?.migrate_to_chat_id;
+  return id === undefined || id === null ? "" : String(id);
 }
 
 async function withRetry<T extends { response: Response; data: any }>(run: () => Promise<T>): Promise<T> {
@@ -74,7 +83,7 @@ async function sendMessage(token: string, chatId: string, html: string) {
   }));
   if (!result.response.ok || !result.data?.ok) {
     const description = String(result.data?.description || "Telegram sendMessage failed (HTTP " + result.response.status + ").");
-    throw new TelegramError(description, "send_message", telegramHint(description));
+    throw new TelegramError(description, "send_message", telegramHint(description), migrationTarget(result.data));
   }
   return Number(result.data?.result?.message_id || 0) || undefined;
 }
@@ -97,7 +106,7 @@ async function sendDocument(token: string, chatId: string, buffer: Buffer, filen
   const { response, data } = await withRetry(run);
   if (!response.ok || !data?.ok) {
     const description = String(data?.description || "Telegram sendDocument failed (HTTP " + response.status + ").");
-    throw new TelegramError(description, "send_document", telegramHint(description));
+    throw new TelegramError(description, "send_document", telegramHint(description), migrationTarget(data));
   }
   return Number(data?.result?.message_id || 0) || undefined;
 }
@@ -131,6 +140,7 @@ export async function GET() {
         type: chat.data?.result?.type || null,
         title: chat.data?.result?.title || chat.data?.result?.username || null,
         reason: chat.response.ok && chat.data?.ok ? null : chat.data?.description || "Unable to resolve chat",
+        migratedTo: migrationTarget(chat.data) || undefined,
       });
     }
 
@@ -223,7 +233,7 @@ export async function POST(request: Request) {
   const title = String(body?.title || "Aurelius Research").trim();
   const legacyText = String(body?.text || "").trim().slice(0, 3500);
   const messages: string[] = payload && Array.isArray(payload.results)
-    ? buildTelegramMessages(payload as ResearchExportPayload, 12)
+    ? buildTelegramMessages(payload as ResearchExportPayload, 10)
     : legacyText
       ? ["<b>" + escapeHtml(title.slice(0, 200)) + "</b>\n\n" + escapeHtml(legacyText)]
       : [];
@@ -250,13 +260,29 @@ export async function POST(request: Request) {
     }
   }
 
-  const delivered: Array<{ chatId: string; messageIds: number[] }> = [];
+  const delivered: Array<{ chatId: string; messageIds: number[]; migratedTo?: string }> = [];
   const failed: Array<{ chatId: string; stage: string; error: string; hint: string }> = [];
+  const migrations: Array<{ from: string; to: string }> = [];
   for (const chatId of recipients) {
+    let target = chatId;
+    // Follows Telegram's own migrate_to_chat_id once: the new id is the same chat,
+    // so it does not widen the allowlist.
+    const deliver = async <T,>(send: (id: string) => Promise<T>) => {
+      try {
+        return await send(target);
+      } catch (error) {
+        if (error instanceof TelegramError && error.migrateTo && target === chatId) {
+          target = error.migrateTo;
+          migrations.push({ from: chatId, to: target });
+          return send(target);
+        }
+        throw error;
+      }
+    };
     const messageIds: number[] = [];
     try {
       for (const message of messages) {
-        const id = await sendMessage(token, chatId, message);
+        const id = await deliver((id) => sendMessage(token, id, message));
         if (id) messageIds.push(id);
       }
     } catch (error) {
@@ -265,13 +291,13 @@ export async function POST(request: Request) {
     }
     for (const file of attachments) {
       try {
-        const id = await sendDocument(token, chatId, file.buffer, file.name, file.type);
+        const id = await deliver((id) => sendDocument(token, id, file.buffer, file.name, file.type));
         if (id) messageIds.push(id);
       } catch (error) {
         attachmentErrors.push({ stage: "send_document:" + file.name + ":" + chatId, error: error instanceof Error ? error.message : "Telegram sendDocument failed." });
       }
     }
-    delivered.push({ chatId, messageIds });
+    delivered.push(target === chatId ? { chatId, messageIds } : { chatId, messageIds, migratedTo: target });
   }
 
   if (!delivered.length) {
@@ -285,6 +311,10 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     partial: failed.length > 0 || attachmentErrors.length > 0,
+    migrations,
+    migrationHint: migrations.length
+      ? "The Telegram group became a supergroup. Replace " + migrations.map((m) => m.from + " with " + m.to).join(", ") + " in TELEGRAM_CHAT_ID and TELEGRAM_ALLOWED_CHAT_IDS in Vercel."
+      : undefined,
     botUsername: me?.username || null,
     recipients: delivered.length,
     delivered,

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/research/task/route";
 import { clearReaderCache } from "@/lib/free-research";
 import { resetLocalQuotaCounters } from "@/lib/plans";
-import { EVENT_PAGE, VC_PAGE, aiResult, json, mockFetch, openRouterReply, postJson, researchPayload } from "./helpers";
+import { EVENT_PAGE, VC_PAGE, json, mockFetch, postJson, verifyReply } from "./helpers";
 
 const QUERY = "Find venture capital investors in Amsterdam for a B2B software startup";
 const PAGES: Record<string, { title: string; text: string }> = {
@@ -37,6 +37,9 @@ beforeEach(() => {
   vi.stubEnv("PLAN_ENFORCEMENT", "off");
   vi.stubEnv("JINA_API_KEY", "jina_test_key");
   vi.stubEnv("OPENROUTER_API_KEY", "or_test_key");
+  vi.stubEnv("KEYLESS_SEARCH_PAUSE_MS", "0");
+  vi.stubEnv("DIRECT_READ", "off");
+  for (const key of ["GEMINI_API_KEY", "GROQ_API_KEY", "SEARXNG_URL", "PRO_OPENROUTER_MODEL", "OPENAI_API_KEY"]) vi.stubEnv(key, "");
   for (const key of ["BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY", "MOJEEK_API_KEY", "YANDEX_SEARCH_API_KEY", "NAVER_CLIENT_ID", "DATAFORSEO_LOGIN", "KV_REST_API_URL", "UPSTASH_REDIS_REST_URL"]) vi.stubEnv(key, "");
 });
 
@@ -46,8 +49,9 @@ afterEach(() => {
 });
 
 describe("research flow: explicit errors instead of empty results", () => {
-  it("returns a clear 503 when JINA_API_KEY and every fallback provider are missing", async () => {
+  it("returns a clear 503 when keyless search is off and no search key is configured", async () => {
     vi.stubEnv("JINA_API_KEY", "");
+    vi.stubEnv("KEYLESS_SEARCH", "off");
     const calls = mockFetch([]);
     const response = await POST(request());
     const body = await response.json();
@@ -93,7 +97,8 @@ describe("research flow: explicit errors instead of empty results", () => {
     expect(body.results.length).toBeGreaterThan(0);
     expect(body.results.every((r: any) => r.status === "Manual review")).toBe(true);
     expect(body.results.some((r: any) => r.url.includes("/events/"))).toBe(false);
-    expect(body.summary).toContain("OpenRouter HTTP 503");
+    expect(body.summary).toContain("HTTP 503");
+    expect(body.aiStatus).toMatchObject({ ok: false, configured: true });
   });
 
   it("reports a true zero (providers answered, nothing found) with an explanation", async () => {
@@ -115,12 +120,11 @@ describe("research flow: normal successful run", () => {
       jinaReaderOk(),
       {
         match: (u) => u.includes("openrouter.ai"),
-        respond: () => openRouterReply(researchPayload([
-          aiResult({ title: "Northwave Ventures", organization: "Northwave Ventures B.V.", specialization: "B2B software", geography: "Amsterdam", investment_type: "VC", url: "https://northwave.vc", source: "northwave.vc", evidence: "Amsterdam VC investing in B2B software", evidence_quote: quote }),
-          aiResult({ title: "Northwave Ventures team", organization: "Northwave Ventures", url: "https://northwave.vc/team", source: "northwave.vc", confidence: 70, evidence: "Team page", evidence_quote: "Meet the Northwave Ventures partners." }),
-          aiResult({ title: "Investor Networking Night Amsterdam", url: "https://amsterdam-networking.com/events/investor-night", source: "amsterdam-networking.com", evidence: "Networking event", evidence_quote: "an event for founders to meet angels" }),
-          aiResult({ title: "Invented Capital", organization: "Invented Capital", url: "https://invented-capital.example/fund", source: "invented", evidence: "made up", evidence_quote: "Invented Capital invests in B2B software in Amsterdam." }),
-        ])),
+        respond: verifyReply({
+          "https://northwave.vc": { keep: true, page_type: "entity", name: "Northwave Ventures", organization: "Northwave Ventures B.V.", specialization: "B2B software", location: "Amsterdam", investment_type: "VC", match: 85, evidence_quote: quote, why: "Amsterdam VC investing in B2B software" },
+          "https://northwave.vc/team": { keep: true, page_type: "entity", name: "Northwave Ventures team", organization: "Northwave Ventures", match: 70, evidence_quote: "Meet the Northwave Ventures partners.", why: "Team page" },
+          "https://amsterdam-networking.com/events/investor-night": { keep: false, page_type: "article", name: "Investor Networking Night Amsterdam", match: 20, why: "An event, not an investor" },
+        }),
       },
     ]);
     const response = await POST(request());
@@ -146,16 +150,17 @@ describe("research flow: normal successful run", () => {
       jinaReaderOk(),
       {
         match: (u) => u.includes("openrouter.ai"),
-        respond: () => openRouterReply(researchPayload([
-          aiResult({ title: "Northwave Ventures", organization: "Northwave Ventures", specialization: "B2B software", geography: "Amsterdam", url: "https://northwave.vc", source: "northwave.vc", evidence: "VC in Amsterdam", evidence_quote: "Northwave Ventures manages EUR 900m and invests in B2B software across Amsterdam." }),
-        ])),
+        respond: verifyReply({
+          "https://northwave.vc": { keep: true, page_type: "entity", name: "Northwave Ventures", organization: "Northwave Ventures", specialization: "B2B software", location: "Amsterdam", match: 85, evidence_quote: "Northwave Ventures manages EUR 900m and invests in B2B software across Amsterdam.", why: "VC in Amsterdam" },
+        }),
       },
     ]);
     const body = await (await POST(request())).json();
     expect(body.results).toHaveLength(1);
-    expect(body.results[0].status).toBe("Manual review");
-    expect(body.results[0].qualityGate.gate).toBe("REVIEW");
-    expect(body.results[0].qualityGate.dimensions.evidence.notes.join(" ")).toContain("not found");
+    // The invented quote is replaced by a real sentence from the page: checked, but not "Verified".
+    expect(body.results[0].status).toBe("Reviewed");
+    expect(body.results[0].evidenceQuote || body.results[0].evidence_quote).not.toContain("EUR 900m");
+    expect(body.results[0].qualityGate.checks.evidenceGrounded).toBe(true);
   });
 });
 
@@ -176,8 +181,10 @@ describe("plans", () => {
     vi.stubEnv("PLAN_ENFORCEMENT", "on");
     vi.stubEnv("FREE_DAILY_TASKS", "1");
     vi.stubEnv("JINA_API_KEY", "");
+    vi.stubEnv("KEYLESS_SEARCH", "off");
     mockFetch([]);
     expect((await POST(request())).status).toBe(503);
+    vi.stubEnv("KEYLESS_SEARCH", "");
     vi.stubEnv("JINA_API_KEY", "jina_test_key");
     mockFetch([{ match: (u) => u.startsWith("https://s.jina.ai/"), respond: () => json({ code: 200, data: [] }) }]);
     expect((await POST(request())).status).toBe(200);
