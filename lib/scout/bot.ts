@@ -56,6 +56,19 @@ function isControl(chatId: string, userId: string) {
   return ids.has(chatId) || ids.has(userId);
 }
 
+function healthIcon(level: "ok" | "warning" | "error") {
+  if (level === "ok") return "✅ ";
+  if (level === "warning") return "⚠️ ";
+  return "❌ ";
+}
+
+function taskStateIcon(state: string) {
+  if (state === "done") return "✅";
+  if (state === "failed") return "❌";
+  if (state === "stopped") return "⏹";
+  return "⏳";
+}
+
 // ---- Rendering helpers --------------------------------------------------------
 
 function objectLine(o: ObjectCard, i: number) {
@@ -131,7 +144,7 @@ async function diagnosticText(chatId: string, userId: string) {
   const lines = [
     "<b>AURELIUS · диагностика</b>",
     "",
-    ...health.checks.map((item) => (item.level === "ok" ? "✅ " : item.level === "warning" ? "⚠️ " : "❌ ") + "<b>" + escapeHtml(item.label) + "</b>: " + escapeHtml(item.detail)),
+    ...health.checks.map((item) => healthIcon(item.level) + "<b>" + escapeHtml(item.label) + "</b>: " + escapeHtml(item.detail)),
     "",
     "Control access: " + (isControl(chatId, userId) ? "✅" : "❌"),
     "User ID: <code>" + escapeHtml(userId) + "</code>",
@@ -174,7 +187,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
         return {};
       }
       const lines = tasks.map((task) => {
-        const mark = task.state === "done" ? "✅" : task.state === "failed" ? "❌" : task.state === "stopped" ? "⏹" : "⏳";
+        const mark = taskStateIcon(task.state);
         return mark + " <b>" + escapeHtml(task.id) + "</b> · " + escapeHtml(task.stage || task.state) +
           "\n" + escapeHtml(task.query.slice(0, 110)) +
           "\nисточники " + task.counters.sourcesChecked + " · результаты " + task.counters.afterDedupe + " · verified " + task.counters.matchingCriteria + " · quality " + (task.quality?.score || 0) + "%";
