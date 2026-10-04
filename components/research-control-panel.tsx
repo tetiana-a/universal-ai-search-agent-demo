@@ -168,14 +168,15 @@ export default function ResearchControlPanel(props: {
           </div>
         </div>
         {edition ? (
-          <div className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">
+          <details className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">
+            <summary className="cursor-pointer py-1 text-[var(--text-muted)]">{ru ? "О поиске" : "Search details"}</summary>
             {(ru ? "Поиск: " : "Search: ") + (edition.search || []).join(", ")}
             {(edition.limitations || []).length ? (
               <ul className="mt-1 list-disc pl-4 text-[var(--text-faint)]">
                 {edition.limitations.map((code: string) => <li key={code}>{(LIMITATION_TEXT[code] || [code, code])[ru ? 0 : 1]}</li>)}
               </ul>
             ) : null}
-          </div>
+          </details>
         ) : null}
         {session && !running ? (
           <div className="mt-2 text-[11px] text-[var(--text-faint)]">
