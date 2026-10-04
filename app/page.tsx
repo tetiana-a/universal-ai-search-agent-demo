@@ -515,6 +515,7 @@ export default function Home() {
   const [searchBranches, setSearchBranches] = useState<string[]>([]);
   const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
   const [researchSummary, setResearchSummary] = useState("");
+  const [aiCheck, setAiCheck] = useState<{ ok: boolean; configured?: boolean; provider?: string; model?: string; pagesChecked?: number; kept?: number; dropped?: number; message?: string } | null>(null);
   const [liveBilling, setLiveBilling] = useState<Record<string, unknown> | undefined>(undefined);
   const [activeTask, setActiveTask] = useState<{ id: string; responseId: string; query: string; language: Lang; depth: "Quick" | "Balanced" | "Deep"; maxResults: number; maxSources: number; maxPages: number } | null>(null);
   const pollingTaskRef = useRef<string | null>(null);
@@ -1090,6 +1091,7 @@ export default function Home() {
     });
     setSearchPlan(String(data.searchPlan || ""));
     setResearchSummary(String(data.summary || ""));
+    setAiCheck(data.aiStatus && typeof data.aiStatus === "object" ? data.aiStatus : null);
     setLiveBilling(data.billing || undefined);
     setQueryUnderstanding(data.queryUnderstanding || null);
     setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
@@ -1256,6 +1258,7 @@ export default function Home() {
     setSearchBranches([]);
     setQueryUnderstanding(null);
     setResearchSummary("");
+    setAiCheck(null);
     setLiveBilling(undefined);
     setQualityGate({ total: 0, pass: 0, review: 0, fail: 0, independentVerification: false, ruleSet: [] });
     setSearchPlan("");
@@ -2101,6 +2104,15 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+              {aiCheck ? (
+                <div className={"mt-3 rounded-lg border p-3 text-[10px] leading-4 " + (aiCheck.ok ? "border-emerald-400/30 text-emerald-200/90" : "border-amber-400/40 text-amber-200/90")}>
+                  {aiCheck.ok
+                    ? (lang === "ru" ? "ИИ-проверка работает" : "AI verification ran") + ` · ${aiCheck.provider} · ${aiCheck.model} · ` + (lang === "ru" ? `страниц ${aiCheck.pagesChecked}, подошло ${aiCheck.kept}, отсеяно ${aiCheck.dropped}` : `${aiCheck.pagesChecked} pages, ${aiCheck.kept} kept, ${aiCheck.dropped} dropped`)
+                    : !aiCheck.configured
+                      ? (lang === "ru" ? "ИИ-проверка не подключена (нет OPENROUTER_API_KEY / GEMINI_API_KEY / GROQ_API_KEY): результаты отобраны правилами." : "AI verification is not configured: results were selected by rules.")
+                      : (lang === "ru" ? "ИИ-проверка не сработала: " : "AI verification failed: ") + String(aiCheck.message || "")}
+                </div>
+              ) : null}
               {researchSummary ? <div className="mt-3 rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3 text-[10px] leading-4 text-[var(--text-muted)]">{researchSummary}</div> : null}
             </div>
             <div className="glass-soft rounded-xl p-4">

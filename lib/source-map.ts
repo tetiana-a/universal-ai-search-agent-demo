@@ -200,6 +200,31 @@ const LOCAL_TERMS: Record<string, Partial<Record<ResearchKind, string[]>>> = {
   cs: { real_estate: ["pozemek na prodej", "byt na prodej"], investor: ["investoři"], company: ["výrobce"] },
 };
 
+// Without an AI key the task cannot be translated, so common product and trade words are
+// mapped to English by a small table: B2B platforms and factory sites are in English.
+const PRODUCT_EN: Array<[RegExp, string]> = [
+  [/светодиод\p{L}*|\bled\b/iu, "LED"], [/светильник\p{L}*|освещени\p{L}*/iu, "lighting"], [/ламп\p{L}*/iu, "lamps"],
+  [/мебел\p{L}*/iu, "furniture"], [/одежд\p{L}*/iu, "clothing"], [/обув\p{L}*/iu, "footwear"], [/текстил\p{L}*|ткан\p{L}*/iu, "textile"],
+  [/упаковк\p{L}*/iu, "packaging"], [/электроник\p{L}*/iu, "electronics"], [/косметик\p{L}*/iu, "cosmetics"], [/игрушк\p{L}*/iu, "toys"],
+  [/солнечн\p{L}* панел\p{L}*/iu, "solar panels"], [/аккумулятор\p{L}*|батаре\p{L}*/iu, "batteries"], [/кабел\p{L}*/iu, "cables"],
+  [/станк\p{L}*|оборудовани\p{L}*/iu, "machinery"], [/запчаст\p{L}*/iu, "spare parts"], [/пластик\p{L}*/iu, "plastic products"],
+  [/стекл\p{L}*/iu, "glass"], [/металл\p{L}*/iu, "metal products"], [/плитк\p{L}*/iu, "tiles"], [/сантехник\p{L}*/iu, "sanitary ware"],
+  [/дрон\p{L}*|беспилотник\p{L}*/iu, "drones"], [/велосипед\p{L}*/iu, "bicycles"], [/электромобил\p{L}*/iu, "electric vehicles"],
+];
+const TRADE_EN: Array<[RegExp, string]> = [
+  [/производител\p{L}*|завод\p{L}*|фабрик\p{L}*/iu, "manufacturers"], [/поставщик\p{L}*/iu, "suppliers"], [/дистрибьютор\p{L}*|дистрибутор\p{L}*/iu, "distributors"],
+];
+
+export function roughEnglish(query: string, kind: ResearchKind, where: string) {
+  const text = String(query || "").split("\n")[0];
+  if (!/[^\x00-\x7F]/.test(text)) return "";
+  const product = PRODUCT_EN.filter(([re]) => re.test(text)).map(([, en]) => en);
+  if (!product.length) return "";
+  const trade = TRADE_EN.filter(([re]) => re.test(text)).map(([, en]) => en);
+  const tail = trade.length ? trade : kind === "company" ? ["manufacturers"] : [];
+  return [...new Set([...product, ...tail])].join(" ") + (where ? " " + where : "");
+}
+
 const OBJECT = /(земельн\p{L}* участ\p{L}*|участ\p{L}*|земл\p{L}*|квартир\p{L}*|апартамент\p{L}*|дом\p{L}*|вилл\p{L}*|коммерческ\p{L}* недвижимост\p{L}*|land|plot|apartment|flat|house|villa|commercial property)/iu;
 
 const FILLER = /^(найди|найти|ищу|нужн\p{L}*|подбери|покажи|find|search|look for|i need|please)\s+/iu;
@@ -226,8 +251,8 @@ export function buildSourceMap(query: string, hints: { subjectEn?: string } = {}
   const kind = inferResearchKind(query);
   const country = detectCountry(query);
   const original = subjectOf(query);
-  const subject = String(hints.subjectEn || "").trim().slice(0, 160) || original;
   const place = cityOf(query) || country?.en || placeOf(query, country);
+  const subject = String(hints.subjectEn || "").trim().slice(0, 160) || roughEnglish(query, kind, cityOf(query) || country?.en || "") || original;
   const c = country?.id || "";
 
   const seeds: Seed[] = [];
@@ -265,12 +290,18 @@ export function buildSourceMap(query: string, hints: { subjectEn?: string } = {}
       { classId: "events", query: `investor conference ${where} 2026`.trim() },
     );
   } else if (kind === "company") {
+    // Manufacturers are found on B2B platforms and on their own sites, not in blogs:
+    // B2B supplier searches go first, then factory sites ("Co., Ltd", OEM).
+    const product = subject.replace(/\b(manufacturers?|suppliers?|factory|factories|distributors?)\b/gi, "").replace(new RegExp("\\b" + (where || "#none#") + "\\b", "i"), "").replace(/\s+/g, " ").trim() || subject;
+    for (const source of sources.filter((s) => s.classId === "b2b" && s.access === "open").slice(0, 3)) {
+      branches.push({ classId: "b2b", query: `site:${source.domain} ${product} manufacturer` });
+    }
     branches.push(
-      ...local.slice(0, 1).map((term) => ({ classId: "manufacturers", query: `${subject} ${term}`.trim() })),
-      { classId: "manufacturers", query: `${subject} manufacturer factory ${subject.includes(where) ? "" : where}`.trim() },
-      { classId: "directories", query: `${subject} suppliers directory`.trim() },
-      { classId: "fairs", query: `${subject} trade fair exhibitors`.trim() },
-      { classId: "associations", query: `${subject} industry association`.trim() },
+      { classId: "manufacturers", query: `${product} manufacturer factory ${where} "Co., Ltd"`.replace(/\s+/g, " ").trim() },
+      ...local.slice(0, 1).map((term) => ({ classId: "manufacturers", query: `${product} ${term}`.trim() })),
+      { classId: "manufacturers", query: `${product} OEM ODM factory ${where}`.trim() },
+      { classId: "directories", query: `${product} suppliers directory ${where}`.trim() },
+      { classId: "fairs", query: `${product} trade fair exhibitors list`.trim() },
     );
   } else if (kind === "person") {
     branches.push(
@@ -288,10 +319,11 @@ export function buildSourceMap(query: string, hints: { subjectEn?: string } = {}
 
   // Search inside known open portals through the search engine (site: queries).
   const searchable = sources.filter((s) => s.access === "open" || s.access === "search_only").filter((s) => s.classId !== "communities");
-  for (const source of searchable.slice(0, 6)) {
+  for (const source of searchable.filter((s) => kind !== "company" || s.classId !== "b2b").slice(0, 6)) {
     branches.push({ classId: source.classId, query: `site:${source.domain} ${kind === "real_estate" ? objectWord || subject : subject} ${kind === "real_estate" || !subject.includes(where) ? where : ""}`.replace(/\s+/g, " ").trim() });
   }
-  branches.push({ classId: "communities", query: `${original} (site:t.me OR site:reddit.com)` });
+  // Forums and channels are leads for people and open questions, not for objects or companies.
+  if (kind === "person" || kind === "general") branches.push({ classId: "communities", query: `${original} (site:t.me OR site:reddit.com)` });
 
   const unique = new Map<string, { classId: string; query: string }>();
   for (const b of branches) if (b.query && !unique.has(b.query.toLowerCase())) unique.set(b.query.toLowerCase(), b);
