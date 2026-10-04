@@ -21,29 +21,15 @@ import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSou
 export type BotResult = { background?: () => Promise<void> };
 
 const HELP = [
-  "<b>AURELIUS — универсальный AI-агент поиска</b>",
-  "Напишите задачу обычным текстом, например: «Найди земельные участки в Мадриде от 10 000 м²» или «Найди инвесторов в Амстердаме для B2B SaaS».",
-  "Агент уточнит критерии, соберёт базу источников, проверит их и пришлёт таблицу результатов (Excel + CSV).",
-  "В группе: /find задача, упоминание бота или ответ на его сообщение.",
-  "/find задача — новый поиск · /status — прогресс текущего поиска",
-  "/tasks — последние задачи · /results — последние результаты · /health — диагностика · /id — Telegram ID",
+  "<b>AURELIUS</b>",
+  "Просто напишите обычным сообщением, что нужно найти.",
   "",
-  "<b>Разведчик (недвижимость + инвесторы)</b>",
-  "/report — отчёт за сегодня",
-  "/scan — запустить обход сейчас",
-  "/objects [город] — топ объектов",
-  "/investors — топ инвесторов",
-  "/matches — пары объект ↔ инвестор",
-  "/drafts — сообщения на одобрение (Отправить / Изменить / Отклонить)",
-  "/leads — диалоги и квалификация",
-  "/sources — новые источники (Одобрить / Отклонить)",
-  "/watch — watchlist; /watch add person @канал · /watch add keyword текст · /watch add domain сайт.com · /watch add group t.me/… · /watch del значение",
-  "/comments ссылка_на_пост + с новой строки «Имя: комментарий» — разобрать комментаторов",
-  "/meet 18.10 11:00 Zoom — Engel &amp; Völkers — встреча (.ics + Google Календарь)",
-  "/stop контакт — в стоп-лист · /forget контакт — удалить по GDPR",
-  "/settings — критерии; /settings price 100000-900000 · /settings discount 15",
+  "Например:",
+  "«Найди участки возле Мадрида от 10 000 м²»",
+  "«Найди инвесторов в Амстердаме для B2B SaaS»",
   "",
-  "Дашборд: " + dashboardUrl(),
+  "Я сам уточню детали, выполню поиск и покажу результаты.",
+  "Команды запоминать не нужно — используйте кнопки.",
 ].join("\n");
 
 function commandOf(text: string) {
@@ -67,6 +53,15 @@ function taskStateIcon(state: string) {
   if (state === "failed") return "❌";
   if (state === "stopped") return "⏹";
   return "⏳";
+}
+
+function taskStateLabel(state: string) {
+  if (state === "clarifying") return "жду уточнение";
+  if (state === "running") return "ищу";
+  if (state === "done") return "готово";
+  if (state === "stopped") return "остановлено";
+  if (state === "failed") return "ошибка";
+  return state;
 }
 
 // ---- Rendering helpers --------------------------------------------------------
@@ -99,43 +94,60 @@ function sourceText(s: ScoutSource) {
 
 function mainPanelKeyboard(): Keyboard {
   return [
+    [{ text: "🔎 Найти", callback_data: "menu:find" }],
     [
-      { text: "🔎 Новый поиск", callback_data: "menu:find" },
-      { text: "📍 Статус", callback_data: "menu:status" },
-    ],
-    [
-      { text: "📋 Задачи", callback_data: "menu:tasks" },
+      { text: "📋 Мои поиски", callback_data: "menu:tasks" },
       { text: "✅ Результаты", callback_data: "menu:results" },
     ],
     [
+      { text: "📍 Что сейчас?", callback_data: "menu:status" },
+      { text: "➕ Ещё", callback_data: "menu:more" },
+    ],
+    [{ text: "🖥 Открыть кабинет", url: dashboardUrl() }],
+  ];
+}
+
+function moreMenuKeyboard(): Keyboard {
+  return [
+    [
       { text: "📊 Отчёт", callback_data: "menu:report" },
-      { text: "🛰 Обход", callback_data: "menu:scan" },
+      { text: "🛰 Обновить данные", callback_data: "menu:scan" },
     ],
     [
       { text: "🌐 Источники", callback_data: "menu:sources" },
-      { text: "✉️ Черновики", callback_data: "menu:drafts" },
+      { text: "✉️ Сообщения", callback_data: "menu:drafts" },
     ],
     [
-      { text: "👥 Лиды", callback_data: "menu:leads" },
+      { text: "👥 Диалоги", callback_data: "menu:leads" },
       { text: "⚙️ Настройки", callback_data: "menu:settings" },
     ],
-    [{ text: "🩺 Диагностика", callback_data: "menu:health" }],
-    [{ text: "🖥 Открыть дашборд", url: dashboardUrl() }],
+    [
+      { text: "🩺 Проверка", callback_data: "menu:health" },
+      { text: "⬅️ Назад", callback_data: "menu:panel" },
+    ],
   ];
 }
 
 async function showPanel(chatId: string) {
   const task = await loadTask(chatId);
   const state = task
-    ? "Текущая задача: <b>" + escapeHtml(task.query.slice(0, 120)) + "</b>\nСтатус: " + escapeHtml(task.state)
-    : "Активной задачи сейчас нет.";
+    ? "Сейчас: <b>" + escapeHtml(task.query.slice(0, 120)) + "</b>\n" + taskStateIcon(task.state) + " " + escapeHtml(taskStateLabel(task.state))
+    : "Сейчас ничего не ищу.";
+
   await sendMessage(
     chatId,
-    "<b>AURELIUS · центр управления</b>\n" +
-      "Одна панель для поиска, источников, отчётов и действий.\n\n" +
-      state +
-      "\n\nВыберите действие:",
+    "<b>AURELIUS</b>\n" +
+      "Напишите, что хотите найти, обычным сообщением — или выберите кнопку.\n\n" +
+      state,
     mainPanelKeyboard(),
+  );
+}
+
+async function showMoreMenu(chatId: string) {
+  await sendMessage(
+    chatId,
+    "<b>Дополнительные функции</b>\nЗдесь отчёты, источники, сообщения и настройки.",
+    moreMenuKeyboard(),
   );
 }
 
@@ -183,23 +195,23 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "tasks": {
       const tasks = (await listRecentResearchTasks(12)).filter((task) => task.chatId === chatId || task.ownerId === userId).slice(0, 8);
       if (!tasks.length) {
-        await sendMessage(chatId, "Задач пока нет. Нажмите «🔎 Новый поиск» или используйте /find.");
+        await sendMessage(chatId, "Поисков пока нет. Нажмите «🔎 Найти» или просто напишите, что нужно найти.", mainPanelKeyboard());
         return {};
       }
-      const lines = tasks.map((task) => {
+      const lines = tasks.map((task, index) => {
         const mark = taskStateIcon(task.state);
-        return mark + " <b>" + escapeHtml(task.id) + "</b> · " + escapeHtml(task.stage || task.state) +
-          "\n" + escapeHtml(task.query.slice(0, 110)) +
-          "\nисточники " + task.counters.sourcesChecked + " · результаты " + task.counters.afterDedupe + " · verified " + task.counters.matchingCriteria + " · quality " + (task.quality?.score || 0) + "%";
+        const found = task.counters.afterDedupe ? " · найдено " + task.counters.afterDedupe : "";
+        return mark + " <b>" + (index + 1) + ". " + escapeHtml(task.query.slice(0, 120)) + "</b>" +
+          "\n" + escapeHtml(taskStateLabel(task.state)) + found;
       });
-      await sendLong(chatId, "<b>Последние задачи</b>\n\n" + lines.join("\n\n"), mainPanelKeyboard());
+      await sendLong(chatId, "<b>Мои последние поиски</b>\n\n" + lines.join("\n\n"), mainPanelKeyboard());
       return {};
     }
 
     case "results": {
       const task = await loadTask(chatId);
       if (!task) {
-        await sendMessage(chatId, "Результатов пока нет. /find — начать поиск.", mainPanelKeyboard());
+        await sendMessage(chatId, "Результатов пока нет. Нажмите «🔎 Найти» или просто напишите запрос.", mainPanelKeyboard());
         return {};
       }
       if (!task.results.length) {
@@ -213,11 +225,11 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
         const status = String(row?.status || row?.verificationStatus || "");
         return (index + 1) + ". " + (url ? "<a href=\"" + escapeHtml(url) + "\">" + escapeHtml(title) + "</a>" : "<b>" + escapeHtml(title) + "</b>") + (status ? " · " + escapeHtml(status) : "");
       });
-      const header = "<b>Результаты " + escapeHtml(task.id) + "</b>\n" +
+      const header = "<b>Вот что я нашёл</b>\n" +
         escapeHtml(task.query.slice(0, 220)) + "\n\n" +
-        "Найдено: <b>" + task.counters.afterDedupe + "</b> · подтверждено: <b>" + task.counters.matchingCriteria + "</b> · требует проверки: <b>" + task.counters.needsReview + "</b>" +
-        "\nQuality: <b>" + String(task.quality?.score || 0) + "%</b> · evidence: <b>" + String(task.quality?.evidenceCoverage || 0) + "%</b>";
-      await sendLong(chatId, header + "\n\n" + lines.join("\n"), [[{ text: "📍 Статус", callback_data: "menu:status" }, { text: "🖥 Дашборд", url: dashboardUrl("?tab=tasks") }]]);
+        "Всего: <b>" + task.counters.afterDedupe + "</b> · подтверждено: <b>" + task.counters.matchingCriteria + "</b>" +
+        (task.counters.needsReview ? " · проверить вручную: <b>" + task.counters.needsReview + "</b>" : "");
+      await sendLong(chatId, header + "\n\n" + lines.join("\n"), [[{ text: "📍 Что сейчас?", callback_data: "menu:status" }, { text: "🖥 Открыть кабинет", url: dashboardUrl("?tab=tasks") }]]);
       return {};
     }
 
@@ -227,7 +239,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
 
     case "find":
     case "search": {
-      if (!args) { await sendMessage(chatId, "Напишите задачу после команды, например: /find инвесторы в Амстердаме для B2B SaaS"); return {}; }
+      if (!args) { await sendMessage(chatId, "Просто напишите одним сообщением, что нужно найти. Например: «инвесторы в Амстердаме для B2B SaaS»", mainPanelKeyboard()); return {}; }
       return { background: await startResearch(chatId, userId, args) };
     }
 
@@ -412,7 +424,11 @@ async function handleCallback(query: any): Promise<BotResult> {
   if (kind === "menu") {
     await answerCallback(query.id, "✓");
     if (action === "find") {
-      await tgForceReply(chatId, "🔎 Напишите одним сообщением, что нужно найти. Я запущу поиск по бесплатному маршруту.");
+      await tgForceReply(chatId, "🔎 Что найти? Напишите запрос обычным сообщением.");
+      return {};
+    }
+    if (action === "more") {
+      await showMoreMenu(chatId);
       return {};
     }
     if (action === "panel") {
