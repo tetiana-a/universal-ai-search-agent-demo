@@ -1,8 +1,8 @@
 import { configuredAiProviders } from "@/lib/free-ai";
 import { keylessProviders } from "@/lib/keyless-search";
-import { adminKeyConfigured } from "@/lib/scout/auth";
+import { adminKeyConfigured, publicDashboardEnabled } from "@/lib/scout/auth";
 import { deleteValue, getValue, setValue, storeIsPersistent } from "@/lib/scout/store";
-import { botToken, reportChatId, tgCall, webhookSecret } from "@/lib/scout/telegram";
+import { botToken, openGroupAccessEnabled, reportChatId, tgCall, webhookSecret } from "@/lib/scout/telegram";
 
 export type HealthLevel = "ok" | "warning" | "error";
 
@@ -26,6 +26,7 @@ export type OperationalHealth = {
     webhookError?: string;
     pendingUpdates?: number;
     reportChatId?: string;
+    openGroupAccess: boolean;
   };
   persistence: {
     configured: boolean;
@@ -115,6 +116,7 @@ async function probeTelegram(): Promise<{ health: TelegramHealth; checks: Health
     apiOk,
     webhookConfigured: Boolean(webhookUrl),
     pendingUpdates,
+    openGroupAccess: openGroupAccessEnabled(),
   };
   if (usernameValue) health.username = usernameValue;
   if (webhookUrl) health.webhookUrl = webhookUrl;
@@ -153,12 +155,17 @@ function aiHealth() {
   return { providers, zeroCost, check: aiCheck };
 }
 
+function dashboardAccessCheck(publicDashboard: boolean, adminProtected: boolean): HealthCheck {
+  if (publicDashboard) return check("admin", "Dashboard access", "ok", "Public shared dashboard mode is enabled.");
+  if (adminProtected) return check("admin", "Admin protection", "ok", "SCOUT_ADMIN_KEY protects Scout API/dashboard state.");
+  return check("admin", "Admin protection", "warning", "SCOUT_ADMIN_KEY is not set. Do not store real personal data in open demo mode.");
+}
+
 function securityHealth() {
+  const publicDashboard = publicDashboardEnabled();
   const adminProtected = adminKeyConfigured();
   const explicitWebhookSecret = Boolean(String(process.env.TELEGRAM_WEBHOOK_SECRET || "").trim());
-  const adminCheck = adminProtected
-    ? check("admin", "Admin protection", "ok", "SCOUT_ADMIN_KEY protects Scout API/dashboard state.")
-    : check("admin", "Admin protection", "warning", "SCOUT_ADMIN_KEY is not set. Do not store real personal data in open demo mode.");
+  const adminCheck = dashboardAccessCheck(publicDashboard, adminProtected);
 
   let webhookCheck: HealthCheck;
   if (!webhookSecret()) {

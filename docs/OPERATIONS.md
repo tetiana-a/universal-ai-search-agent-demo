@@ -81,3 +81,19 @@ A change is not production-ready unless:
 - Vercel preview deploys
 - Telegram control callbacks are covered by tests when changed
 - failure behavior is explicit and user-visible
+
+
+## Shared demo workspace
+
+For a temporary shared/demo workspace where every member of one Telegram group has the same controls:
+
+```env
+TELEGRAM_OPEN_GROUP_ACCESS=on
+SCOUT_REPORT_CHAT_ID=-100...
+TELEGRAM_OPEN_GROUP_IDS=
+SCOUT_PUBLIC_DASHBOARD=on
+```
+
+Leave `TELEGRAM_OPEN_GROUP_IDS` empty to reuse the migration-aware report group automatically. Other Telegram groups stay closed. In the shared group, commands and inline buttons work for every human member; ordinary free-text search should still address/reply to the bot so normal group conversation is not consumed as research requests.
+
+`SCOUT_PUBLIC_DASHBOARD=on` intentionally makes Scout reads and actions available to anyone with the dashboard URL. Use this only for a shared/demo workspace without sensitive personal data. Turn it off and set `SCOUT_ADMIN_KEY` before storing private production contacts.

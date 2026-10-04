@@ -11,6 +11,8 @@ beforeEach(() => {
   vi.stubEnv("TELEGRAM_BOT_TOKEN", "test-bot-token");
   vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "test-webhook-secret");
   vi.stubEnv("SCOUT_REPORT_CHAT_ID", "-100123");
+  vi.stubEnv("SCOUT_PUBLIC_DASHBOARD", "off");
+  vi.stubEnv("TELEGRAM_OPEN_GROUP_ACCESS", "off");
   vi.stubEnv("SCOUT_ADMIN_KEY", "admin-test-key");
   vi.stubEnv("ZERO_COST_MODE", "on");
   vi.stubEnv("KEYLESS_SEARCH", "always");
@@ -68,5 +70,18 @@ describe("Scout production health", () => {
     const allowed = await GET(new Request("https://x/api/scout/health", { headers: { "x-scout-key": "admin-test-key" } }));
     expect(allowed.status).toBe(200);
     expect((await allowed.json()).ok).toBe(true);
+  });
+
+  it("allows the shared dashboard without a key when public mode is explicitly enabled", async () => {
+    telegramHealth(true);
+    vi.stubEnv("SCOUT_PUBLIC_DASHBOARD", "on");
+    vi.stubEnv("TELEGRAM_OPEN_GROUP_ACCESS", "on");
+
+    const response = await GET(new Request("https://x/api/scout/health"));
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.telegram.openGroupAccess).toBe(true);
+    expect(data.security.adminProtected).toBe(false);
+    expect(data.checks.find((item: any) => item.id === "admin")?.detail).toContain("Public shared dashboard");
   });
 });

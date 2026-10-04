@@ -3,8 +3,12 @@ import { timingSafeEqual } from "node:crypto";
 // Dashboard access. With SCOUT_ADMIN_KEY set, every read and write needs the key
 // (the CRM holds personal data). Without it the dashboard runs in open demo mode.
 
+export function publicDashboardEnabled() {
+  return String(process.env.SCOUT_PUBLIC_DASHBOARD || "").trim().toLowerCase() === "on";
+}
+
 export function adminKeyConfigured() {
-  return Boolean(String(process.env.SCOUT_ADMIN_KEY || "").trim());
+  return !publicDashboardEnabled() && Boolean(String(process.env.SCOUT_ADMIN_KEY || "").trim());
 }
 
 function same(a: string, b: string) {
@@ -14,6 +18,7 @@ function same(a: string, b: string) {
 }
 
 export function isAuthorized(request: Request) {
+  if (publicDashboardEnabled()) return true;
   const key = String(process.env.SCOUT_ADMIN_KEY || "").trim();
   if (!key) return true;
   const given = request.headers.get("x-scout-key") || "";

@@ -4,7 +4,7 @@ import { loadSettings } from "@/lib/scout/config";
 import { collectReport, renderReport } from "@/lib/scout/report";
 import { listRecentResearchTasks } from "@/lib/scout/research-bot";
 import { getValue, listAll, readLog, storeIsPersistent } from "@/lib/scout/store";
-import { botToken, reportChatId } from "@/lib/scout/telegram";
+import { botToken, openGroupAccessEnabled, reportChatId } from "@/lib/scout/telegram";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, Meeting, ObjectCard, ScanStats, ScoutSource, WatchItem } from "@/lib/scout/types";
 
 export const runtime = "nodejs";
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     ok: true,
     persistent: storeIsPersistent(),
     protected: adminKeyConfigured(),
-    telegram: { token: Boolean(botToken()), chatId: await reportChatId() },
+    telegram: { token: Boolean(botToken()), chatId: await reportChatId(), openGroupAccess: openGroupAccessEnabled() },
     adapters: adapterStatus(),
     settings,
     lastScan,
