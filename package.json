@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "telegram:poll": "node scripts/telegram-poll.mjs"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
