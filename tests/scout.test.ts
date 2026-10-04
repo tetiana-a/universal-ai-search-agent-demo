@@ -249,6 +249,23 @@ describe("scout Telegram bot", () => {
     expect(webhookSecret()).toHaveLength(48);
   });
 
+  it("processes each Telegram update_id only once", async () => {
+    const calls = botFetch();
+    const { POST } = await import("@/app/api/scout/telegram/route");
+    const update = { update_id: 4242, message: { text: "/panel", chat: { id: -5415363237, type: "group" }, from: { id: 1, first_name: "T" } } };
+    const request = () => new Request("https://x/api/scout/telegram", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": webhookSecret() },
+      body: JSON.stringify(update),
+    });
+    const first = await POST(request());
+    const second = await POST(request());
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ ok: true, duplicate: true });
+    expect(sent(calls)).toHaveLength(1);
+  });
+
   it("runs control commands only for the allowed chats", async () => {
     const calls = botFetch();
     await handleUpdate({ message: { text: "/watch@AURELIUS8_bot add person @valencia_invest", chat: { id: -5415363237, type: "group" }, from: { id: 1, first_name: "T" } } });
