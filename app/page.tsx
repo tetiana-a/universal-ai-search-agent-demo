@@ -440,6 +440,16 @@ const labels = {
 
 const PLAN_KEY_STORAGE = "aurelius-plan-key-v1";
 
+function SectionIntro({ label, title, description }: Readonly<{ label: string; title: string; description: string }>) {
+  return (
+    <div>
+      <div className="text-[10px] font-normal uppercase tracking-[.18em] text-[var(--gold)]">{label}</div>
+      <h1 className="mt-2 text-[28px] font-normal leading-[1.15] text-[var(--text)] sm:text-[34px]">{title}</h1>
+      <p className="mt-2 max-w-3xl text-[13px] leading-5 text-[var(--text-muted)]">{description}</p>
+    </div>
+  );
+}
+
 function readPlanKey() {
   try { return window.localStorage.getItem(PLAN_KEY_STORAGE) || ""; } catch { return ""; }
 }
@@ -2423,10 +2433,10 @@ export default function Home() {
               liveAttempted ? (usingLiveData ? "live dedup estimate" : "not available") : "demo baseline",
               FileSearch,
             ],
-          ].map(([label, value, note, Icon], index) => (
+          ].map(([label, value, note, Icon]) => (
             <div
               key={String(label)}
-              className={`glass panel-hover rounded-2xl p-4 float-in ${index > 0 ? `float-in-delay-${Math.min(index, 3)}` : ""}`}
+              className="glass panel-hover rounded-2xl p-4"
             >
               <div className="flex items-center justify-between">
                 <div className="text-xs text-[var(--text-muted)]">{String(label)}</div>
@@ -2789,17 +2799,11 @@ export default function Home() {
     return (
       <section className="space-y-5">
         <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-            {t.allTasks}
-          </div>
-          <h1 className="mt-3 text-[28px] font-normal leading-[1.15] text-[var(--text)] sm:text-[34px]">
-            {lang === "ru" ? "Все исследовательские задачи" : "All research tasks"}
-          </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">
-            {lang === "ru"
-              ? "История запусков, состояние, продолжительность и количество результатов."
-              : "Run history, status, duration and result counts."}
-          </p>
+          <SectionIntro
+            label={t.allTasks}
+            title={lang === "ru" ? "История исследований" : "Research history"}
+            description={lang === "ru" ? "Запуски, статус и результаты." : "Runs, status and results."}
+          />
         </div>
 
         <div className="grid gap-4">
@@ -2912,17 +2916,11 @@ export default function Home() {
     return (
       <section className="space-y-5">
         <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-            {lang === "ru" ? "БАЗА ИСТОЧНИКОВ" : "SOURCE BASE"}
-          </div>
-          <h1 className="mt-3 text-[28px] font-normal leading-[1.15] text-[var(--text)] sm:text-[34px]">
-            {lang === "ru" ? "Накопленные источники" : "Accumulated sources"}
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
-            {lang === "ru"
-              ? "Каждый поиск добавляет сюда найденные сайты, порталы, каталоги и сообщества. Следующий похожий поиск начинает с них. Источники со входом в аккаунт или запретом автоматизации помечены и не считаются проверенными."
-              : "Every search adds the sites, portals, directories and communities it found. The next similar search starts from them. Sources behind a login or with automation forbidden are marked and never counted as checked."}
-          </p>
+          <SectionIntro
+            label={lang === "ru" ? "База источников" : "Source base"}
+            title={lang === "ru" ? "Накопленные источники" : "Saved sources"}
+            description={lang === "ru" ? "Источники прошлых исследований. Недоступные для проверки отмечены отдельно." : "Sources from previous research. Those unavailable for verification are marked."}
+          />
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {summary.map(([label, value]) => (
               <div key={label} className="stat-tile rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
@@ -2987,17 +2985,11 @@ export default function Home() {
     return (
       <section className="space-y-5">
         <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-            Qualified Results
-          </div>
-          <h1 className="mt-3 text-[28px] font-normal leading-[1.15] text-[var(--text)] sm:text-[34px]">
-            {lang === "ru" ? "Результаты исследования" : "Research results"}
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
-            {lang === "ru"
-              ? "Открывайте результат, источник и evidence в одном месте."
-              : "Open a result, its source and evidence in one place."}
-          </p>
+          <SectionIntro
+            label={lang === "ru" ? "Результаты" : "Results"}
+            title={lang === "ru" ? "Результаты исследования" : "Research results"}
+            description={lang === "ru" ? "Результаты, источники и подтверждения." : "Results, sources and evidence."}
+          />
         </div>
 
         <div className="glass overflow-hidden rounded-[26px]">
