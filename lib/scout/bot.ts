@@ -177,7 +177,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
         const mark = task.state === "done" ? "✅" : task.state === "failed" ? "❌" : task.state === "stopped" ? "⏹" : "⏳";
         return mark + " <b>" + escapeHtml(task.id) + "</b> · " + escapeHtml(task.stage || task.state) +
           "\n" + escapeHtml(task.query.slice(0, 110)) +
-          "\nисточники " + task.counters.sourcesChecked + " · результаты " + task.counters.afterDedupe + " · verified " + task.counters.matchingCriteria;
+          "\nисточники " + task.counters.sourcesChecked + " · результаты " + task.counters.afterDedupe + " · verified " + task.counters.matchingCriteria + " · quality " + (task.quality?.score || 0) + "%";
       });
       await sendLong(chatId, "<b>Последние задачи</b>\n\n" + lines.join("\n\n"), mainPanelKeyboard());
       return {};
@@ -202,7 +202,8 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       });
       const header = "<b>Результаты " + escapeHtml(task.id) + "</b>\n" +
         escapeHtml(task.query.slice(0, 220)) + "\n\n" +
-        "Найдено: <b>" + task.counters.afterDedupe + "</b> · подтверждено: <b>" + task.counters.matchingCriteria + "</b> · требует проверки: <b>" + task.counters.needsReview + "</b>";
+        "Найдено: <b>" + task.counters.afterDedupe + "</b> · подтверждено: <b>" + task.counters.matchingCriteria + "</b> · требует проверки: <b>" + task.counters.needsReview + "</b>" +
+        "\nQuality: <b>" + String(task.quality?.score || 0) + "%</b> · evidence: <b>" + String(task.quality?.evidenceCoverage || 0) + "%</b>";
       await sendLong(chatId, header + "\n\n" + lines.join("\n"), [[{ text: "📍 Статус", callback_data: "menu:status" }, { text: "🖥 Дашборд", url: dashboardUrl("?tab=tasks") }]]);
       return {};
     }
