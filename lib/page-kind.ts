@@ -8,7 +8,7 @@ import type { ResearchKind } from "@/lib/relevance-gate";
 export type PageType = "entity" | "listing_index" | "article" | "catalog";
 
 const ARTICLE_PATH = /\/(blog|news|novosti|article|articles|stati|statya|faq|wiki|journal|magazine|media|guide|guides|insights|post|posts|press)(\/|$|-)/iu;
-const ARTICLE_TITLE = /(что такое|как (?:найти|выбрать|привлечь|купить|получить)|как работает|руководство|гид по|обзор|советы|топ[- ]?\d+|\d+ (?:лучших|способов|шагов)|what is|how to|guide to|\btips\b|\btop \d+|\d+ best|explained)/iu;
+const ARTICLE_TITLE = /(что такое|как (?:найти|выбрать|привлечь|купить|получить)|как работает|руководство|гид по|обзор|советы|топ[- ]?\d+|\d+ (?:лучших|способов|шагов|крупнейших|ведущих|главных|популярных|надежных|надёжных)|рейтинг|what is|how to|guide to|\btips\b|\btop[- ]?\d+|\d+ (?:best|top|leading|largest|biggest|major|popular)\b|\bbest (?:[\p{L}\d-]+ ){1,3}(?:in|for)\b|explained|\blist of\b)/iu;
 const LISTING_PATH = /\/(search|category|categories|catalog|catalogue|katalog|listing|listings|tag|tags|filter|results|kupit|prodazha|for-sale|sale)(\/|$|\?|-)|[?&](page|sort|q|query)=/iu;
 const LISTING_TEXT = /(найден[оa]?\s*(?:объект|объявлен|предложен)\p{L}*\s*:?\s*\d|\d[\d\s]*\s+(?:объявлен|предложен|объект)\p{L}*\s+(?:по запросу|найдено|в продаже)|\b\d[\d,.\s]*\s+(?:results|listings|properties|homes|plots)\s+(?:found|for sale|available)|сортир\p{L}+ по|sort by|показать ещ[её]|load more|все объявления|view all listings)/iu;
 const LISTING_TITLE = /^(?:купить|продажа|снять|аренда|buy|sale of|for sale|properties for sale)(?=\s).*(?:участк|квартир|дом[аов]?(?![\p{L}])|вилл|недвижимост|апартамент|plots|land|houses|apartments|villas|properties)/iu;

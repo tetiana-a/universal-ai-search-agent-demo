@@ -145,6 +145,9 @@ export async function runStructuredExtraction(options: {
         temperature: 0.1,
         max_tokens: options.maxTokens,
         ...(withFormat ? { response_format: { type: "json_object" } } : {}),
+        // OpenRouter: route only to models that honour response_format (the free router
+        // otherwise lands on models that answer in prose).
+        ...(withFormat && provider.id === "openrouter" ? { provider: { require_parameters: true } } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -181,7 +184,9 @@ export async function runStructuredExtraction(options: {
           attempts.push({ provider: provider.id, model: String(raw?.model || model), ok: true });
           return { parsed, usage: raw?.usage || null, provider: provider.id, model: String(raw?.model || model), attempts, error: "" };
         } catch {
-          const message = provider.label + " " + model + " returned text that is not valid JSON.";
+          const finish = String(raw?.choices?.[0]?.finish_reason || "");
+          const snippet = extractText(raw).replace(/\s+/g, " ").slice(0, 200);
+          const message = provider.label + " " + String(raw?.model || model) + " returned text that is not valid JSON" + (finish ? " (finish_reason " + finish + ")" : "") + (snippet ? ": " + snippet : ": empty answer") + ".";
           console.warn("[ai] " + message);
           attempts.push({ provider: provider.id, model, ok: false, message });
         }

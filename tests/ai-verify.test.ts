@@ -131,3 +131,13 @@ describe("manufacturer searches", () => {
     expect(picked.some((q) => /reddit/.test(q))).toBe(false);
   });
 });
+
+describe("listicles", () => {
+  it("are articles, not companies", async () => {
+    const { classifyPage } = await import("@/lib/page-kind");
+    for (const title of ["10 крупнейших производителей светодиодных экранов в Китае", "Top 8 LED batten manufacturers in China", "Top-10 VC firms in Amsterdam", "15 leading venture capital firms in the Netherlands", "Best VC funds in Amsterdam"]) {
+      expect(classifyPage({ url: "https://example.com/x", title, text: "" }, "company")).toBe("article");
+    }
+    expect(classifyPage({ url: "https://www.leyard.com/en/about", title: "Leyard Optoelectronic Co., Ltd — LED display manufacturer", text: "" }, "company")).toBe("entity");
+  });
+});
