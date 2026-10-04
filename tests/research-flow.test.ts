@@ -157,9 +157,10 @@ describe("research flow: normal successful run", () => {
     ]);
     const body = await (await POST(request())).json();
     expect(body.results).toHaveLength(1);
-    expect(body.results[0].status).toBe("Manual review");
-    expect(body.results[0].qualityGate.gate).toBe("REVIEW");
-    expect(body.results[0].qualityGate.dimensions.evidence.notes.join(" ")).toContain("not found");
+    // The invented quote is replaced by a real sentence from the page: checked, but not "Verified".
+    expect(body.results[0].status).toBe("Reviewed");
+    expect(body.results[0].evidenceQuote || body.results[0].evidence_quote).not.toContain("EUR 900m");
+    expect(body.results[0].qualityGate.checks.evidenceGrounded).toBe(true);
   });
 });
 

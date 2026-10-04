@@ -5,7 +5,7 @@ import { filterResearchResults } from "@/lib/relevance-gate";
 import { configuredFallbackProviders, searchFallbackProviders } from "@/lib/provider-search";
 import { ResearchError, type ProviderDiagnostic } from "@/lib/research-errors";
 import { isSafePublicUrl } from "@/lib/url-safety";
-import { normalizeResultUrl, registrableDomain } from "@/lib/result-quality";
+import { isQuoteGrounded, normalizeResultUrl, registrableDomain } from "@/lib/result-quality";
 import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
 import { directRead } from "@/lib/direct-reader";
 import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
@@ -116,7 +116,8 @@ async function jinaRead(url: string): Promise<{ content: string; status: ReadSta
       } else {
         content = await response.text();
       }
-      content = content.slice(0, 8000);
+      // Long enough to keep the item links of a list page; the AI only sees a short excerpt.
+      content = content.slice(0, 24000);
       result = { content, status: content.trim() ? "checked" : "unavailable", httpStatus: response.status };
     }
   } catch {
@@ -192,6 +193,27 @@ export function itemLinks(listUrl: string, content: string, limit = 6) {
     if (links.size >= limit) break;
   }
   return [...links].filter((u) => isSafePublicUrl(u));
+}
+
+// The page sentence that best supports a result: it names the entity, or covers most of the
+// task's terms. Copied verbatim (whitespace aside) so the quality gate can find it.
+export function groundedSentence(content: string, names: string[], query: string) {
+  const clean = String(content || "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^(Title|URL Source|Markdown Content|Published Time):.*$/gim, "")
+    .replace(/[#*_>`|]/g, " ");
+  const sentences = clean.split(/(?<=[.!?])\s+|\n+/).map((x) => x.replace(/\s+/g, " ").trim()).filter((x) => x.length >= 30 && x.length <= 320);
+  const tokens = names.flatMap((n) => String(n || "").split(/\s+/)).filter((t) => t.length >= 4 && !/^(the|and|ltd|group|company)$/i.test(t)).slice(0, 4);
+  let best = "";
+  let bestScore = 0;
+  for (const sentence of sentences.slice(0, 400)) {
+    const lower = sentence.toLowerCase();
+    const named = tokens.some((t) => lower.includes(t.toLowerCase())) ? 1 : 0;
+    const score = named * 2 + termCoverage(query, sentence);
+    if (score > bestScore) { best = sentence; bestScore = score; }
+  }
+  return bestScore >= 1 ? best : "";
 }
 
 function firstSentences(text: string, limit = 320) {
@@ -410,38 +432,40 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     usedMemoryFallback = candidateHits.length > 0;
   }
 
-  const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : edition === "pro" ? 14 : 8);
-  // Reading stops early enough to leave the AI check about 25 seconds.
-  await untilDeadline(Promise.all(candidateHits.slice(0, readerLimit).map(async (hit) => {
-    if (hit.content) return;
-    const read = await jinaRead(hit.url);
-    hit.content = read.content;
-    hit.readStatus = read.status;
-  })), deadlineAt - 27_000);
-  for (const hit of candidateHits.slice(readerLimit)) hit.readStatus = hit.readStatus || "skipped";
-
-  // Open list pages and read the item pages they link to, within the time budget.
+  // Forums and videos are never results for an entity search, so they are not read.
+  const kindForRead = sourceMap.kind;
+  const toRead = candidateHits.filter((hit) => !isNoiseSource(hit.url, kindForRead));
+  const readerLimit = Math.min(toRead.length, input.testMode ? 3 : edition === "pro" ? 14 : 8);
+  // Stage 3: a list page (portal search, B2B category) is opened and the item pages it links
+  // to are read right away, in parallel with the other reads. Reading stops early enough
+  // to leave the AI check about 25 seconds.
   const followBudget = input.testMode ? 2 : edition === "pro" ? 10 : 6;
   const known = new Set(candidateHits.map((hit) => hit.url.toLowerCase()));
   const followUrls: string[] = [];
-  for (const hit of candidateHits) {
-    if (!hit.content || followUrls.length >= followBudget) continue;
-    if (classifyPage({ url: hit.url, title: hit.title, text: hit.content }, sourceMap.kind) !== "listing_index") continue;
+  const followed: FreeSearchHit[] = [];
+  await untilDeadline(Promise.all(toRead.slice(0, readerLimit).map(async (hit) => {
+    if (!hit.content) {
+      const read = await jinaRead(hit.url);
+      hit.content = read.content;
+      hit.readStatus = read.status;
+    }
+    if (!hit.content || classifyPage({ url: hit.url, title: hit.title, text: hit.content }, sourceMap.kind) !== "listing_index") return;
+    const mine: string[] = [];
     for (const url of itemLinks(hit.url, hit.content, 3)) {
       if (followUrls.length >= followBudget || known.has(url.toLowerCase()) || excluded.has(url.toLowerCase())) continue;
       known.add(url.toLowerCase());
       followUrls.push(url);
+      mine.push(url);
     }
-  }
-  if (followUrls.length && Date.now() < deadlineAt - 32_000) {
-    const followed: FreeSearchHit[] = [];
-    await untilDeadline(Promise.all(followUrls.map(async (url) => {
+    await Promise.all(mine.map(async (url) => {
       const read = await jinaRead(url);
+      if (!read.content) return;
       const title = (read.content.match(/^Title:\s*(.+)$/m)?.[1] || read.content.match(/^#\s+(.+)$/m)?.[1] || host(url)).trim();
       followed.push({ title, url, snippet: firstSentences(read.content.replace(/^(Title|URL Source|Markdown Content):.*$/gm, ""), 600), domain: host(url), content: read.content, provider: "followed_link", retrievedAt: new Date().toISOString(), readStatus: read.status });
-    })), deadlineAt - 26_000);
-    candidateHits = [...followed.filter((hit) => hit.content), ...candidateHits];
-  }
+    }));
+  })), deadlineAt - 27_000);
+  for (const hit of candidateHits) if (!hit.content) hit.readStatus = hit.readStatus || "skipped";
+  candidateHits = [...followed.filter((hit) => hit.content), ...candidateHits];
 
   const sourceRegistry = candidateHits.map((hit) => {
     const status = hit.readStatus === "checked" || hit.content ? "checked" : hit.readStatus === "skipped" || !hit.readStatus ? "partial" : hit.readStatus;
@@ -514,7 +538,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
 
   let verify: VerifyOutcome | null = null;
   if (hasAi && aiPages.length) {
-    verify = await verifyPagesWithAi({ query: input.query, kind, criteria, language: input.language, pages: aiPages, edition, deadlineAt, batchSize: input.testMode ? 3 : 4 });
+    verify = await verifyPagesWithAi({ query: input.query, kind, criteria, language: input.language, pages: aiPages, edition, deadlineAt, batchSize: 3 });
   }
   const aiError = !hasAi ? "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY)." : verify && verify.error ? verify.error : "";
   const verifiedById = new Map((verify?.items || []).map((item) => [item.id, item]));
@@ -535,8 +559,11 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       continue;
     }
     aiKept += 1;
-    const quote = item.evidence_quote && String(hit.content || "").includes(item.evidence_quote.slice(0, 60)) ? item.evidence_quote : "";
-    const place = item.location || placeFromQuery(input.query, pageText);
+    // The AI's quote counts only if it is really on the page; otherwise a sentence from the
+    // page that names the entity is used, so every kept result carries checkable evidence.
+    const quote = item.evidence_quote && isQuoteGrounded(item.evidence_quote, pageText) ? item.evidence_quote : "";
+    const substitute = quote ? "" : groundedSentence(String(hit.content || ""), [item.name, item.organization], input.query);
+    const place = item.location || sourceMap.place || placeFromQuery(input.query, pageText);
     const ruleType = classifyPage({ url: hit.url, title: hit.title, text: pageText }, kind);
     candidates.push({
       ...heuristicFields(kind, pageText),
@@ -552,11 +579,11 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       area: item.area,
       price: item.price,
       match: item.match,
-      confidence: quote ? 80 : 60,
-      evidence: quote || firstSentences(hit.snippet || String(hit.content || "")),
-      // An AI quote that is not on the page is kept so the quality gate can flag it.
-      evidence_quote: item.evidence_quote,
-      status: quote ? (item.match >= 70 ? "Verified" : "Reviewed") : "Manual review",
+      confidence: quote ? 82 : substitute ? 72 : 55,
+      evidence: item.why || quote || substitute || firstSentences(hit.snippet || String(hit.content || "")),
+      // An AI quote that is not on the page and has no substitute is kept so the gate flags it.
+      evidence_quote: quote || substitute || item.evidence_quote,
+      status: quote ? (item.match >= 70 ? "Verified" : "Reviewed") : substitute ? "Reviewed" : "Manual review",
       source: hit.domain,
       source_type: "ai_verified_page",
       url: hit.url,
@@ -571,7 +598,12 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   // Pages the AI did not answer for (no key, a failed batch) and pages that were not read
   // are checked by rules and always need manual review.
   const verifiedUrls = new Set([...verifiedById.keys()].map((id) => pageById.get(id)!.url));
-  const ruleHits = [...readHits.filter((hit) => !verifiedUrls.has(hit.url)), ...usableHits.filter((hit) => !hit.content)];
+  // When the AI check works, pages it did not see are not shown as results: they stay in the
+  // source registry ("not checked") instead of filling the table with unverified pages.
+  const aiWorked = Boolean(verify && verify.checkedPages > 0);
+  const ruleHits = aiWorked
+    ? readHits.filter((hit) => !verifiedUrls.has(hit.url) && aiPages.some((p) => p.url === hit.url))
+    : [...readHits.filter((hit) => !verifiedUrls.has(hit.url)), ...usableHits.filter((hit) => !hit.content)];
   for (const item of fallbackResults(ruleHits, { ...input, maxResults: ruleHits.length })) candidates.push(item as Candidate);
 
   // Hard filters: numeric criteria, then page type. Articles never count as results for
@@ -601,11 +633,18 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       rejected.push({ title: String(item.title || ""), url: item.url, reason: "not_an_entity: " + type, score: Number(item.match || 0) });
     } else listPages.push({ ...item, status: "Manual review" });
   }
-  const keepListPages = kind === "general" || entities.length < 3;
+  const keepListPages = kind === "general" || (!aiWorked && entities.length < 3);
   if (!keepListPages) for (const item of listPages) rejected.push({ title: String(item.title || ""), url: item.url, reason: "list_page_kept_as_source", score: Number(item.match || 0) });
 
   const relevance = filterResearchResults([...entities, ...(keepListPages ? listPages : [])], input.query);
   rejected.push(...relevance.rejected);
+  // A page the AI read and confirmed is not demoted by the keyword relevance rules.
+  for (const item of relevance.kept) {
+    if (item.source_type === "ai_verified_page" && item.relevanceTier === "review" && item.status !== "Manual review") {
+      item.relevanceTier = "accept";
+      item.relevanceReason = "ai_verified";
+    }
+  }
   const results = rankResults(relevance.kept).slice(0, input.maxResults);
   const usedCandidateFallback = results.length > 0 && !results.some((item) => item.status !== "Manual review");
 

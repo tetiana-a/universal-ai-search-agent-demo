@@ -87,6 +87,7 @@ export function buildVerifyPrompt(query: string, kind: ResearchKind, criteria: N
     KIND_RULES[kind],
     "For every page return one item with its id. keep=true only when the page is a single entity that matches the task (place, type, criteria). keep=false for articles, rankings, listicles, forums, videos, list/search pages, unrelated pages, or when a stated value breaks a numeric criterion.",
     numeric ? "Numeric criteria: " + numeric + ". If the page states a value outside this range, keep=false. If it states no value, keep=true only if everything else matches and say so in why." : "",
+    "organization: the legal or brand name of the entity the page itself is about (from the page title, header, logo text or imprint), never a client, partner, investor or other company mentioned on the page. location: the city and country of that entity.",
     "match: 0-100, how well the page fits the whole task. evidence_quote: one short sentence copied verbatim from the page that proves the match (empty if none). why: one short sentence in " + (lang === "ru" ? "Russian" : "English") + ". Leave unknown fields as empty strings.",
     "Return ONLY a JSON object {\"results\":[...]}.",
   ].filter(Boolean).join("\n");
@@ -118,7 +119,7 @@ export async function verifyPagesWithAi(options: {
   deadlineAt: number;
   batchSize?: number;
 }): Promise<VerifyOutcome> {
-  const size = Math.max(1, options.batchSize || 5);
+  const size = Math.max(1, options.batchSize || 3);
   const batches: VerifyPage[][] = [];
   for (let i = 0; i < options.pages.length; i += size) batches.push(options.pages.slice(i, i + size));
   const outcomes = await Promise.all(batches.map((batch) => {
@@ -129,7 +130,8 @@ export async function verifyPagesWithAi(options: {
       schema: VERIFY_SCHEMA,
       edition: options.edition,
       deadlineAt: options.deadlineAt,
-      maxTokens: 250 * batch.length + 200,
+      // Generous: some free models think before answering and return nothing when cut off.
+      maxTokens: 700 * batch.length + 600,
       perCallTimeoutMs: Number(process.env.FREE_AI_TIMEOUT_MS || 25000),
     }).then((out) => ({ out, batch }));
   }));
