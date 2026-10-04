@@ -62,7 +62,7 @@ export type RoundRunner = (input: { query: string; lang: ResearchLang; round: nu
 
 const TASK_KEY = "research:";
 const STOP_KEY = "research-stop:";
-const EMPTY_COUNTERS: ReportCounters = { sourcesDiscovered: 0, sourcesInBase: 0, sourcesChecked: 0, sourcesUnavailable: 0, resultsFound: 0, afterDedupe: 0, matchingCriteria: 0, needsReview: 0 };
+const EMPTY_COUNTERS: ReportCounters = { sourcesDiscovered: 0, sourcesInBase: 0, sourcesChecked: 0, sourcesUnavailable: 0, resultsFound: 0, afterDedupe: 0, filteredOut: 0, matchingCriteria: 0, needsReview: 0 };
 const UNAVAILABLE = new Set(["unavailable", "blocked", "auth_required", "policy_restricted", "captcha_required", "rate_limited", "not_automatable"]);
 
 const TEXT = {
@@ -171,6 +171,7 @@ export function mergeRound(task: ResearchTask, outcome: RoundOutcome): ResearchT
     sourcesUnavailable: sources.filter((s) => UNAVAILABLE.has(String(s?.accessStatus))).length,
     resultsFound: task.counters.resultsFound + Number(round.resultsFound || outcome.results?.length || 0),
     afterDedupe: results.length,
+    filteredOut: Number(task.counters.filteredOut || 0) + Number(round.filteredOut || 0),
     matchingCriteria: results.filter((r) => (r?.status === "Verified" || r?.status === "Reviewed") && (r?.pageType || "entity") === "entity").length,
     needsReview: results.filter((r) => r?.status === "Manual review").length,
   };
