@@ -1,6 +1,6 @@
 import { BACKGROUND_RESEARCH_SCHEMA, type BackgroundResearchRequest, normalizeCompletedResearch, progressCounters } from "@/lib/background-research";
 import { UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN, UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU, taskSpecificRules } from "@/lib/research-prompts";
-import { buildSearchMatrix } from "@/lib/search-matrix";
+import { buildSourceMap, classLabel, pickBranches, type SourceMap } from "@/lib/source-map";
 import { buildAccessEscalationPlan } from "@/lib/access-escalation";
 import { filterResearchResults } from "@/lib/relevance-gate";
 import { configuredFallbackProviders, searchFallbackProviders } from "@/lib/provider-search";
@@ -131,27 +131,60 @@ async function jinaRead(url: string): Promise<{ content: string; status: ReadSta
   return result;
 }
 
-function buildBranches(query: string, language: "ru" | "en", testMode = false, sourceMemory: BackgroundResearchRequest["sourceMemory"] = [], edition: "free" | "pro" = "free", round = 0) {
-  const matrix = buildSearchMatrix(query, language);
-  const branches = matrix
-    .sort((a, b) => b.priority - a.priority)
-    .flatMap((branch) => Array.isArray(branch.queries) ? branch.queries : [])
-    .filter(Boolean);
-  const memoryBranches = sourceMemory
+function buildBranches(map: SourceMap, testMode = false, sourceMemory: BackgroundResearchRequest["sourceMemory"] = [], edition: "free" | "pro" = "free", round = 0) {
+  const memoryBranches = (sourceMemory || [])
     .slice(0, 12)
     .flatMap((source) => {
       const domain = String(source?.domain || "").trim();
-      return domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain) ? [`site:${domain} ${query}`] : [];
+      return domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain) ? [`site:${domain} ${map.subject}`] : [];
     });
-  const limit = testMode ? 3 : edition === "pro" ? 10 : 6;
-  const pool = [...new Set([query, ...branches])];
-  // A continuation round moves on to search branches that earlier rounds did not use.
-  const offset = round > 0 && pool.length > limit ? (round * (limit - 1)) % pool.length : 0;
-  const rotated = offset ? [...pool.slice(offset), ...pool.slice(0, offset)] : pool;
+  const limit = testMode ? 3 : edition === "pro" ? 12 : 8;
+  // Every class of source gets a turn; a continuation round moves on to the next branches.
+  const core = pickBranches(map, memoryBranches.length ? limit - 1 : limit, round);
   // Keep one learned-source branch in the budget so memory is actually reused.
-  const core = rotated.slice(0, memoryBranches.length ? limit - 1 : limit);
   const memoryPick = memoryBranches.length ? memoryBranches[round % memoryBranches.length] : undefined;
   return [...new Set([...core, ...(memoryPick ? [memoryPick] : [])])].slice(0, limit);
+}
+
+// Search engines and foreign portals match English (or local) words far better than a
+// Russian sentence. With an AI key the task is turned into a short English phrase first.
+async function englishSubject(query: string, edition: "free" | "pro", deadlineAt: number) {
+  if (!/[^\x00-\x7F]/.test(query) || !configuredAiProviders(edition).length || process.env.TRANSLATE_QUERY === "off") return "";
+  const out = await runStructuredExtraction({
+    system: "Rewrite the user's search task as one short English web-search phrase (at most 12 words). Keep names, places, numbers and units. Return JSON {\"en\": \"...\"}.",
+    user: query.slice(0, 600),
+    schema: { type: "object", additionalProperties: false, properties: { en: { type: "string" } }, required: ["en"] },
+    edition,
+    deadlineAt: Math.min(deadlineAt, Date.now() + 8000),
+    maxTokens: 120,
+    perCallTimeoutMs: 7000,
+  }).catch(() => null);
+  const en = String(out?.parsed?.en || "").replace(/\s+/g, " ").trim();
+  return /^[\x00-\x7F€£]+$/.test(en) ? en.slice(0, 160) : "";
+}
+
+// Stage 3 of the spec: a list page (a portal's search results, a directory) is opened
+// and the item pages it links to are read, instead of stopping at the list.
+export function itemLinks(listUrl: string, content: string, limit = 6) {
+  let base: URL;
+  try { base = new URL(listUrl); } catch { return []; }
+  const links = new Set<string>();
+  const re = /\]\((https?:\/\/[^)\s]+)\)|href="(https?:\/\/[^"]+|\/[^"]+)"/g;
+  for (const m of String(content || "").matchAll(re)) {
+    let url: URL;
+    try { url = new URL(m[1] || m[2], base); } catch { continue; }
+    if (url.hostname.replace(/^www\./, "") !== base.hostname.replace(/^www\./, "")) continue;
+    const path = url.pathname;
+    if (path === base.pathname || path.split("/").filter(Boolean).length < 2) continue;
+    if (/\.(jpg|jpeg|png|gif|webp|svg|pdf|css|js)$/i.test(path)) continue;
+    if (/\/(login|signin|register|cart|basket|account|privacy|terms|contact|about|blog|news|faq|help|search|tag|category)(\/|$)/i.test(path)) continue;
+    // Detail pages usually carry an id or a long slug.
+    if (!/\d{3,}|[a-z]+(?:-[a-z0-9]+){3,}/i.test(path)) continue;
+    url.hash = "";
+    links.add(normalizeResultUrl(url.toString()));
+    if (links.size >= limit) break;
+  }
+  return [...links].filter((u) => isSafePublicUrl(u));
 }
 
 function firstSentences(text: string, limit = 320) {
@@ -310,7 +343,8 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const edition = input.edition === "pro" ? "pro" : "free";
   const round = Math.max(0, Math.floor(Number(input.continuation?.round || 0)));
   const excluded = new Set((input.continuation?.excludeUrls || []).map((u) => normalizeResultUrl(u).toLowerCase()).filter(Boolean));
-  const queries = buildBranches(input.query, input.language, input.testMode === true, input.sourceMemory, edition, round);
+  const sourceMap = buildSourceMap(input.query, { subjectEn: await englishSubject(input.query, edition, deadlineAt) });
+  const queries = buildBranches(sourceMap, input.testMode === true, input.sourceMemory, edition, round);
   const discovery = await discoverCandidates(queries, input.language, deadlineAt);
   const discoveredTotal = discovery.hits.length;
   // Pages already reviewed in earlier rounds are not read again.
@@ -355,6 +389,28 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   }));
   for (const hit of candidateHits.slice(readerLimit)) hit.readStatus = hit.readStatus || "skipped";
 
+  // Open list pages and read the item pages they link to, within the time budget.
+  const followBudget = input.testMode ? 2 : edition === "pro" ? 8 : 4;
+  const known = new Set(candidateHits.map((hit) => hit.url.toLowerCase()));
+  const followUrls: string[] = [];
+  for (const hit of candidateHits) {
+    if (!hit.content || followUrls.length >= followBudget) continue;
+    if (classifyPage({ url: hit.url, title: hit.title, text: hit.content }, sourceMap.kind) !== "listing_index") continue;
+    for (const url of itemLinks(hit.url, hit.content, 3)) {
+      if (followUrls.length >= followBudget || known.has(url.toLowerCase()) || excluded.has(url.toLowerCase())) continue;
+      known.add(url.toLowerCase());
+      followUrls.push(url);
+    }
+  }
+  if (followUrls.length && Date.now() < deadlineAt - 30_000) {
+    const followed = await Promise.all(followUrls.map(async (url) => {
+      const read = await jinaRead(url);
+      const title = (read.content.match(/^Title:\s*(.+)$/m)?.[1] || read.content.match(/^#\s+(.+)$/m)?.[1] || host(url)).trim();
+      return { title, url, snippet: firstSentences(read.content.replace(/^(Title|URL Source|Markdown Content):.*$/gm, ""), 600), domain: host(url), content: read.content, provider: "followed_link", retrievedAt: new Date().toISOString(), readStatus: read.status } as FreeSearchHit;
+    }));
+    candidateHits = [...followed.filter((hit) => hit.content), ...candidateHits];
+  }
+
   const researchedHits = candidateHits.filter((hit) => Boolean(hit.content));
   const sourceRegistry = candidateHits.map((hit) => {
     const status = hit.readStatus === "checked" || hit.content ? "checked" : hit.readStatus === "skipped" || !hit.readStatus ? "partial" : hit.readStatus;
@@ -368,7 +424,9 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       name: hit.title || hit.domain,
       url: hit.url,
       domain: hit.domain,
-      category: "web_search:" + hit.provider,
+      category: sourceMap.sources.find((src) => hit.domain === src.domain || hit.domain.endsWith("." + src.domain))
+        ? classLabel(sourceMap, sourceMap.sources.find((src) => hit.domain === src.domain || hit.domain.endsWith("." + src.domain))!.classId, input.language)
+        : hit.provider === "followed_link" ? (input.language === "ru" ? "Карточка из подборки" : "Item from a list page") : "web_search:" + hit.provider,
       access_status: plan.status,
       access_method: hit.content ? "page_reader" : hit.provider + "_search",
       reason: plan.reason,
@@ -377,6 +435,34 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       last_checked: hit.retrievedAt,
     };
   });
+
+  // The rest of the source map: known sources for this task and country that this round
+  // did not reach. They are listed honestly as not checked, or as not automatable.
+  const hitDomains = new Set(candidateHits.map((hit) => hit.domain.replace(/^www\./, "")));
+  let mappedOnly = 0;
+  const ru = input.language === "ru";
+  for (const source of sourceMap.sources) {
+    if ([...hitDomains].some((d) => d === source.domain || d.endsWith("." + source.domain))) continue;
+    const status = source.access === "auth_required" ? "auth_required" : source.access === "not_automatable" ? "not_automatable" : "partial";
+    const reason = status === "auth_required"
+      ? (ru ? "Нужен вход в аккаунт: автоматически не исследуется, только вручную." : "Login required: not researched automatically, manual only.")
+      : status === "not_automatable"
+        ? (ru ? "Правила площадки запрещают автоматический сбор: только ручная проверка." : "Platform rules forbid automated collection: manual review only.")
+        : (ru ? "В карте источников; в этом раунде не проверялся. Нажмите «Продолжить»." : "In the source map; not checked in this round. Press Continue.");
+    mappedOnly += 1;
+    sourceRegistry.push({
+      name: source.name,
+      url: source.url,
+      domain: source.domain,
+      category: classLabel(sourceMap, source.classId, input.language),
+      access_status: status,
+      access_method: "source_map",
+      reason,
+      evidence_available: false,
+      quality: 60,
+      last_checked: new Date().toISOString(),
+    });
+  }
 
   const accessEvents = candidateHits
     .filter((hit) => hit.readStatus && hit.readStatus !== "checked" && hit.readStatus !== "skipped")
@@ -516,7 +602,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   normalized.taskKind = kind;
   normalized.fieldSchema = fieldSchemaFor(kind);
   normalized.progressCounters = progressCounters({
-    discovered: discoveredTotal,
+    discovered: discoveredTotal + followUrls.length + mappedOnly,
     knownSources: Number(input.knownSourceCount || 0),
     registry: normalized.sourceRegistry,
     recordsExtracted: Number(normalized.stats.recordsExtracted || 0) + rejected.length,

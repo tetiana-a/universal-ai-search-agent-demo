@@ -25,6 +25,8 @@ function urlPath(value: unknown) {
 export function inferResearchKind(query: string): ResearchKind {
   const q = text(query);
   if (/investor|investors|venture capital|vc fund|angel investor|family office|private equity|инвестор|венчур|бизнес ангел|інвестор|фонд/.test(q)) return "investor";
+  // A profession named outright wins over the field it works in ("юристы по недвижимости").
+  if (/lawyer|attorney|notary|specialist|expert|architect|doctor|consultant|accountant|юрист|адвокат|нотариус|специалист|эксперт|архитектор|врач|консультант|бухгалтер|риэлтор|риелтор|realtor/.test(q)) return "person";
   if (/land|plot|property|real estate|apartment|house|villa|недвиж|участ|квартир|дом|земел|вилл/.test(q)) return "real_estate";
   if (/company|companies|supplier|manufacturer|distributor|factory|vendor|компан|поставщик|производител|дистриб|фабрик|завод/.test(q)) return "company";
   if (/person|people|specialist|expert|broker|agent|manager|founder|lawyer|architect|человек|люди|специалист|эксперт|брокер|агент|основатель|юрист|архитектор/.test(q)) return "person";
