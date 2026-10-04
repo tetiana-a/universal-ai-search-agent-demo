@@ -46,50 +46,6 @@ const LEARNED_TASK_PREFIX = "aurelius:memory:learned-task:v1:";
 const localSources = new Map<string, SourceMemoryRecord>();
 const localHistory: any[] = [];
 
-type LocalMemoryFile = {
-  sources: SourceMemoryRecord[];
-  history: any[];
-  learnedTasks: Record<string, number>;
-};
-
-function localMemoryDir() {
-  return String(process.env.LOCAL_STORE_DIR || "").trim();
-}
-
-function localMemoryConfigured() {
-  return Boolean(localMemoryDir());
-}
-
-async function localMemoryPath() {
-  const { join } = await import("node:path");
-  return join(localMemoryDir(), "research-memory.json");
-}
-
-async function readLocalMemory(): Promise<LocalMemoryFile> {
-  if (!localMemoryConfigured()) return { sources: [], history: [], learnedTasks: {} };
-  try {
-    const { readFile } = await import("node:fs/promises");
-    const parsed = JSON.parse(await readFile(await localMemoryPath(), "utf8"));
-    return {
-      sources: Array.isArray(parsed?.sources) ? parsed.sources : [],
-      history: Array.isArray(parsed?.history) ? parsed.history : [],
-      learnedTasks: parsed?.learnedTasks && typeof parsed.learnedTasks === "object" ? parsed.learnedTasks : {},
-    };
-  } catch {
-    return { sources: [], history: [], learnedTasks: {} };
-  }
-}
-
-async function writeLocalMemory(state: LocalMemoryFile) {
-  if (!localMemoryConfigured()) return;
-  const { mkdir, writeFile, rename } = await import("node:fs/promises");
-  await mkdir(localMemoryDir(), { recursive: true });
-  const path = await localMemoryPath();
-  const tmp = path + ".tmp";
-  await writeFile(tmp, JSON.stringify(state), "utf8");
-  await rename(tmp, path);
-}
-
 function redisUrl() {
   return process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
 }
@@ -250,7 +206,6 @@ export function healthFor(source: Pick<SourceMemoryRecord, "consecutiveFailures"
 }
 
 async function loadAllSources(): Promise<SourceMemoryRecord[]> {
-  if (localMemoryConfigured()) return (await readLocalMemory()).sources;
   if (!persistentMemoryConfigured()) return Array.from(localSources.values());
 
   const ids = await redisCommand<string[]>("SMEMBERS", [SOURCE_INDEX_KEY]);
@@ -276,13 +231,6 @@ async function saveSources(sources: SourceMemoryRecord[]) {
     .sort((a, b) => Number(b.quality || 0) - Number(a.quality || 0))
     .slice(0, 600);
 
-  if (localMemoryConfigured()) {
-    const state = await readLocalMemory();
-    state.sources = limited;
-    await writeLocalMemory(state);
-    return;
-  }
-
   if (!persistentMemoryConfigured()) {
     localSources.clear();
     for (const source of limited) localSources.set(source.id, source);
@@ -299,13 +247,6 @@ async function saveSources(sources: SourceMemoryRecord[]) {
 
 async function appendSearchHistory(entry: any) {
   const record = JSON.stringify(entry);
-  if (localMemoryConfigured()) {
-    const state = await readLocalMemory();
-    state.history.unshift(entry);
-    state.history = state.history.slice(0, 200);
-    await writeLocalMemory(state);
-    return;
-  }
   if (!persistentMemoryConfigured()) {
     localHistory.unshift(entry);
     localHistory.splice(200);
@@ -320,26 +261,13 @@ async function appendSearchHistory(entry: any) {
 
 async function wasTaskLearned(taskId: string) {
   if (!taskId) return false;
-  if (localMemoryConfigured()) {
-    const state = await readLocalMemory();
-    const expires = Number(state.learnedTasks[taskId] || 0);
-    return expires > Date.now();
-  }
   if (!persistentMemoryConfigured()) return false;
   const value = await redisCommand<string>("GET", [LEARNED_TASK_PREFIX + taskId]);
   return Boolean(value);
 }
 
 async function markTaskLearned(taskId: string) {
-  if (!taskId) return;
-  if (localMemoryConfigured()) {
-    const state = await readLocalMemory();
-    state.learnedTasks[taskId] = Date.now() + 86400 * 1000;
-    for (const [id, expires] of Object.entries(state.learnedTasks)) if (Number(expires) <= Date.now()) delete state.learnedTasks[id];
-    await writeLocalMemory(state);
-    return;
-  }
-  if (!persistentMemoryConfigured()) return;
+  if (!taskId || !persistentMemoryConfigured()) return;
   await redisCommand("SET", [LEARNED_TASK_PREFIX + taskId, "1", "EX", 86400]);
 }
 
@@ -377,7 +305,7 @@ export async function getResearchMemoryContext(query: string, limit = 40) {
     .slice(0, Math.max(1, Math.min(limit, 80)));
 
   return {
-    persistent: persistentMemoryConfigured() || localMemoryConfigured(),
+    persistent: persistentMemoryConfigured(),
     sources: ranked.map(({ source }) => ({
       name: source.name,
       url: source.url,
@@ -394,7 +322,7 @@ export async function getResearchMemoryContext(query: string, limit = 40) {
 export async function recordResearchLearning(input: ResearchLearningInput) {
   const taskId = String(input.taskId || "").trim();
   if (taskId && (await wasTaskLearned(taskId))) {
-    return { persisted: persistentMemoryConfigured() || localMemoryConfigured(), skipped: true, learnedSources: 0 };
+    return { persisted: persistentMemoryConfigured(), skipped: true, learnedSources: 0 };
   }
 
   const now = new Date().toISOString();
@@ -490,7 +418,7 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
 
   if (taskId) await markTaskLearned(taskId);
 
-  return { persisted: persistentMemoryConfigured() || localMemoryConfigured(), skipped: false, learnedSources };
+  return { persisted: persistentMemoryConfigured(), skipped: false, learnedSources };
 }
 
 export async function getMemoryHealth() {
@@ -498,9 +426,9 @@ export async function getMemoryHealth() {
   const health = { healthy: 0, degraded: 0, failing: 0, unknown: 0 } as Record<SourceHealth, number>;
   for (const source of sources) health[source.healthStatus || "unknown"] += 1;
   return {
-    persistent: persistentMemoryConfigured() || localMemoryConfigured(),
+    persistent: persistentMemoryConfigured(),
     sourceCount: sources.length,
     health,
-    backend: localMemoryConfigured() ? "local-json" : persistentMemoryConfigured() ? "upstash-redis-rest" : "process-memory-fallback",
+    backend: persistentMemoryConfigured() ? "upstash-redis-rest" : "process-memory-fallback",
   };
 }
