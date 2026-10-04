@@ -124,9 +124,6 @@ async function showPanel(chatId: string) {
 async function handleCommand(chatId: string, userId: string, userName: string, cmd: string, args: string): Promise<BotResult> {
   switch (cmd) {
     case "start":
-      await showPanel(chatId);
-      return {};
-
     case "panel":
       await showPanel(chatId);
       return {};
