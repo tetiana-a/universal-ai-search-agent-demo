@@ -209,9 +209,9 @@ export default function ResearchControlPanel(props: {
       {session ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {counterRows.map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3">
+            <div key={label} className="stat-tile rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3">
               <div className="text-[9px] uppercase tracking-[.13em] text-[var(--text-faint)]">{label}</div>
-              <div className="mt-1 text-lg font-semibold text-[var(--text)]">{value.toLocaleString(ru ? "ru-RU" : "en-US")}</div>
+              <div className="mt-1 font-display text-2xl font-medium leading-tight tabular-nums text-[var(--text)]">{value.toLocaleString(ru ? "ru-RU" : "en-US")}</div>
             </div>
           ))}
         </div>

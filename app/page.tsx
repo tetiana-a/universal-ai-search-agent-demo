@@ -2250,7 +2250,15 @@ export default function Home() {
             </div>
 
             <h1 className="font-display mt-5 max-w-4xl text-[40px] font-medium leading-[1.02] tracking-[-.012em] text-[var(--text)] sm:text-[52px] lg:text-[68px]">
-              {t.tell}
+              {(() => {
+                const cut = t.tell.lastIndexOf(" ");
+                return (
+                  <>
+                    {t.tell.slice(0, cut + 1)}
+                    <em className="hero-accent">{t.tell.slice(cut + 1)}</em>
+                  </>
+                );
+              })()}
             </h1>
 
             <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--text-muted)] sm:text-[15px]">
@@ -2980,8 +2988,8 @@ export default function Home() {
           </p>
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {summary.map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
-                <div className="text-2xl font-medium text-[var(--text)]">{value}</div>
+              <div key={label} className="stat-tile rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
+                <div className="font-display text-[32px] font-medium leading-none tabular-nums text-[var(--text)]">{value}</div>
                 <div className="mt-1 text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">{label}</div>
               </div>
             ))}
@@ -3222,7 +3230,7 @@ export default function Home() {
                         : "border border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]"
                     }`}
                   >
-                    <Icon className="icon-lift" size={17} color={active ? "var(--gold)" : "currentColor"} />
+                    <Icon className={`icon-lift icon-foil ${active ? "" : "opacity-60 group-hover:opacity-100"}`} size={17} />
                     <span>{lang === "ru" ? item.ru : item.en}</span>
                     {item.key === "tasks" && taskHistory.length > 0 && (
                       <span className="ml-auto rounded-full bg-[var(--surface)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
@@ -3283,15 +3291,27 @@ export default function Home() {
               </button>
 
               <div className="mt-3 border-t border-[var(--line-soft)] pt-4">
-                <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-full btn-gold text-xs font-bold text-black">
-                    TK
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-[var(--text-soft)]">Lead Workspace</div>
-                    <div className="truncate text-xs text-[var(--text-faint)]">prototype • 2026</div>
-                  </div>
-                </div>
+                <a
+                  href="https://tetianakotolup.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-[var(--surface-hover)]"
+                  title={lang === "ru" ? "Профиль разработчика: Tetiana Kotolup" : "Developer profile: Tetiana Kotolup"}
+                >
+                  <span className="dev-badge-ring grid h-10 w-10 shrink-0 place-items-center rounded-full p-[1.5px]">
+                    <span className="grid h-full w-full place-items-center rounded-full bg-[var(--bg)] font-display text-[15px] font-semibold tracking-[.06em] text-[var(--gold-bright)]">
+                      TK
+                    </span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-display text-[17px] font-medium leading-5 text-[var(--text)]">Tetiana Kotolup</span>
+                    <span className="block truncate text-[11px] text-[var(--text-faint)]">
+                      {lang === "ru" ? "Разработчик" : "Developer"} · TK Lead Workspace
+                    </span>
+                    <span className="block truncate text-[10px] text-[var(--text-faint)] opacity-80">prototype • 2026</span>
+                  </span>
+                  <ArrowUpRight size={14} className="shrink-0 text-[var(--text-faint)] transition group-hover:text-[var(--gold-bright)]" />
+                </a>
               </div>
             </div>
           </div>
