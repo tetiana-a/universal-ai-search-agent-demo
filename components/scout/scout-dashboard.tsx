@@ -169,7 +169,7 @@ function ReportView({ html }: { html: string }) {
 
 function ScoreBadge({ score }: { score: number }) {
   const color = score >= 70 ? "#34c759" : score >= 50 ? "var(--gold-bright)" : "var(--text-muted)";
-  return <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-sm font-semibold tabular-nums" style={{ color, borderColor: color }}>{score}</span>;
+  return <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-sm font-medium tabular-nums" style={{ color, borderColor: color }}>{score}</span>;
 }
 
 type ChipTone = "muted" | "gold" | "green" | "red" | "blue" | "violet";
@@ -180,17 +180,17 @@ function Chip({ children, tone = "muted" }: Readonly<{ children: ReactNode; tone
 }
 
 function Button({ children, onClick, variant = "ghost", disabled, title }: { children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum" | "danger"; disabled?: boolean; title?: string }) {
-  const base = "scout-button inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition disabled:opacity-40";
+  const base = "scout-button inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-40";
   const style = variant === "spectrum" ? "spectrum-button text-white shadow-lg" : variant === "danger" ? "border border-[#ff375f]/40 text-[#ff375f] hover:bg-[#ff375f]/10" : "border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-soft)] hover:border-[var(--line)] hover:text-[var(--text)]";
   return <button type="button" title={title} disabled={disabled} onClick={onClick} className={base + " " + style}>{children}</button>;
 }
 
 function Panel({ title, icon: Icon, color, children, actions }: { title: string; icon?: typeof Radar; color?: string; children: ReactNode; actions?: ReactNode }) {
   return (
-    <section className="glass scout-panel rounded-[28px] p-4 sm:p-5 lg:p-6">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="scout-panel-title flex items-center gap-3 text-[17px] font-semibold sm:text-lg">
-          {Icon && <span className="scout-panel-icon grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={17} style={{ color }} /></span>}
+    <section className="glass scout-panel rounded-[20px] p-3.5 sm:p-4 lg:p-5">
+      <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="scout-panel-title flex items-center gap-2.5 text-[15px] font-medium sm:text-base">
+          {Icon && <span className="scout-panel-icon grid h-8 w-8 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={15} style={{ color }} /></span>}
           <span>{title}</span>
         </h2>
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -201,10 +201,10 @@ function Panel({ title, icon: Icon, color, children, actions }: { title: string;
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="scout-empty rounded-2xl border border-dashed border-[var(--line-soft)] p-7 text-center text-sm leading-6 text-[var(--text-muted)]">{children}</div>;
+  return <div className="scout-empty rounded-2xl border border-dashed border-[var(--line-soft)] p-5 text-center text-[13px] leading-5 text-[var(--text-muted)]">{children}</div>;
 }
 
-const inputClass = "scout-input w-full min-h-11 rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3.5 py-2.5 text-sm text-[var(--text)] outline-none focus:border-[var(--line)]";
+const inputClass = "scout-input w-full min-h-10 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--line)]";
 
 function dashboardCounts(state: State | null): Partial<Record<Tab, number>> {
   if (!state) return {};
@@ -318,13 +318,13 @@ export default function ScoutDashboard() {
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
         <aside
-          className={"fixed inset-y-0 left-0 z-50 w-[280px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 " +
+          className={"fixed inset-y-0 left-0 z-50 w-[256px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 " +
             (mobileOpen ? "translate-x-0" : "-translate-x-full")}
         >
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
               <a href="/" className="block min-w-0">
-                <div className="brand-mark font-display text-[32px] font-semibold leading-none tracking-[.2em]">AURELIUS</div>
+                <div className="brand-mark font-display text-[28px] font-medium leading-none tracking-[.2em]">AURELIUS</div>
                 <div className="mt-3 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
                   <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">AI Scout · Разведчик</span>
@@ -349,17 +349,17 @@ export default function ScoutDashboard() {
                     type="button"
                     onClick={() => changeTab(id)}
                     aria-current={active ? "page" : undefined}
-                    className={"scout-nav-item group flex w-full items-center gap-3 rounded-xl border px-2.5 py-2.5 text-left text-sm transition " +
+                    className={"scout-nav-item group flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left text-[13px] transition " +
                       (active
                         ? "is-active border-[var(--line)] bg-[var(--gold)]/7 text-[var(--text)]"
                         : "border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]")}
                   >
-                    <span className="scout-nav-icon grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-transparent">
-                      <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={16} />
+                    <span className="scout-nav-icon grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-transparent">
+                      <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={15} />
                     </span>
                     <span className="font-medium tracking-[-.01em]">{label}</span>
                     {counts[id] ? (
-                      <span className="ml-auto rounded-full bg-[#ff375f] px-2 py-0.5 text-[10px] font-semibold text-white">{counts[id]}</span>
+                      <span className="ml-auto rounded-full bg-[#ff375f] px-2 py-0.5 text-[10px] font-medium text-white">{counts[id]}</span>
                     ) : null}
                   </button>
                 );
@@ -415,7 +415,7 @@ export default function ScoutDashboard() {
 
         <section className="min-w-0 flex-1">
           <div className="sticky top-0 z-30">
-            <header className="flex h-[74px] items-center justify-between border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_78%,transparent)] px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
+            <header className="flex h-[64px] items-center justify-between border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_78%,transparent)] px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
@@ -431,7 +431,7 @@ export default function ScoutDashboard() {
                     <span>/</span>
                     <span className="truncate text-[var(--text-soft)]">{activeTab?.label || "Главная"}</span>
                   </div>
-                  <div className="scout-mobile-title truncate text-lg font-semibold text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
+                  <div className="scout-mobile-title truncate text-base font-medium text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
                 </div>
               </div>
 
@@ -466,11 +466,11 @@ export default function ScoutDashboard() {
                 </Button>
               </div>
             </header>
-            <div className="spectrum-line h-[2px] w-full opacity-70" />
+            <div className="spectrum-line h-px w-full opacity-70" />
           </div>
 
-          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-14 lg:pt-8">
-            <div className="scout-content space-y-5 soft-focus">
+          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-4 sm:px-6 lg:px-8 lg:pb-14 lg:pt-5">
+            <div className="scout-content space-y-4 soft-focus">
               {needKey && (
                 <Panel title="Доступ к кабинету" icon={KeyRound} color="#ffd60a">
                   <p className="mb-3 text-sm text-[var(--text-muted)]">Введите ключ доступа к рабочему кабинету.</p>
@@ -520,9 +520,9 @@ type Act = (action: string, payload?: Record<string, unknown>, label?: string) =
 
 function Kpi({ label, value, color, hint }: { label: string; value: ReactNode; color: string; hint?: string }) {
   return (
-    <div className="glass-soft scout-kpi rounded-2xl p-4 sm:p-[18px]">
+    <div className="glass-soft scout-kpi rounded-2xl p-3.5 sm:p-4">
       <div className="scout-eyebrow text-[10px] uppercase tracking-[.16em] text-[var(--text-muted)]">{label}</div>
-      <div className="scout-kpi-value mt-2 text-[32px] font-semibold leading-none tabular-nums tracking-[-.045em]" style={{ color }}>{value}</div>
+      <div className="scout-kpi-value mt-2 text-[28px] font-medium leading-none tabular-nums tracking-[-.045em]" style={{ color }}>{value}</div>
       {hint && <div className="mt-2 text-[11px] leading-4 text-[var(--text-faint)]">{hint}</div>}
     </div>
   );
@@ -547,14 +547,14 @@ function ReportTab({ state, act, busy, headers, setToast }: { state: State; act:
         <Kpi label="На одобрение" value={d.pendingDrafts} color="#af52de" />
         <Kpi label="Пары" value={state.matches.filter((m) => m.state === "proposed").length} color="#0a84ff" />
       </div>
-      <div className="grid gap-5 lg:grid-cols-[1.25fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr]">
         <Panel title={"Отчёт за " + d.date} icon={Sparkles} color="#ffd60a" actions={<Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("report.send", {}, "report")}><Send size={14} />{busy === "report" ? "Отправляю…" : "Отправить в Telegram"}</Button>}>
           <div className="rounded-2xl border border-[var(--line-soft)] bg-[var(--surface-strong)] p-4 text-sm leading-relaxed [&_a]:text-[#0a84ff] [&_a]:underline-offset-2 hover:[&_a]:underline">
             <ReportView html={state.report.html} />
           </div>
           <p className="mt-2 text-xs text-[var(--text-faint)]">Автоматически каждый день в 06:00 UTC (08:00 по Мадриду летом) — Vercel Cron.</p>
         </Panel>
-        <div className="space-y-5">
+        <div className="space-y-4">
           <Panel title="Telegram" icon={Send} color="#0a84ff">
             <ul className="space-y-2 text-sm">
               <li className="flex items-center justify-between gap-2"><span>Токен бота</span>{state.telegram.token ? <Chip tone="green">задан</Chip> : <Chip tone="red">нет TELEGRAM_BOT_TOKEN</Chip>}</li>
@@ -672,7 +672,7 @@ function InvestorsTab({ state, act, focusId }: { state: State; act: Act; focusId
           </div>
         )}
       </Panel>
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Комментаторы под постом (5.1)" icon={MessageSquare} color="#ff2d55">
           <p className="mb-2 text-xs text-[var(--text-muted)]">Скопируйте комментарии из поста, который видите сами (Facebook, Instagram, LinkedIn). Агент отберёт явный и общий интерес и подготовит публичный ответ в ветке — личные сообщения незнакомым не пишет.</p>
           <input className={inputClass + " mb-2"} aria-label="Ссылка на пост" placeholder="Ссылка на пост" value={postUrl} onChange={(e) => setPostUrl(e.target.value)} />
@@ -849,7 +849,7 @@ function IntelTab({ state, act }: { state: State; act: Act }) {
   const [value, setValue] = useState("");
   const groups: Array<[ScoutSource["state"], string]> = [["candidate", "Новые — одобрить или отклонить"], ["approved", "Подключены"], ["dead", "«Мёртвые» — 30 дней без пользы"]];
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
       <Panel title="Новые источники" icon={Telescope} color="#ff2d55">
         {groups.map(([st, label]) => {
           const list = state.sources.filter((s) => s.state === st);
@@ -929,7 +929,7 @@ function SettingsTab({ state, act }: { state: State; act: Act }) {
   } }, "settings");
 
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid gap-4 lg:grid-cols-2">
       <Panel title="Критерии поиска" icon={Settings2} color="#a3b6c4" actions={<Button variant="spectrum" onClick={save}>Сохранить всё</Button>}>
         <label htmlFor="scout-targets" className="text-xs text-[var(--text-muted)]">Страна | город | типы | язык поиска (по строке)</label>
         <textarea id="scout-targets" className={inputClass + " h-28 font-mono text-xs"} value={targets} onChange={(e) => setTargets(e.target.value)} />
@@ -1002,7 +1002,7 @@ function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
   const complete = tasks.filter((task) => task.state === "done");
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi label="Активные" value={active.length} color="#64d2ff" />
         <Kpi label="Завершены" value={complete.length} color="#34c759" />
@@ -1013,7 +1013,7 @@ function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
         {!tasks.length ? <Empty>Поисков пока нет. Напишите боту в Telegram, что нужно найти.</Empty> : (
           <div className="space-y-3">
             {tasks.map((task) => (
-              <article key={task.id} className="glass-soft scout-row-card rounded-2xl p-4 sm:p-5">
+              <article key={task.id} className="glass-soft scout-row-card rounded-2xl p-3.5 sm:p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Chip tone={taskTone(task.state)}>{taskLabel(task.state)}</Chip>
