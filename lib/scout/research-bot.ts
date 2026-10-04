@@ -323,6 +323,14 @@ async function stopRequested(chatId: string) {
 export async function requestResearchStop(chatId: string, actor = "human") {
   const task = await loadTask(chatId);
   if (!task || (task.state !== "running" && task.state !== "clarifying")) return { ok: false, task, message: "active task not found" };
+  if (task.state === "clarifying") {
+    task.state = "stopped";
+    checkpoint(task, "stopped", "cancelled before search started");
+    await saveTask(task);
+    await deleteValue(STOP_KEY + chatId);
+    await logAction({ actor: actor === "bot" ? "bot" : "human", action: "research.stopped", detail: task.id + " · before search" });
+    return { ok: true, task, message: "stopped" };
+  }
   await setValue(STOP_KEY + chatId, true, 15 * 60);
   await logAction({ actor: actor === "bot" ? "bot" : "human", action: "research.stop_requested", detail: task.id + " · " + task.query.slice(0, 100) });
   return { ok: true, task, message: "stop requested" };
