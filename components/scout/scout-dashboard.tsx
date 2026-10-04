@@ -215,6 +215,12 @@ function dashboardCounts(state: State | null): Partial<Record<Tab, number>> {
   };
 }
 
+function telegramStatus(state: State | null): { tone: ChipTone; label: string } {
+  if (!state?.telegram.token) return { tone: "red", label: "не настроен" };
+  if (state.telegram.openGroupAccess) return { tone: "green", label: "группа открыта" };
+  return { tone: "green", label: "готов" };
+}
+
 export default function ScoutDashboard() {
   const [state, setState] = useState<State | null>(null);
   const [tab, setTab] = useState<Tab>("report");
@@ -301,6 +307,7 @@ export default function ScoutDashboard() {
   const counts = dashboardCounts(state);
 
   const activeTab = TABS.find((item) => item.id === tab);
+  const telegramState = telegramStatus(state);
 
   return (
     <main className="relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
@@ -371,9 +378,7 @@ export default function ScoutDashboard() {
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>Telegram</span>
-                  <Chip tone={state?.telegram.token ? "green" : "red"}>
-                    {state?.telegram.token ? (state.telegram.openGroupAccess ? "группа открыта" : "готов") : "не настроен"}
-                  </Chip>
+                  <Chip tone={telegramState.tone}>{telegramState.label}</Chip>
                 </div>
               </div>
             </div>
