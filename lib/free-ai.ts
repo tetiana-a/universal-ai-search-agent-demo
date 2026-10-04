@@ -71,7 +71,7 @@ export function orderByHealth(models: string[]) {
 // Without this one search burns the whole free daily quota on retries.
 const providerBlocked = new Map<string, { until: number; daily: boolean }>();
 export function isDailyQuotaMessage(text: string) {
-  return /per[- ]?day|daily|free-models-per-day|quota/i.test(String(text || ""));
+  return /per[- ]?day|daily/i.test(String(text || ""));
 }
 export function blockProvider(id: string, daily: boolean, now = Date.now()) {
   const midnight = new Date(now);
@@ -83,7 +83,25 @@ export function providerBlock(id: string, now = Date.now()) {
   return b && b.until > now ? b : null;
 }
 
-export function resetFreeModelCache() { freeModelCache = null; modelHealth.clear(); providerBlocked.clear(); }
+// Seconds to wait before retrying a per-minute 429: the Retry-After header, Gemini's
+// RetryInfo ("retryDelay": "7s"), or a few seconds by default.
+export function retryDelayMs(headerValue: string | null, body: unknown) {
+  const header = Number(headerValue);
+  if (Number.isFinite(header) && header > 0) return Math.min(header * 1000, 15_000);
+  const match = /retryDelay"?\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(JSON.stringify(body || ""));
+  return match ? Math.min(Number(match[1]) * 1000, 15_000) : 6_000;
+}
+
+// Gemini's free tier allows only a few requests a minute, so parallel batches from one
+// search go out at most two at a time.
+const inFlight = new Map<string, number>();
+async function acquireSlot(id: string, limit: number, deadlineAt: number) {
+  while ((inFlight.get(id) || 0) >= limit && Date.now() < deadlineAt - 5000) await new Promise((r) => setTimeout(r, 250));
+  inFlight.set(id, (inFlight.get(id) || 0) + 1);
+  return () => inFlight.set(id, Math.max(0, (inFlight.get(id) || 1) - 1));
+}
+
+export function resetFreeModelCache() { freeModelCache = null; modelHealth.clear(); providerBlocked.clear(); inFlight.clear(); }
 
 async function freeOpenRouterModels(): Promise<string[]> {
   if (freeModelCache && Date.now() - freeModelCache.at < 60 * 60 * 1000) return freeModelCache.models;
@@ -206,10 +224,15 @@ export async function runStructuredExtraction(options: {
         // OpenRouter: route only to models that honour response_format (the free router
         // otherwise lands on models that answer in prose).
         ...(withFormat && provider.id === "openrouter" ? { provider: { require_parameters: true } } : {}),
+        // Gemini 2.5 thinks by default and the thinking counts against max_tokens, which
+        // leaves no room for the JSON. Flash models can turn it off.
+        ...(provider.id === "gemini" ? { reasoning_effort: /flash/i.test(model) ? "none" : "low" } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    const raw: any = await response.json().catch(() => null);
+    const body: any = await response.json().catch(() => null);
+    // Gemini wraps errors in an array.
+    const raw: any = Array.isArray(body) ? body[0] || null : body;
     return { response, raw };
   }
 
@@ -234,8 +257,20 @@ export async function runStructuredExtraction(options: {
         attempts.push({ provider: provider.id, model, ok: false, message: provider.label + ": not enough time left for AI verification." });
         break;
       }
+      const release = provider.id === "gemini" ? await acquireSlot(provider.id, 2, options.deadlineAt) : () => {};
       try {
         let { response, raw } = await call(provider, model, timeoutMs, true);
+        // A per-minute limit on Gemini/Groq (the last fallbacks): wait as asked and try once
+        // more while there is time. OpenRouter moves straight on to the next provider.
+        if (response.status === 429 && provider.id !== "openrouter" && !isDailyQuotaMessage(JSON.stringify(raw || ""))) {
+          const wait = retryDelayMs(response.headers.get("retry-after"), raw);
+          const left = options.deadlineAt - Date.now() - 1500 - wait;
+          if (left >= 6000) {
+            console.warn("[ai] " + provider.label + " " + model + " rate limit, retrying in " + Math.round(wait / 1000) + "s");
+            await new Promise((r) => setTimeout(r, wait));
+            ({ response, raw } = await call(provider, model, Math.min(timeoutMs, left), true));
+          }
+        }
         const errText = String(raw?.error?.message || raw?.error || "");
         if (!response.ok && (response.status === 400 || response.status === 404 || response.status === 422) && /response_format|json|structured|parameter/i.test(errText)) {
           ({ response, raw } = await call(provider, model, Math.min(timeoutMs, options.deadlineAt - Date.now() - 1500), false));
@@ -245,7 +280,7 @@ export async function runStructuredExtraction(options: {
           console.warn("[ai] " + message);
           if (response.status === 429) {
             // The limit is per account, not per model: stop this provider, go to the next one.
-            const daily = isDailyQuotaMessage(String(raw?.error?.message || errText) + " " + JSON.stringify(raw?.error?.metadata || ""));
+            const daily = isDailyQuotaMessage(JSON.stringify(raw || ""));
             blockProvider(quotaKey, daily);
             attempts.push({ provider: provider.id, model, ok: false, quota: true, message });
             break;
@@ -274,6 +309,8 @@ export async function runStructuredExtraction(options: {
           : provider.label + " " + model + " request failed: " + (error instanceof Error ? error.message : "network error");
         console.warn("[ai] " + message);
         attempts.push({ provider: provider.id, model, ok: false, message });
+      } finally {
+        release();
       }
     }
   }

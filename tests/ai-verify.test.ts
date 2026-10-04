@@ -250,3 +250,34 @@ describe("after the third live test", () => {
     expect(body.outcome).toBe("all_candidates_rejected");
   });
 });
+
+describe("Gemini free tier", () => {
+  it("turns off thinking for flash and retries once after a per-minute 429", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    const bodies: any[] = [];
+    mockFetch([
+      { match: (u) => u.includes("generativelanguage.googleapis.com"), respond: (_u, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        if (bodies.length === 1) return json([{ error: { code: 429, message: "Quota exceeded for metric: generate_content_free_tier_requests, limit: 10 per minute", details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "0.01s" }] } }], 429);
+        return openRouterReply({ ok: true });
+      } },
+    ]);
+    const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(out.parsed).toEqual({ ok: true });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].reasoning_effort).toBe("none");
+  });
+
+  it("treats a Gemini per-day 429 as the daily quota", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    let calls = 0;
+    mockFetch([
+      { match: (u) => u.includes("generativelanguage.googleapis.com"), respond: () => { calls += 1; return json([{ error: { code: 429, message: "Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel-FreeTier" } }], 429); } },
+    ]);
+    const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(out.quotaExhausted).toBe(true);
+    expect(calls).toBe(1);
+  });
+});
