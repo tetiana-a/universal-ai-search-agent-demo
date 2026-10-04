@@ -203,6 +203,18 @@ function Empty({ children }: { children: ReactNode }) {
 
 const inputClass = "w-full rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--line)]";
 
+function dashboardCounts(state: State | null): Partial<Record<Tab, number>> {
+  if (!state) return {};
+  return {
+    drafts: state.drafts.filter((draft) => draft.state === "pending").length,
+    leads: state.leads.filter((lead) => lead.state === "qualified" || lead.state === "escalated").length,
+    intel: state.sources.filter((source) => source.state === "candidate").length,
+    matches: state.matches.filter((match) => match.state === "proposed").length,
+    tasks: state.researchTasks.filter((task) => task.state === "running" || task.state === "clarifying").length,
+    health: state.persistent && state.telegram.token ? 0 : 1,
+  };
+}
+
 export default function ScoutDashboard() {
   const [state, setState] = useState<State | null>(null);
   const [tab, setTab] = useState<Tab>("report");
@@ -286,14 +298,7 @@ export default function ScoutDashboard() {
     try { window.localStorage.setItem("aurelius-theme", next); } catch {}
   };
 
-  const counts: Partial<Record<Tab, number>> = state ? {
-    drafts: state.drafts.filter((d) => d.state === "pending").length,
-    leads: state.leads.filter((l) => l.state === "qualified" || l.state === "escalated").length,
-    intel: state.sources.filter((s) => s.state === "candidate").length,
-    matches: state.matches.filter((m) => m.state === "proposed").length,
-    tasks: state.researchTasks.filter((t) => t.state === "running" || t.state === "clarifying").length,
-    health: state.persistent && state.telegram.token ? 0 : 1,
-  } : {};
+  const counts = dashboardCounts(state);
 
   const activeTab = TABS.find((item) => item.id === tab);
 
@@ -421,7 +426,7 @@ export default function ScoutDashboard() {
                 {state?.persistent ? (
                   <div className="hidden items-center gap-2 rounded-full border border-[var(--success)]/30 bg-[var(--success)]/7 px-3 py-1.5 text-[11px] text-[var(--success)] xl:flex">
                     <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                    Память подключена
+                    <span>Память подключена</span>
                   </div>
                 ) : null}
                 {state?.telegram.token ? (
