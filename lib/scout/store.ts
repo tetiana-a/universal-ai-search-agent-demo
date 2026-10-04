@@ -105,6 +105,21 @@ export async function deleteValue(key: string) {
   memory().values.delete(key);
 }
 
+// Atomically claims an idempotency key for a limited time.
+// Returns true only to the first caller. Redis uses SET NX EX; the in-memory
+// fallback provides best-effort protection within one warm serverless instance.
+export async function claimOnce(key: string, ttlSeconds: number): Promise<boolean> {
+  const fullKey = PREFIX + key;
+  if (storeIsPersistent()) {
+    const result = await redisCommand<string | null>("SET", [fullKey, "1", "NX", "EX", Math.max(1, Math.floor(ttlSeconds))]);
+    return result === "OK";
+  }
+  const state = memory();
+  if (state.values.has(key)) return false;
+  state.values.set(key, JSON.stringify({ claimedAt: Date.now(), ttlSeconds }));
+  return true;
+}
+
 // Atomic counter (daily send limits). Returns the value after increment.
 export async function increment(key: string, ttlSeconds: number): Promise<number> {
   if (storeIsPersistent()) {
