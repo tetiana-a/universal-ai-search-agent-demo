@@ -48,3 +48,35 @@ describe("Cyrillic patterns", () => {
     expect(profileFromText("company", "Производитель светодиодных светильников")).toBe("Производитель, светодиодных светильников");
   });
 });
+
+import { buildSourceMap, pickBranches } from "@/lib/source-map";
+import { itemLinks } from "@/lib/free-research";
+
+describe("source map for the spec's examples", () => {
+  it("builds country-specific sources and covers every class", () => {
+    const land = buildSourceMap("Найди земельные участки в Мадриде площадью от 10 000 м²");
+    expect(land.kind).toBe("real_estate");
+    expect(land.country).toBe("Spain");
+    expect(land.sources.map((s) => s.domain)).toEqual(expect.arrayContaining(["idealista.com", "subastas.boe.es", "solvia.es"]));
+    const picked = pickBranches(land, 8);
+    expect(picked.some((q) => q.includes("terreno en venta"))).toBe(true);
+    expect(picked.some((q) => q.startsWith("site:idealista.com"))).toBe(true);
+
+    const investors = buildSourceMap("Найти потенциальных инвесторов в Амстердаме для проекта X");
+    expect(investors.kind).toBe("investor");
+    expect(investors.sources.map((s) => s.domain)).toEqual(expect.arrayContaining(["nvp.nl", "techleap.nl", "dealroom.co"]));
+    expect(investors.branches.every((b) => !/Cyprus/i.test(b.query))).toBe(true);
+
+    const factories = buildSourceMap("Найти производителей светодиодных ламп в Китае");
+    expect(factories.kind).toBe("company");
+    expect(factories.sources.map((s) => s.domain)).toEqual(expect.arrayContaining(["alibaba.com", "made-in-china.com"]));
+  });
+
+  it("picks item pages from a list page and skips navigation", () => {
+    const content = "[Parcela 2.400 m²](https://www.idealista.com/inmueble/104558231/) [Ayuda](https://www.idealista.com/ayuda/) [Login](https://www.idealista.com/login/x) [Otro](https://other.com/inmueble/1234/) [Terreno urbano en Boadilla del Monte con licencia](https://www.idealista.com/venta/terreno-urbano-boadilla-del-monte-licencia)";
+    expect(itemLinks("https://www.idealista.com/venta-terrenos/madrid/", content)).toEqual([
+      "https://www.idealista.com/inmueble/104558231",
+      "https://www.idealista.com/venta/terreno-urbano-boadilla-del-monte-licencia",
+    ]);
+  });
+});

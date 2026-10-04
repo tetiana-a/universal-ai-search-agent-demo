@@ -73,13 +73,13 @@ export function buildSearchMatrix(query: string, language = "en", geographyHint?
         className: "investors",
         priority: 99,
         queries: [
-          `${q} venture capital VC fund angel investor Cyprus SaaS B2B`,
-          `${q} investor portfolio Cyprus software technology`,
-          `${q} investment fund Cyprus B2B SaaS enterprise technology`,
-          `${q} site:crunchbase.com Cyprus SaaS investor venture capital`,
-          `${q} site:linkedin.com/company Cyprus venture capital investment`,
-          `${q} Cyprus startup investor portfolio SaaS B2B`,
-          `${q} Cyprus angel investor technology startup portfolio`,
+          `${q} venture capital fund angel investor`,
+          `${q} investor portfolio`,
+          `${q} investment fund`,
+          `${q} site:crunchbase.com investor venture capital`,
+          `${q} site:linkedin.com/company venture capital investment`,
+          `${q} startup investor portfolio`,
+          `${q} angel investor network`,
         ],
       }]
     : [];

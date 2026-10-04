@@ -132,7 +132,13 @@ describe("Free edition without any keys", () => {
     expect(plot.area).toBe("12.500 m²");
     expect(body.taskKind).toBe("real_estate");
     expect(body.fieldSchema.map((f: any) => f.key)).toEqual(expect.arrayContaining(["price", "area", "location"]));
-    expect(body.progressCounters).toMatchObject({ sourcesDiscovered: 2, sourcesChecked: 1 });
+    // 2 pages from search plus the Spanish source map (portals, banks, auctions, social).
+    expect(body.progressCounters.sourcesChecked).toBe(1);
+    expect(body.progressCounters.sourcesDiscovered).toBeGreaterThan(10);
+    expect(body.progressCounters.sourcesUnavailable).toBeGreaterThan(0);
+    const idealista = body.sourceRegistry.find((s: any) => s.domain === "idealista.com");
+    expect(idealista).toMatchObject({ accessStatus: "partial", category: "Порталы недвижимости" });
+    expect(body.sourceRegistry.find((s: any) => s.domain === "facebook.com").accessStatus).toBe("not_automatable");
     expect(body.progressCounters.resultsFound).toBeGreaterThan(0);
     expect(body.continuation.round).toBe(1);
     expect(body.continuation.seenUrls).toContain("https://fincas-madrid.es/terreno-valdebebas");

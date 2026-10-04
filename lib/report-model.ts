@@ -174,7 +174,7 @@ export function t(key: keyof typeof L, lang: ReportLanguage) {
 
 const ACCESS_LABEL: Record<string, [string, string]> = {
   checked: ["Проверен", "Checked"],
-  partial: ["Найден, не прочитан", "Found, not read"],
+  partial: ["Ещё не проверялся", "Not checked yet"],
   unavailable: ["Недоступен", "Unavailable"],
   blocked: ["Заблокирован", "Blocked"],
   auth_required: ["Нужен вход", "Login required"],
