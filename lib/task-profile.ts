@@ -62,28 +62,36 @@ const PHONE = /(?:\+|00)\d[\d\s().-]{7,}\d/g;
 
 // Template and demo contacts (test1234@126.com, name@example.com, +00 1234 5678) are not
 // real contacts and must not reach the table.
+const PLACEHOLDER_LOCAL = new Set(["test", "tester", "example", "sample", "demo", "user", "username", "name", "yourname", "youremail", "your-email", "email", "mail", "someone", "somebody", "johndoe", "john.doe", "janedoe", "jane.doe", "noreply", "no-reply", "donotreply", "do-not-reply", "abc", "asdf", "qwerty"]);
+const PLACEHOLDER_DOMAIN = new Set(["example.com", "example.net", "example.org", "test.com", "sample.com", "demo.com", "domain.com", "email.com", "yourdomain.com", "yoursite.com", "company.com", "mysite.com", "site.com"]);
+const FILE_TLD = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "css", "js"]);
+const RESERVED_TLD = new Set(["example", "invalid", "test", "localhost"]);
+
 export function isPlaceholderEmail(email: string) {
   const [local = "", domain = ""] = String(email || "").toLowerCase().split("@");
-  if (/\.(png|jpe?g|gif|webp|svg|css|js)$/.test(domain)) return true;
-  if (/^(example|test|sample|demo|domain|email|yourdomain|yoursite|company|mysite|site)\.(com|net|org)$|(^|\.)(example|invalid|test|localhost)$|sentry|wixpress/.test(domain)) return true;
-  return /^(test|tester|example|sample|demo|user|username|name|yourname|your-?email|email|mail|someone|somebody|john\.?doe|jane\.?doe|no-?reply|do-?not-?reply|xxx+|abc|asdf|qwerty)[\d._-]*$/.test(local);
+  const tld = domain.split(".").pop() || "";
+  if (FILE_TLD.has(tld) || RESERVED_TLD.has(tld) || PLACEHOLDER_DOMAIN.has(domain)) return true;
+  if (domain.includes("sentry") || domain.includes("wixpress")) return true;
+  const stem = local.replace(/[\d._-]+$/, "");
+  return PLACEHOLDER_LOCAL.has(stem) || /^x{3,}$/.test(stem);
 }
 export function isPlaceholderPhone(phone: string) {
   let digits = String(phone || "").replace(/\D/g, "");
-  if (/^\s*00/.test(phone)) digits = digits.slice(2);
+  if (String(phone || "").trim().startsWith("00")) digits = digits.slice(2);
   if (digits.length < 8 || digits.length > 15) return true;
-  if (/^(\d)\1+$/.test(digits) || /0{6,}/.test(digits)) return true;
-  if (/^0/.test(digits)) return true; // no country code starts with 0
-  return /123456|234567|345678|456789|987654|876543/.test(digits);
+  if (/^(\d)\1+$/.test(digits) || digits.includes("000000")) return true;
+  if (digits.startsWith("0")) return true; // no country code starts with 0
+  return ["123456", "234567", "345678", "456789", "987654", "876543"].some((run) => digits.includes(run));
 }
 // A contact string from the AI or a page with placeholder emails and phones removed.
 export function cleanContact(value: string) {
   return String(value || "")
     .replace(EMAIL, (e) => (isPlaceholderEmail(e) ? "" : e))
     .replace(PHONE, (p) => (isPlaceholderPhone(p) ? "" : p))
-    .replace(/(\s*[·,;|]\s*){2,}/g, " · ")
-    .replace(/^[\s·,;|]+|[\s·,;|]+$/g, "")
-    .trim();
+    .split(/[·,;|]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" · ");
 }
 const TICKET = /(?:ticket|cheque|check|чек|invest(?:s|ing)?)\D{0,30}((?:€|eur|\$|usd|£)\s?\d[\d.,]*\s?(?:k|m|mln|million)?(?:\s?(?:-|–|to|до)\s?(?:€|eur|\$|usd|£)?\s?\d[\d.,]*\s?(?:k|m|mln|million)?)?)/i;
 const STAGE = /\b(pre-seed|seed|series [a-e]|growth|early[- ]stage|late[- ]stage)\b/i;

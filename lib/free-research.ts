@@ -171,15 +171,36 @@ async function englishSubject(query: string, edition: "free" | "pro", deadlineAt
   return /^[\x00-\x7F€£]+$/.test(en) ? en.slice(0, 160) : "";
 }
 
-const B2B_PLATFORM = /(^|\.)(made-in-china|alibaba|globalsources|europages|tradeindia|indiamart|ec21|ecplaza|tradekey|dhgate)\.[a-z.]+$/i;
-const JUNK_HOST = /^(www\.)?(login|passport|sso|auth|accounts?|my|member|members|cart|buy|checkout|pay|payment|static|assets?|img\d*|images?|image\d*|pic|pics|photo|photos|media|cdn\d*|s\d*|m|help|service|sale|offer|insights|activity|message|messages|feedback|i)\./i;
-const JUNK_PATH = /\/(login|log-in|logout|signin|sign-in|signup|sign-up|register|join|cart|basket|checkout|wishlist|favou?rites?|compare|account|my-?account|user|member|passport|auth|sso|privacy|terms|cookies?|contact|contact-us|about|about-us|blog|news|faq|help|search|tag|tags|category|static|assets|img|images|uploads?|media|cdn|feedback|inquiry|sitemap)(\/|$|\.)/i;
-const JUNK_EXT = /\.(jpe?g|png|gif|webp|avif|bmp|ico|svg|pdf|css|js|json|xml|zip|rar|mp4|mp3|woff2?|ttf)$/i;
+const B2B_PLATFORMS = new Set(["made-in-china", "alibaba", "globalsources", "europages", "tradeindia", "indiamart", "ec21", "ecplaza", "tradekey", "dhgate"]);
+const JUNK_HOSTS = new Set(["login", "passport", "sso", "auth", "account", "accounts", "my", "member", "members", "cart", "buy", "checkout", "pay", "payment", "static", "asset", "assets", "image", "images", "pic", "pics", "photo", "photos", "media", "m", "help", "service", "sale", "offer", "insights", "activity", "message", "messages", "feedback", "i"]);
+const JUNK_SEGMENTS = new Set(["login", "log-in", "logout", "signin", "sign-in", "signup", "sign-up", "register", "join", "cart", "basket", "checkout", "wishlist", "favorites", "favourites", "compare", "account", "myaccount", "my-account", "user", "member", "passport", "auth", "sso", "privacy", "terms", "cookie", "cookies", "contact", "contact-us", "about", "about-us", "blog", "news", "faq", "help", "search", "tag", "tags", "category", "static", "assets", "img", "images", "upload", "uploads", "media", "cdn", "feedback", "inquiry", "sitemap"]);
+const JUNK_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "svg", "pdf", "css", "js", "json", "xml", "zip", "rar", "mp4", "mp3", "woff", "woff2", "ttf"]);
+
+function isB2bPlatform(domain: string) {
+  return B2B_PLATFORMS.has(domain.split(".")[0]);
+}
 
 // Links that are never an item: login, cart, account, static files, images, CDN hosts.
 export function isJunkLink(url: URL) {
-  return JUNK_HOST.test(url.hostname) || JUNK_PATH.test(url.pathname) || JUNK_EXT.test(url.pathname)
-    || /[?&](action|do)=(login|cart|add|register)/i.test(url.search);
+  const label = url.hostname.toLowerCase().replace(/^www\./, "").split(".")[0];
+  if (JUNK_HOSTS.has(label) || /^(img|image|cdn|s)\d*$/.test(label)) return true;
+  const segments = url.pathname.toLowerCase().split("/").filter(Boolean);
+  if (segments.some((segment) => JUNK_SEGMENTS.has(segment.split(".")[0]))) return true;
+  const last = segments[segments.length - 1] || "";
+  if (last.includes(".") && JUNK_EXTENSIONS.has(last.split(".").pop() || "")) return true;
+  return /[?&](action|do)=(login|cart|add|register)/i.test(url.search);
+}
+
+function aiFailureLine(ru: boolean, hadPages: boolean, quota: boolean, error: string) {
+  if (!hadPages) return "";
+  if (quota) {
+    return ru
+      ? "ИИ-проверка недоступна: дневной лимит бесплатного ИИ исчерпан. Результаты отобраны правилами, проверьте их вручную. Лимит обновится в 03:00 по Москве; чтобы снять его, добавьте бесплатный GEMINI_API_KEY или пополните OpenRouter на $10."
+      : "AI check unavailable: the free daily AI limit is reached. Results were selected by rules and need manual review. The limit resets at 00:00 UTC; add a free GEMINI_API_KEY or $10 of OpenRouter credit to lift it.";
+  }
+  return ru
+    ? "ИИ-проверка не сработала: " + error + " Поля взяты правилами, результаты нужно проверить вручную."
+    : "AI verification failed: " + error + " Fields were extracted by rules and need manual review.";
 }
 
 // Stage 3 of the spec: a list page (a portal's search results, a directory) is opened
@@ -200,7 +221,7 @@ export function itemLinks(listUrl: string, content: string, limit = 6) {
     if (subdomain) {
       // A bare subdomain home page is only an item on B2B platforms (a supplier's shop).
       // Elsewhere a subdomain link must look like a detail page.
-      if (!B2B_PLATFORM.test(registrableDomain(base.toString())) && !/\d{3,}|[a-z]+(?:-[a-z0-9]+){3,}/i.test(path)) continue;
+      if (!isB2bPlatform(registrableDomain(base.toString())) && !/\d{3,}|[a-z]+(?:-[a-z0-9]+){3,}/i.test(path)) continue;
     } else {
       if (path === base.pathname || path.split("/").filter(Boolean).length < 2) continue;
       // Detail pages usually carry an id or a long slug.
@@ -559,9 +580,9 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     verify = await verifyPagesWithAi({ query: input.query, kind, criteria, language: input.language, pages: aiPages, edition, deadlineAt, batchSize: AI_BATCH_SIZE });
   }
   const aiQuota = Boolean(verify?.quotaExhausted) && !verify?.checkedPages;
-  const aiError = !hasAi ? "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY)."
-    : aiQuota ? "AI check unavailable: the free daily AI limit is reached. " + (verify?.error || "")
-    : verify && verify.error ? verify.error : "";
+  let aiError = verify?.error || "";
+  if (!hasAi) aiError = "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY).";
+  else if (aiQuota) aiError = "AI check unavailable: the free daily AI limit is reached. " + aiError;
   const verifiedById = new Map((verify?.items || []).map((item) => [item.id, item]));
   const pageById = new Map(aiPages.map((page) => [page.id, page]));
   const hitByUrl = new Map(candidateHits.map((hit) => [hit.url, hit]));
@@ -681,11 +702,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       ? (ru
           ? `ИИ-проверка (${verify.provider} · ${verify.model}): проверено страниц ${verify.checkedPages}, подошло ${aiKept}, отсеяно ${aiDropped}.` + (verify.error ? " Часть страниц ИИ не проверил: " + verify.error : "")
           : `AI verification (${verify.provider} · ${verify.model}): ${verify.checkedPages} pages checked, ${aiKept} kept, ${aiDropped} dropped.` + (verify.error ? " Some pages were not checked: " + verify.error : ""))
-      : aiPages.length && aiQuota
-        ? (ru ? "ИИ-проверка недоступна: дневной лимит бесплатного ИИ исчерпан. Результаты отобраны правилами, проверьте их вручную. Лимит обновится в 03:00 по Москве; чтобы снять его, добавьте бесплатный GEMINI_API_KEY или пополните OpenRouter на $10." : "AI check unavailable: the free daily AI limit is reached. Results were selected by rules and need manual review. The limit resets at 00:00 UTC; add a free GEMINI_API_KEY or $10 of OpenRouter credit to lift it.")
-      : aiPages.length
-        ? (ru ? "ИИ-проверка не сработала: " + aiError + " Поля взяты правилами, результаты нужно проверить вручную." : "AI verification failed: " + aiError + " Fields were extracted by rules and need manual review.")
-        : "";
+      : aiFailureLine(ru, aiPages.length > 0, aiQuota, aiError);
   if (hasAi && aiError) console.warn("[research] AI verification problem:", aiError);
   const criteriaLine = hasNumericCriteria(criteria)
     ? (ru ? `Критерий ${describeCriteria(criteria, "ru")}: не подошло ${belowCriteria}.` : `Criterion ${describeCriteria(criteria, "en")}: ${belowCriteria} did not match.`)

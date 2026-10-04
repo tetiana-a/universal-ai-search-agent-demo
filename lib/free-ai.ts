@@ -175,7 +175,7 @@ export function parseJsonLoose(text: string) {
 }
 
 export type AiAttempt = { provider: AiProviderId; model: string; ok: boolean; message?: string; quota?: boolean };
-export type AiExtraction = { parsed: any | null; usage: any; provider?: AiProviderId; model?: string; attempts: AiAttempt[]; error: string; quotaExhausted?: boolean };
+export type AiExtraction = { parsed: any; usage: any; provider?: AiProviderId; model?: string; attempts: AiAttempt[]; error: string; quotaExhausted?: boolean };
 
 // Tries each configured provider until one returns valid JSON or the time budget runs out.
 export async function runStructuredExtraction(options: {
@@ -221,7 +221,7 @@ export async function runStructuredExtraction(options: {
       : orderByHealth([...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...(await freeOpenRouterModels())])]);
     for (const model of models.slice(0, 4)) {
       // Free models of one account share one quota; a paid model has its own.
-      const quotaKey = provider.id + ":" + (/:free$/.test(model) ? "free" : model);
+      const quotaKey = provider.id + ":" + (model.endsWith(":free") ? "free" : model);
       const blocked = providerBlock(quotaKey);
       if (blocked) {
         if (!attempts.some((a) => a.quota && a.provider === provider.id)) {
