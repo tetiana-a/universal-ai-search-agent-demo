@@ -15,7 +15,8 @@ export type Collection =
   | "leads"
   | "matches"
   | "meetings"
-  | "stoplist";
+  | "stoplist"
+  | "research_tasks";
 
 const PREFIX = "aurelius:scout:v1:";
 const LOG_KEY = PREFIX + "log";
