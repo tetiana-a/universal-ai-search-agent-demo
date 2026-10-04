@@ -320,6 +320,14 @@ async function stopRequested(chatId: string) {
   return Boolean(await getValue<boolean>(STOP_KEY + chatId));
 }
 
+export async function requestResearchStop(chatId: string, actor = "human") {
+  const task = await loadTask(chatId);
+  if (!task || (task.state !== "running" && task.state !== "clarifying")) return { ok: false, task, message: "active task not found" };
+  await setValue(STOP_KEY + chatId, true, 15 * 60);
+  await logAction({ actor: actor === "bot" ? "bot" : "human", action: "research.stop_requested", detail: task.id + " · " + task.query.slice(0, 100) });
+  return { ok: true, task, message: "stop requested" };
+}
+
 // ---- Conversation ----------------------------------------------------------------------
 
 async function askQuestion(task: ResearchTask) {
@@ -452,7 +460,7 @@ export async function handleResearchCallback(chatId: string, action: string, cal
   if (!task) { await answer(TEXT.ru.none); return undefined; }
   const t = TEXT[task.lang];
   if (action === "stop") {
-    await setValue(STOP_KEY + chatId, true, 15 * 60);
+    await requestResearchStop(chatId, "human");
     await answer(t.stopAck);
     return undefined;
   }
