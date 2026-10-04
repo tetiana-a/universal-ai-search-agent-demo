@@ -49,8 +49,10 @@ import {
   SkipForward,
 } from "lucide-react";
 import ResearchControlPanel, { mergeRound, type ResearchSession } from "@/components/research-control-panel";
+import { accessLabel } from "@/lib/report-model";
+import { formatDuration, loadTasks, newTaskId, saveTasks, settleStaleTasks, upsertTask, type TaskRecord } from "@/lib/task-history";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { NavKey, Result, Scenario, Lang, Task } from "@/lib/data";
+import type { NavKey, Result, Scenario, Lang } from "@/lib/data";
 import type { AppSettings, SettingsTab } from "@/lib/settings";
 import { defaultSettings } from "@/lib/settings";
 import {
@@ -60,7 +62,7 @@ import {
   exportJsonFile,
   type ResearchExportPayload,
 } from "@/lib/exporters";
-import { resultsByScenario, scenarios, sourceRegistry, tasks } from "@/lib/data";
+import { resultsByScenario, scenarios } from "@/lib/data";
 
 type Theme = "dark" | "light";
 type ResultFilter = "All" | "Verified" | "High match";
@@ -520,6 +522,14 @@ export default function Home() {
   const [clarifications, setClarifications] = useState<Record<string, string>>({});
   const researchAbortRef = useRef<AbortController | null>(null);
   const continueNextRef = useRef(false);
+  const [taskHistory, setTaskHistory] = useState<TaskRecord[]>([]);
+  const currentTaskIdRef = useRef<string>("");
+  useEffect(() => { setTaskHistory(saveTasks(settleStaleTasks(loadTasks()))); }, []);
+  function recordTask(patch: Partial<TaskRecord>) {
+    const id = currentTaskIdRef.current;
+    if (!id) return;
+    setTaskHistory((list) => saveTasks(upsertTask(list, { ...patch, id })));
+  }
   const [qualityGate, setQualityGate] = useState({
     total: 0,
     pass: 0,
@@ -1096,6 +1106,7 @@ export default function Home() {
       ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
     });
     saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
+    recordTask({ status: "completed", finishedAt: new Date().toISOString(), rounds: session.round, resultsCount: session.results.length, counters: session.counters as any, snapshot: { ...data, query: session.query } });
     setProgress(100);
     setResearchStage(6);
     setCompletedSearch(true);
@@ -1172,6 +1183,7 @@ export default function Home() {
 
   async function cancelResearch() {
     const task = activeTask;
+    recordTask({ status: "stopped", finishedAt: new Date().toISOString() });
     if (researchAbortRef.current) {
       researchAbortRef.current.abort();
       researchAbortRef.current = null;
@@ -1225,6 +1237,8 @@ export default function Home() {
   async function startResearch() {
     const isContinuation = continueNextRef.current && researchSession !== null;
     continueNextRef.current = false;
+    if (!isContinuation || !currentTaskIdRef.current) currentTaskIdRef.current = newTaskId();
+    recordTask({ query, status: "running", ...(isContinuation ? {} : { startedAt: new Date().toISOString(), finishedAt: undefined }) });
     const detected = detectScenarioFromQuery(query);
     setScenario(detected);
     setActiveNav("research");
@@ -1309,6 +1323,7 @@ export default function Home() {
       // A user stop aborts the request; cancelResearch already updated the view.
       if (error instanceof Error && error.name === "AbortError") return;
       setLiveError(error instanceof Error ? error.message : "Live research failed.");
+      recordTask({ status: "failed", finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : "Live research failed." });
       setRunning(false);
       setCompletedSearch(false);
       setLiveResults(null);
@@ -1501,12 +1516,6 @@ export default function Home() {
     setProgress(0);
     setRunning(false);
     setFilter("All");
-  }
-
-  function statusLabel(status: Task["status"]) {
-    if (status === "Running") return t.running;
-    if (status === "Completed") return t.completed;
-    return t.paused;
   }
 
 
@@ -2845,189 +2854,181 @@ export default function Home() {
         </div>
 
         <div className="grid gap-4">
-          {tasks.map((task, index) => (
-            <div
-              key={task.id}
-              className={`glass panel-hover rounded-2xl p-5 float-in float-in-delay-${Math.min(index + 1, 3)}`}
-            >
-              <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(340px,440px)_auto] lg:items-center lg:gap-8">
-                <div className="flex min-w-0 items-start gap-4">
-                  <div className="icon-lift grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[var(--line)] bg-[var(--gold)]/7 text-[var(--gold)]">
-                    {task.status === "Running" ? <Activity size={18} /> : task.status === "Completed" ? <Check size={18} /> : <CirclePause size={18} />}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-[var(--text-soft)]">{task.title}</div>
-                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">{task.id} · {task.date}</div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  {[
-                    [t.status, statusLabel(task.status)],
-                    [t.duration, task.duration],
-                    [t.resultCount, task.results.toString()],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <div className="text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">{label}</div>
-                      <div className="mt-1 text-sm text-[var(--text-soft)]">{value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  onClick={() => {
-                    setScenario(task.scenario);
-                    setActiveNav("research");
-                  }}
-                  className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2.5 text-xs text-[var(--gold-bright)]"
-                >
-                  {lang === "ru" ? "Открыть" : "Open"}
-                  <ArrowUpRight size={14} />
-                </button>
-              </div>
+          {!taskHistory.length && (
+            <div className="glass rounded-2xl p-6 text-sm leading-6 text-[var(--text-muted)]">
+              {lang === "ru"
+                ? "Здесь появятся ваши задачи: запрос, статус, число результатов и счётчики. Запустите первое исследование в чате."
+                : "Your tasks will appear here with status, result counts and counters. Start a research run in the chat."}
             </div>
-          ))}
+          )}
+          {taskHistory.map((task, index) => {
+            const statusText = {
+              running: lang === "ru" ? "Выполняется" : "Running",
+              completed: lang === "ru" ? "Готово" : "Completed",
+              stopped: lang === "ru" ? "Остановлено" : "Stopped",
+              failed: lang === "ru" ? "Ошибка" : "Failed",
+            }[task.status];
+            const counters = task.counters || {};
+            return (
+              <div
+                key={task.id}
+                className={`glass panel-hover rounded-2xl p-5 float-in float-in-delay-${Math.min(index + 1, 3)}`}
+              >
+                <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(340px,520px)_auto] lg:items-center lg:gap-8">
+                  <div className="flex min-w-0 items-start gap-4">
+                    <div className="icon-lift grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[var(--line)] bg-[var(--gold)]/7 text-[var(--gold)]">
+                      {task.status === "running" ? <Activity size={18} /> : task.status === "completed" ? <Check size={18} /> : <CirclePause size={18} />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="line-clamp-2 text-sm font-semibold text-[var(--text-soft)]">{task.query}</div>
+                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                        {task.id} · {new Date(task.startedAt).toLocaleString(lang === "ru" ? "ru-RU" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        {task.rounds > 1 ? " · " + (lang === "ru" ? "раундов: " : "rounds: ") + task.rounds : ""}
+                      </div>
+                      {task.error && <div className="mt-1 line-clamp-2 text-[11px] text-[var(--danger)]">{task.error}</div>}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 sm:grid-cols-5">
+                    {[
+                      [t.status, statusText],
+                      [t.duration, task.status === "running" ? "…" : formatDuration(task.startedAt, task.finishedAt)],
+                      [lang === "ru" ? "Источников" : "Sources", String(counters.sourcesDiscovered ?? "—")],
+                      [lang === "ru" ? "Проверено" : "Checked", String(counters.sourcesChecked ?? "—")],
+                      [t.resultCount, String(task.resultsCount)],
+                    ].map(([label, value]) => (
+                      <div key={label}>
+                        <div className="text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">{label}</div>
+                        <div className="mt-1 text-sm text-[var(--text-soft)]">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    disabled={!task.snapshot && task.status !== "failed" && task.status !== "stopped"}
+                    onClick={() => openTask(task)}
+                    className="panel-hover inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-2.5 text-xs text-[var(--gold-bright)] disabled:opacity-40"
+                  >
+                    {task.snapshot ? (lang === "ru" ? "Открыть" : "Open") : (lang === "ru" ? "Повторить" : "Run again")}
+                    <ArrowUpRight size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
     );
   }
 
+  // Reopens a finished task with its results, or puts its query back for a new run.
+  function openTask(task: TaskRecord) {
+    setQuery(task.query);
+    setActiveNav("research");
+    if (!task.snapshot) return;
+    currentTaskIdRef.current = task.id;
+    setResearchSession(null);
+    setLiveAttempted(true);
+    setLiveError("");
+    applyResearchResult({ ...task.snapshot, continuation: task.snapshot.continuation ? { ...task.snapshot.continuation, round: 1 } : undefined });
+  }
+
+  // The accumulated source base: every source found or mapped in this browser's runs,
+  // with its real access status, so "not automatable" is never counted as checked.
+  function sourceBaseRows() {
+    let stored: any[] = [];
+    try {
+      const raw = window.localStorage.getItem("aurelius-source-memory-v1");
+      stored = raw ? JSON.parse(raw) : [];
+    } catch { stored = []; }
+    const merged = new Map<string, any>();
+    for (const item of [...(Array.isArray(stored) ? stored : []), ...liveSourceRegistry]) {
+      const key = String(item?.domain || item?.url || item?.name || "").trim().toLowerCase();
+      if (key) merged.set(key, { ...merged.get(key), ...item });
+    }
+    return Array.from(merged.values());
+  }
+
   function renderSources() {
+    const rows = typeof window === "undefined" ? [] : sourceBaseRows();
+    const status = (item: any) => String(item?.accessStatus || item?.access_status || "partial");
+    const unavailable = new Set(["unavailable", "blocked", "auth_required", "policy_restricted", "captcha_required", "rate_limited", "not_automatable"]);
+    const summary = [
+      [lang === "ru" ? "В базе" : "In the base", rows.length],
+      [lang === "ru" ? "Проверено" : "Checked", rows.filter((r) => status(r) === "checked").length],
+      [lang === "ru" ? "Недоступно для автоанализа" : "Not automatable", rows.filter((r) => unavailable.has(status(r))).length],
+      [lang === "ru" ? "Ещё не проверялись" : "Not checked yet", rows.filter((r) => status(r) === "partial").length],
+    ] as const;
+    const tone = (value: string) => value === "checked" ? "text-[var(--success)]" : value === "partial" ? "text-[var(--text-muted)]" : "text-[var(--warning)]";
     return (
       <section className="space-y-5">
         <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-                STAGE 1 • SOURCE FEASIBILITY GATE
-              </div>
-              <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
-                {lang === "ru" ? "20–30 источников недвижимости Мадрида" : "20–30 Madrid land sources"}
-              </h1>
-              <p className="mt-3 max-w-4xl text-sm leading-6 text-[var(--text-muted)]">
-                {lang === "ru"
-                  ? "Реальные публичные URL для демонстрации Source Feasibility Matrix. Статусы ниже — первоначальная оценка; финальная проверка доступности, robots/Terms и rate limits выполняется live worker."
-                  : "Real public URLs for the Source Feasibility Matrix demo. Statuses below are an initial assessment; final access, robots/Terms and rate-limit checks are performed by the live worker."}
-              </p>
-            </div>
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--gold)]/6 px-4 py-3 text-xs text-[var(--gold-bright)]">
-              30 sources loaded
-            </div>
+          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
+            {lang === "ru" ? "БАЗА ИСТОЧНИКОВ" : "SOURCE BASE"}
           </div>
-        </div>
-
-        
-        <div className="glass rounded-[26px] p-6">
-          <div className="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--cyan)]">
-            LIVE SEARCH SOURCES
-          </div>
-          <h2 className="mt-2 text-2xl font-medium text-[var(--text)]">
-            {lang === "ru" ? "Источники последнего реального поиска" : "Sources from the latest live search"}
-          </h2>
-          <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
+            {lang === "ru" ? "Накопленные источники" : "Accumulated sources"}
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
             {lang === "ru"
-              ? "Эти домены добавляются из фактических live-результатов. Ниже остаётся Stage 1 матрица из 30 предварительно выбранных источников."
-              : "These domains come from actual live results. The 30-source Stage 1 matrix remains below as the planned source baseline."}
+              ? "Каждый поиск добавляет сюда найденные сайты, порталы, каталоги и сообщества. Следующий похожий поиск начинает с них. Источники со входом в аккаунт или запретом автоматизации помечены и не считаются проверенными."
+              : "Every search adds the sites, portals, directories and communities it found. The next similar search starts from them. Sources behind a login or with automation forbidden are marked and never counted as checked."}
           </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {(liveSources.length ? liveSources.slice(0, 20) : ["REALTOR.UA", "DIM.RIA", "OLX", "Prozorro.Sale"]).map((item) => {
-              let label = item;
-              let href = item.startsWith("http") ? item : `https://${item}`;
-              try {
-                label = new URL(item).hostname.replace(/^www\./, "");
-              } catch {}
-              return (
-                <a
-                  key={item}
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-3 py-1.5 text-[11.5px] text-[var(--text-muted)] hover:border-[var(--line)] hover:text-[var(--gold-bright)]"
-                >
-                  {label}
-                </a>
-              );
-            })}
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {summary.map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
+                <div className="text-2xl font-medium text-[var(--text)]">{value}</div>
+                <div className="mt-1 text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">{label}</div>
+              </div>
+            ))}
           </div>
         </div>
 
-<div className="glass overflow-hidden rounded-[26px]">
-          {renderSourceCards()}
-          <div className="thin-scroll hidden overflow-x-auto md:block">
-            <table className="mobile-table w-full border-collapse">
-              <thead>
-                <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">
-                  <th className="px-4 py-4">Source</th>
-                  <th className="px-4 py-4">Category</th>
-                  <th className="px-4 py-4">{lang === "ru" ? "Доступ" : "Access"}</th>
-                  <th className="px-4 py-4">{lang === "ru" ? "Метод" : "Method"}</th>
-                  <th className="px-4 py-4">{lang === "ru" ? "Данные" : "Data available"}</th>
-                  <th className="px-4 py-4">Rate limits</th>
-                  <th className="px-4 py-4">Robots / Terms</th>
-                  <th className="px-4 py-4">Cost</th>
-                  <th className="px-4 py-4">{lang === "ru" ? "Качество" : "Quality"}</th>
-                  <th className="px-4 py-4">{lang === "ru" ? "Решение" : "Decision"}</th>
-                  <th className="px-4 py-4" />
-                </tr>
-              </thead>
-              <tbody>
-                {sourceRegistry.map((source, index) => (
-                  <tr
-                    key={`${source.name}-${source.url}`}
-                    className="border-b border-[var(--line-soft)] last:border-0 hover:bg-white/[.018]"
-                  >
-                    <td className="px-4 py-4 align-top">
-                      <div className="flex gap-2">
-                        <SourceIcon src={sourceFavicon(source.domain)} label={source.name} className="mt-0.5 h-5 w-5" />
-                        <div>
-                          <div className="max-w-[230px] text-xs font-semibold text-[var(--text-soft)]">
-                            {index + 1}. {source.name}
-                          </div>
-                          <div className="mt-1 text-[9px] text-[var(--text-faint)]">
-                            {source.lastChecked}
+        <div className="glass overflow-hidden rounded-[26px]">
+          {!rows.length ? (
+            <div className="p-6 text-sm text-[var(--text-muted)]">
+              {lang === "ru" ? "База пока пуста. Запустите исследование, и найденные источники появятся здесь." : "The base is empty. Run a search and the sources it finds will appear here."}
+            </div>
+          ) : (
+            <div className="thin-scroll overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse">
+                <thead>
+                  <tr className="border-b border-[var(--line-soft)] text-left text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">
+                    <th className="px-4 py-4">{lang === "ru" ? "Источник" : "Source"}</th>
+                    <th className="px-4 py-4">{lang === "ru" ? "Категория" : "Category"}</th>
+                    <th className="px-4 py-4">{lang === "ru" ? "Доступ" : "Access"}</th>
+                    <th className="px-4 py-4">{lang === "ru" ? "Комментарий" : "Note"}</th>
+                    <th className="px-4 py-4" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0, 500).map((source: any, index: number) => (
+                    <tr key={String(source.domain || source.url) + index} className="border-b border-[var(--line-soft)] last:border-0 hover:bg-white/[.018]">
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex gap-2">
+                          <SourceIcon src={sourceFavicon(String(source.domain || ""))} label={String(source.name || source.domain || "")} className="mt-0.5 h-5 w-5" />
+                          <div className="min-w-0">
+                            <div className="max-w-[260px] truncate text-xs font-semibold text-[var(--text-soft)]">{String(source.name || source.domain)}</div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-faint)]">{String(source.domain || "")}</div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-[10px] text-[var(--text-muted)]">{source.category}</td>
-                    <td className="px-4 py-4 text-[10px] text-[var(--text-muted)]">{source.access}</td>
-                    <td className="px-4 py-4 text-[10px] text-[var(--text-muted)]">{source.method}</td>
-                    <td className="max-w-[250px] px-4 py-4 text-[10px] leading-4 text-[var(--text-muted)]">{source.dataAvailable}</td>
-                    <td className="px-4 py-4 text-[10px] text-[var(--text-muted)]">{source.rateLimits}</td>
-                    <td className="px-4 py-4 text-[10px] text-[var(--warning)]">{source.robotsTerms}</td>
-                    <td className="px-4 py-4 text-[10px] text-[var(--text-muted)]">{source.cost}</td>
-                    <td className="px-4 py-4">
-                      <span className="rounded-full bg-[var(--success)]/8 px-2 py-1 text-[10px] text-[var(--success)]">
-                        {source.quality}%
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={`rounded-full px-2 py-1 text-[10px] ${
-                          source.decision === "Keep"
-                            ? "bg-[var(--success)]/8 text-[var(--success)]"
-                            : "bg-[var(--warning)]/8 text-[var(--warning)]"
-                        }`}
-                      >
-                        {source.decision}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <a
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex rounded-lg border border-[var(--line-soft)] p-2 text-[var(--gold-bright)] hover:border-[var(--line)]"
-                        title={t.open}
-                      >
-                        <ExternalLink size={12} />
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-[var(--text-muted)]">{String(source.category || "—").replace(/^web_search:/, "web · ")}</td>
+                      <td className={"px-4 py-3 text-[11px] font-semibold " + tone(status(source))}>{accessLabel(status(source), lang === "ru" ? "ru" : "en")}</td>
+                      <td className="max-w-[320px] px-4 py-3 text-[11px] leading-4 text-[var(--text-muted)]">{String(source.reason || "")}</td>
+                      <td className="px-4 py-3">
+                        {/^https?:\/\//.test(String(source.url || "")) && (
+                          <a href={String(source.url)} target="_blank" rel="noreferrer" className="inline-flex rounded-lg border border-[var(--line-soft)] p-2 text-[var(--gold-bright)] hover:border-[var(--line)]" title={t.open}>
+                            <ExternalLink size={12} />
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
     );
@@ -3163,46 +3164,6 @@ export default function Home() {
     );
   }
 
-  function renderSourceCards() {
-    return (
-      <div className="divide-y divide-[var(--line-soft)] md:hidden">
-        {sourceRegistry.map((source, index) => (
-          <a
-            key={`${source.name}-${source.url}-card`}
-            href={source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex gap-3 px-4 py-4 transition hover:bg-white/[.015]"
-          >
-            <SourceIcon src={sourceFavicon(source.domain)} label={source.name} className="mt-0.5 h-6 w-6" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-3">
-                <div className="text-[13px] font-semibold leading-5 text-[var(--text-soft)]">
-                  {index + 1}. {source.name}
-                </div>
-                <span className="shrink-0 rounded-full bg-[var(--success)]/8 px-2 py-1 text-[10px] text-[var(--success)]">
-                  {source.quality}%
-                </span>
-              </div>
-              <div className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">
-                {[source.category, source.access, source.method].filter(Boolean).join(" · ")}
-              </div>
-              <div className="mt-1 text-[11px] leading-5 text-[var(--text-faint)]">{source.dataAvailable}</div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
-                <span className={`rounded-full px-2 py-0.5 ${source.decision === "Keep" ? "bg-[var(--success)]/8 text-[var(--success)]" : "bg-[var(--warning)]/8 text-[var(--warning)]"}`}>
-                  {source.decision}
-                </span>
-                <span className="text-[var(--warning)]">{source.robotsTerms}</span>
-                <span className="text-[var(--text-faint)]">{source.cost}</span>
-              </div>
-            </div>
-            <ExternalLink size={13} className="mt-1 shrink-0 text-[var(--gold-bright)]" />
-          </a>
-        ))}
-      </div>
-    );
-  }
-
   function renderActiveView() {
     if (activeNav === "tasks") return renderTasks();
     if (activeNav === "sources") return renderSources();
@@ -3259,9 +3220,9 @@ export default function Home() {
                   >
                     <Icon className={`icon-lift icon-foil ${active ? "" : "opacity-60 group-hover:opacity-100"}`} size={17} />
                     <span>{lang === "ru" ? item.ru : item.en}</span>
-                    {item.key === "tasks" && (
+                    {item.key === "tasks" && taskHistory.length > 0 && (
                       <span className="ml-auto rounded-full bg-[var(--surface)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
-                        3
+                        {taskHistory.length}
                       </span>
                     )}
                   </button>

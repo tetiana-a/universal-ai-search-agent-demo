@@ -290,7 +290,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
     pageType: String(item?.page_type || item?.pageType || "entity"),
   }));
   const sourcePlans: AccessEscalationPlan[] = [];
-  const sourceRegistry: LiveSourceRecord[] = (Array.isArray(parsed.source_registry) ? parsed.source_registry : []).slice(0, input.maxSources).map((s: any) => {
+  const sourceRegistry: LiveSourceRecord[] = (Array.isArray(parsed.source_registry) ? parsed.source_registry : []).slice(0, Math.max(input.maxSources, 200)).map((s: any) => {
     const url = normalizeUrl(s?.url); const plan = buildAccessEscalationPlan({
       url, status: String(s?.access_status || "partial"), requiresAuth: String(s?.access_status || "").toLowerCase() === "auth_required",
       rateLimited: String(s?.access_status || "").toLowerCase() === "rate_limited", captcha: String(s?.access_status || "").toLowerCase() === "captcha_required",

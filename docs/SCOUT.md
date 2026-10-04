@@ -6,6 +6,19 @@ The Разведчик module of AURELIUS implements the "AI-агент «Раз
 - Telegram: commands and buttons in the AURELIUS group and in a private chat with the bot
 - Daily run: Vercel Cron `0 6 * * *` (06:00 UTC, 08:00 Madrid in summer) on `/api/scout/cron`
 
+## Universal research agent in Telegram (main TZ)
+
+Any task in plain language goes to the bot: in a private chat with @AURELIUS8_bot just write it; in the AURELIUS group use `/find задача`, mention the bot, or reply to its message.
+
+1. **Understanding.** The bot detects the task type (real estate, investors, companies, people, other) and asks the open clarifying questions one by one, with "Пропустить" and "Искать сейчас" buttons.
+2. **Sources and search.** It runs the same research pipeline as the web app (`runFreeResearch`, or OpenAI deep research on Pro when `OPENAI_API_KEY` is set), round after round. Each round skips pages already reviewed and adds to the saved source base (Upstash).
+3. **Progress.** One status message updates after every round with the TZ counters: sources found, checked, unavailable for automatic analysis, results found, after dedupe, matching criteria. Buttons: ⏹ Остановить · ✏️ Изменить критерии.
+4. **Result.** Summary cards (fields adapt to the task type) plus the full table as Excel and CSV files. Buttons: ▶️ Продолжить поиск · ✏️ Изменить критерии · 🆕 Новая задача.
+
+Stop takes effect after the current round. Changing the criteria restarts the search with the new criteria appended to the task. `/status` shows the current task. Only the control chats (`TELEGRAM_ALLOWED_CHAT_IDS`) can run searches.
+
+Optional: `TG_RESEARCH_ROUNDS` (rounds per run, default 3), `TG_RESEARCH_BUDGET_MS` (time budget per run, default 230000).
+
 ## Spec coverage
 
 | Spec | Status | Where |
