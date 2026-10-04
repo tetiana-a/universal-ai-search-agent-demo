@@ -7,6 +7,7 @@ import { matchCountries, detectGoals, detectSegments, classifyInvestorKind } fro
 import { addToStopList, decideDraft, forgetContact, markSent } from "@/lib/scout/outreach";
 import { advanceDialog, GREETING, questionFor } from "@/lib/scout/qualification";
 import { sendDailyReport } from "@/lib/scout/report";
+import { requestResearchStop } from "@/lib/scout/research-bot";
 import { runScan } from "@/lib/scout/scan";
 import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
@@ -74,6 +75,10 @@ export async function POST(request: Request) {
     }
     case "report.send":
       return Response.json(await sendDailyReport("human"));
+    case "research.cancel": {
+      const result = await requestResearchStop(str(body.chatId, 80), "human");
+      return Response.json(result, { status: result.ok ? 200 : 404 });
+    }
     case "source.state": {
       const state = str(body.state, 20) as any;
       if (!["approved", "rejected", "disabled", "candidate"].includes(state)) return Response.json({ ok: false, error: "bad state" }, { status: 400 });

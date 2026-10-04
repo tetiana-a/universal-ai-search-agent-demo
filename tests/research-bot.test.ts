@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, mockFetch } from "./helpers";
 import { handleUpdate } from "@/lib/scout/bot";
-import { loadTask, mergeRound, newTask, runRounds, saveTask, type RoundRunner } from "@/lib/scout/research-bot";
+import { listRecentResearchTasks, loadTask, mergeRound, newTask, requestResearchStop, runRounds, saveTask, type RoundRunner } from "@/lib/scout/research-bot";
 import { resetMemoryStore, setValue } from "@/lib/scout/store";
 
 const GROUP = "-5415363237";
@@ -117,6 +117,31 @@ describe("universal research in Telegram", () => {
     expect(task.counters.sourcesDiscovered).toBe(12);
     expect(task.counters.sourcesChecked).toBe(1);
     expect(task.counters.sourcesUnavailable).toBe(2);
+  });
+
+  it("persists lifecycle checkpoints and exposes recent task history", async () => {
+    telegram();
+    const task = { ...newTask(OWNER, OWNER, "Find VC investors in Amsterdam for B2B SaaS, seed €500k"), state: "running" as const, runId: "run_history", statusMessageId: 42 };
+    await saveTask(task);
+    await runRounds(OWNER, async () => ({ results: [result("https://northwave.vc/")], sourceRegistry: [{ url: "https://northwave.vc/", accessStatus: "checked" }], continuation: { canContinue: false } }));
+    const done = await loadTask(OWNER);
+    expect(done?.stage).toBe("completed");
+    expect(done?.attempt).toBeGreaterThanOrEqual(0);
+    expect(done?.events.some((event) => event.stage === "searching")).toBe(true);
+    expect(done?.events.some((event) => event.stage === "completed")).toBe(true);
+    const recent = await listRecentResearchTasks();
+    expect(recent[0]).toMatchObject({ id: done?.id, chatId: OWNER, state: "done", stage: "completed" });
+  });
+
+  it("cancels a clarifying task immediately instead of leaving a dead conversation", async () => {
+    telegram();
+    const task = newTask(OWNER, OWNER, "Найди инвесторов для проекта");
+    expect(task.state).toBe("clarifying");
+    await saveTask(task);
+    const stopped = await requestResearchStop(OWNER);
+    expect(stopped.ok).toBe(true);
+    expect((await loadTask(OWNER))?.state).toBe("stopped");
+    expect((await loadTask(OWNER))?.stage).toBe("stopped");
   });
 
   it("runs rounds, updates the status message and delivers Excel + CSV", async () => {

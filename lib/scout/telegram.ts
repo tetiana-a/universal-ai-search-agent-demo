@@ -130,6 +130,8 @@ export const BOT_COMMANDS = [
   { command: "health", description: "Диагностика Telegram и AI" },
   { command: "find", description: "Новый поиск: что найти" },
   { command: "status", description: "Прогресс текущего поиска" },
+  { command: "tasks", description: "Последние задачи поиска" },
+  { command: "results", description: "Последние результаты" },
   { command: "report", description: "Отчёт за сегодня" },
   { command: "scan", description: "Запустить обход сейчас" },
   { command: "objects", description: "Топ объектов" },

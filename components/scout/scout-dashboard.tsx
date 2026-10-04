@@ -2,22 +2,66 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Building2, CalendarPlus, Check, Database, Flame, Handshake, KeyRound, Landmark, Link2, MapPin, MessageSquare, Pencil, Plug,
+  Activity, Building2, CalendarPlus, Check, Database, Flame, Handshake, KeyRound, Landmark, Link2, ListChecks, MapPin, MessageSquare, Pencil, Plug,
   Radar, RefreshCw, ScrollText, Send, Settings2, ShieldCheck, Sparkles, Telescope, Trash2, Upload, Users, X,
 } from "lucide-react";
 import type { AgencyCard, Draft, InvestorCard, Lead, LogEntry, Match, Meeting, ObjectCard, ScanStats, ScoutSettings, ScoutSource, WatchItem } from "@/lib/scout/types";
 
 type AdapterInfo = { id: string; label: string; enabled: boolean; needs: string; note: string };
+type ResearchTaskRow = {
+  id: string;
+  chatId: string;
+  ownerId: string;
+  query: string;
+  kind: string;
+  state: string;
+  stage?: string;
+  attempt?: number;
+  round: number;
+  counters: {
+    sourcesDiscovered: number;
+    sourcesChecked: number;
+    afterDedupe: number;
+    matchingCriteria: number;
+    needsReview: number;
+  };
+  quality?: {
+    score: number;
+    evidenceCoverage: number;
+    gatePassRate: number;
+    verifiedRate: number;
+    reviewRate: number;
+    sourceDiversity: number;
+  };
+  error?: string;
+  startedAt: string;
+  updatedAt: string;
+};
+
+type HealthCheckRow = { id: string; label: string; level: "ok" | "warning" | "error"; detail: string };
+type HealthState = {
+  ok: boolean;
+  checkedAt: string;
+  checks: HealthCheckRow[];
+  telegram: { configured: boolean; apiOk: boolean; username?: string; webhookConfigured: boolean; webhookUrl?: string; webhookError?: string; pendingUpdates?: number; reportChatId?: string };
+  persistence: { configured: boolean; roundTrip: boolean };
+  ai: { zeroCost: boolean; providers: Array<{ provider: string; model: string }>; deterministicFallback: boolean };
+  search: { providers: string[]; directRead: boolean };
+  security: { adminProtected: boolean; webhookSecretConfigured: boolean };
+};
+
 type State = {
   ok: boolean; persistent: boolean; protected: boolean; telegram: { token: boolean; chatId: string }; adapters: AdapterInfo[]; settings: ScoutSettings; lastScan: ScanStats | null;
   report: { data: any; html: string }; objects: ObjectCard[]; investors: InvestorCard[]; agencies: AgencyCard[]; sources: ScoutSource[]; watch: WatchItem[];
-  drafts: Draft[]; leads: Lead[]; matches: Match[]; meetings: Meeting[]; log: LogEntry[];
+  drafts: Draft[]; leads: Lead[]; matches: Match[]; meetings: Meeting[]; researchTasks: ResearchTaskRow[]; log: LogEntry[];
 };
 
-type Tab = "report" | "objects" | "investors" | "agencies" | "matches" | "leads" | "drafts" | "intel" | "settings" | "log";
+type Tab = "report" | "tasks" | "health" | "objects" | "investors" | "agencies" | "matches" | "leads" | "drafts" | "intel" | "settings" | "log";
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Radar; color: string }> = [
   { id: "report", label: "Отчёт", icon: Sparkles, color: "#ffd60a" },
+  { id: "tasks", label: "Задачи", icon: ListChecks, color: "#64d2ff" },
+  { id: "health", label: "Health", icon: Activity, color: "#30d158" },
   { id: "objects", label: "Объекты", icon: Building2, color: "#ff9500" },
   { id: "investors", label: "Инвесторы", icon: Landmark, color: "#34c759" },
   { id: "agencies", label: "Агентства", icon: Handshake, color: "#00c7be" },
@@ -125,7 +169,9 @@ function ScoreBadge({ score }: { score: number }) {
   return <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-sm font-semibold tabular-nums" style={{ color, borderColor: color }}>{score}</span>;
 }
 
-function Chip({ children, tone = "muted" }: { children: ReactNode; tone?: "muted" | "gold" | "green" | "red" | "blue" | "violet" }) {
+type ChipTone = "muted" | "gold" | "green" | "red" | "blue" | "violet";
+
+function Chip({ children, tone = "muted" }: Readonly<{ children: ReactNode; tone?: ChipTone }>) {
   const tones = { muted: "border-[var(--line-soft)] text-[var(--text-muted)]", gold: "border-[var(--gold)]/40 text-[var(--gold-bright)]", green: "border-[#34c759]/40 text-[#34c759]", red: "border-[#ff375f]/40 text-[#ff375f]", blue: "border-[#0a84ff]/40 text-[#0a84ff]", violet: "border-[#af52de]/40 text-[#af52de]" };
   return <span className={"inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] " + tones[tone]}>{children}</span>;
 }
@@ -216,6 +262,8 @@ export default function ScoutDashboard() {
     leads: state.leads.filter((l) => l.state === "qualified" || l.state === "escalated").length,
     intel: state.sources.filter((s) => s.state === "candidate").length,
     matches: state.matches.filter((m) => m.state === "proposed").length,
+    tasks: state.researchTasks.filter((t) => t.state === "running" || t.state === "clarifying").length,
+    health: state.persistent && state.telegram.token ? 0 : 1,
   } : {};
 
   return (
@@ -269,6 +317,8 @@ export default function ScoutDashboard() {
         )}
 
         {state && tab === "report" && <ReportTab state={state} act={act} busy={busy} headers={headers} setToast={setToast} />}
+        {state && tab === "tasks" && <TasksTab state={state} act={act} />}
+        {state && tab === "health" && <HealthTab headers={headers} />}
         {state && tab === "objects" && <ObjectsTab state={state} act={act} focusId={focusId} place={place} query={query} setQuery={setQuery} />}
         {state && tab === "investors" && <InvestorsTab state={state} act={act} focusId={focusId} />}
         {state && tab === "agencies" && <AgenciesTab state={state} act={act} />}
@@ -745,6 +795,179 @@ function SettingsTab({ state, act }: { state: State; act: Act }) {
         </ul>
       </Panel>
     </div>
+  );
+}
+
+function taskTone(state: string): ChipTone {
+  if (state === "done") return "green";
+  if (state === "failed") return "red";
+  if (state === "stopped") return "muted";
+  return "blue";
+}
+
+function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
+  const tasks = state.researchTasks || [];
+  const active = tasks.filter((task) => task.state === "running" || task.state === "clarifying");
+  const failed = tasks.filter((task) => task.state === "failed");
+  const complete = tasks.filter((task) => task.state === "done");
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Kpi label="Активные" value={active.length} color="#64d2ff" />
+        <Kpi label="Завершены" value={complete.length} color="#34c759" />
+        <Kpi label="Ошибки" value={failed.length} color="#ff375f" />
+        <Kpi label="Всего сохранено" value={tasks.length} color="#ffd60a" />
+      </div>
+      <Panel title="Research jobs" icon={ListChecks} color="#64d2ff">
+        {!tasks.length ? <Empty>Задач пока нет. Запустите поиск через Telegram /find или обычным сообщением администратору.</Empty> : (
+          <div className="space-y-3">
+            {tasks.map((task) => (
+              <article key={task.id} className="glass-soft rounded-2xl p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs text-[var(--text-faint)]">{task.id}</span>
+                    <Chip tone={taskTone(task.state)}>{task.state}</Chip>
+                    <Chip tone="blue">{task.stage || task.state}</Chip>
+                    <Chip>attempt {task.attempt || 0}</Chip>
+                    <Chip>round {task.round}</Chip>
+                  </div>
+                  <span className="text-xs text-[var(--text-faint)]">{when(task.updatedAt)}</span>
+                </div>
+                <p className="mt-2 text-sm text-[var(--text)]">{task.query}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
+                  <div><span className="text-[var(--text-faint)]">Источники</span><div className="text-lg tabular-nums">{task.counters.sourcesChecked}</div></div>
+                  <div><span className="text-[var(--text-faint)]">Найдено</span><div className="text-lg tabular-nums">{task.counters.afterDedupe}</div></div>
+                  <div><span className="text-[var(--text-faint)]">Verified</span><div className="text-lg tabular-nums text-[#34c759]">{task.counters.matchingCriteria}</div></div>
+                  <div><span className="text-[var(--text-faint)]">Review</span><div className="text-lg tabular-nums text-[#ffd60a]">{task.counters.needsReview}</div></div>
+                  <div><span className="text-[var(--text-faint)]">Quality</span><div className="text-lg tabular-nums">{task.quality?.score ?? 0}%</div></div>
+                  <div><span className="text-[var(--text-faint)]">Evidence</span><div className="text-lg tabular-nums">{task.quality?.evidenceCoverage ?? 0}%</div></div>
+                </div>
+                {task.error && <p className="mt-2 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-2 text-xs text-[#ff7a93]">{task.error}</p>}
+                {(task.state === "running" || task.state === "clarifying") && (
+                  <div className="mt-3">
+                    <Button variant="danger" onClick={() => void act("research.cancel", { chatId: task.chatId }, "research.cancel")}><X size={13} />Остановить задачу</Button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function healthTone(level: HealthCheckRow["level"]): ChipTone {
+  if (level === "ok") return "green";
+  if (level === "warning") return "gold";
+  return "red";
+}
+
+function healthStatus(value: boolean, okLabel: string, failLabel: string, okColor: string, failColor: string) {
+  return value ? { value: okLabel, color: okColor } : { value: failLabel, color: failColor };
+}
+
+function HealthSummary({ health }: Readonly<{ health: HealthState }>) {
+  const overall = healthStatus(health.ok, "OK", "ATTN", "#34c759", "#ff9500");
+  const redis = healthStatus(health.persistence.roundTrip, "OK", "FAIL", "#34c759", "#ff375f");
+  const telegram = healthStatus(health.telegram.apiOk, "OK", "FAIL", "#34c759", "#ff375f");
+  const zeroCost = healthStatus(health.ai.zeroCost, "ON", "OFF", "#34c759", "#ffd60a");
+
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <Kpi label="Общий статус" value={overall.value} color={overall.color} />
+      <Kpi label="Redis" value={redis.value} color={redis.color} />
+      <Kpi label="Telegram" value={telegram.value} color={telegram.color} />
+      <Kpi label="Zero-cost" value={zeroCost.value} color={zeroCost.color} />
+    </div>
+  );
+}
+
+function HealthChecks({ checks }: Readonly<{ checks: HealthCheckRow[] }>) {
+  return (
+    <div className="space-y-2">
+      {checks.map((item) => (
+        <div key={item.id} className="glass-soft flex flex-col gap-1 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <Chip tone={healthTone(item.level)}>{item.level.toUpperCase()}</Chip>
+            <span className="font-medium">{item.label}</span>
+          </div>
+          <span className="text-xs text-[var(--text-muted)] sm:max-w-[65%] sm:text-right">{item.detail}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HealthDetails({ health }: Readonly<{ health: HealthState }>) {
+  const searchLabel = health.search.providers.join(", ") || "none";
+  const directReadLabel = health.search.directRead ? " + direct read" : "";
+  const aiLabel = health.ai.providers.length
+    ? health.ai.providers.map((provider) => provider.provider + ":" + provider.model).join(", ")
+    : "deterministic fallback only";
+
+  return (
+    <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="glass-soft rounded-2xl p-3 text-xs text-[var(--text-muted)]">
+        <div className="mb-1 font-medium text-[var(--text)]">Search</div>
+        {searchLabel}{directReadLabel}
+      </div>
+      <div className="glass-soft rounded-2xl p-3 text-xs text-[var(--text-muted)]">
+        <div className="mb-1 font-medium text-[var(--text)]">AI</div>
+        {aiLabel}
+      </div>
+    </div>
+  );
+}
+
+function HealthContent({ health }: Readonly<{ health: HealthState | null }>) {
+  if (!health) return <Empty>Проверяю Telegram, Redis, AI route, search и security…</Empty>;
+  return (
+    <div>
+      <HealthSummary health={health} />
+      <HealthChecks checks={health.checks} />
+      <HealthDetails health={health} />
+    </div>
+  );
+}
+
+function HealthTab({ headers }: Readonly<{ headers: () => Record<string, string> }>) {
+  const [health, setHealth] = useState<HealthState | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/scout/health", { headers: headers(), cache: "no-store" });
+      const data = await response.json().catch(() => null);
+      if (!data) {
+        setError("Не удалось прочитать health endpoint.");
+        return;
+      }
+      setHealth(data);
+      if (!response.ok && !data.checks) setError(data.error || "Health check failed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Health check failed.");
+    } finally {
+      setLoading(false);
+    }
+  }, [headers]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  return (
+    <Panel
+      title="Production health"
+      icon={Activity}
+      color="#30d158"
+      actions={<Button onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />{loading ? "Проверяю…" : "Проверить снова"}</Button>}
+    >
+      {error && <div className="mb-3 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-3 text-sm text-[#ff7a93]">{error}</div>}
+      <HealthContent health={health} />
+    </Panel>
   );
 }
 
