@@ -125,6 +125,7 @@ export async function editMessage(chatId: string | number, messageId: number, ht
 }
 
 export const BOT_COMMANDS = [
+  { command: "panel", description: "Панель управления AURELIUS" },
   { command: "find", description: "Новый поиск: что найти" },
   { command: "status", description: "Прогресс текущего поиска" },
   { command: "report", description: "Отчёт за сегодня" },
