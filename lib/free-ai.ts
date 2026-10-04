@@ -2,10 +2,10 @@
 // answers. Every provider here has a free tier; Pro can point OpenRouter at a
 // stronger paid model with PRO_OPENROUTER_MODEL.
 
-export type AiProviderId = "ollama" | "openrouter" | "gemini" | "groq";
+export type AiProviderId = "openrouter" | "gemini" | "groq";
 export type Edition = "free" | "pro";
 
-type AiProvider = { id: AiProviderId; label: string; endpoint: string; key?: string; model: string; models?: string[]; headers?: Record<string, string> };
+type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: string; model: string; models?: string[]; headers?: Record<string, string> };
 
 // Free OpenRouter model IDs come and go. When OPENROUTER_MODEL is not set, the current
 // free models are read from OpenRouter's public model list and the best few are tried in
@@ -87,30 +87,24 @@ async function freeOpenRouterModels(): Promise<string[]> {
 export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   const out: AiProvider[] = [];
   const zeroCost = process.env.ZERO_COST_MODE === "on";
-
-  // Optional local provider. Useful for self-hosting, ignored in pure cloud deployments.
-  const ollamaBase = String(process.env.OLLAMA_BASE_URL || "").trim().replace(/\/$/, "");
-  if (ollamaBase) {
-    out.push({
-      id: "ollama",
-      label: "Ollama Local",
-      endpoint: ollamaBase + "/v1/chat/completions",
-      model: String(process.env.OLLAMA_MODEL || "qwen2.5:7b").trim(),
-    });
-  }
-
-  // Cloud zero-cost mode: OpenRouter is allowed only through a zero-priced route/model.
-  // This keeps the app fully cloud-hosted while preventing accidental paid inference.
   const openRouterKey = String(process.env.OPENROUTER_API_KEY || "").trim();
+
   if (openRouterKey) {
-    const requested = String((edition === "pro" && process.env.PRO_OPENROUTER_MODEL) || process.env.OPENROUTER_MODEL || "").trim();
-    const configured = zeroCost ? (requested && (requested === "openrouter/free" || requested.endsWith(":free")) ? requested : "openrouter/free") : requested;
+    const requested = String(
+      (edition === "pro" && process.env.PRO_OPENROUTER_MODEL) ||
+      process.env.OPENROUTER_MODEL ||
+      "",
+    ).trim();
+    const freeOnlyModel = requested === "openrouter/free" || requested.endsWith(":free")
+      ? requested
+      : "openrouter/free";
+
     out.push({
       id: "openrouter",
       label: zeroCost ? "OpenRouter Free" : "OpenRouter",
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
       key: openRouterKey,
-      model: configured || "auto-free",
+      model: zeroCost ? freeOnlyModel : requested || "auto-free",
       headers: {
         "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://universal-ai-search-agent-demo.vercel.app",
         "X-Title": "Aurelius Universal AI Research Engine",
@@ -118,7 +112,8 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
     });
   }
 
-  // In strict zero-cost mode do not call providers whose selected model might be billable.
+  // Strict zero-cost mode must never fall through to a provider whose selected
+  // model could become billable. Deterministic extraction remains the fallback.
   if (zeroCost) return out;
 
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
@@ -131,6 +126,7 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
     });
   }
+
   const groqKey = String(process.env.GROQ_API_KEY || "").trim();
   if (groqKey) {
     out.push({
@@ -141,6 +137,7 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
     });
   }
+
   return out;
 }
 
@@ -176,14 +173,14 @@ export async function runStructuredExtraction(options: {
   const providers = configuredAiProviders(options.edition || "free");
   const attempts: AiAttempt[] = [];
   if (!providers.length) {
-    return { parsed: null, usage: null, attempts, error: "No zero-cost AI provider is configured. For cloud mode set OPENROUTER_API_KEY; for local mode set OLLAMA_BASE_URL. Deterministic extraction will continue with manual review." };
+    return { parsed: null, usage: null, attempts, error: "No eligible AI provider is configured; results were extracted by rules and need manual review." };
   }
   // One call to one model. A model that rejects response_format is retried once without it.
   async function call(provider: AiProvider, model: string, timeoutMs: number, withFormat: boolean) {
     const user = options.user + "\n\nJSON SCHEMA (follow exactly, return only the JSON object):\n" + JSON.stringify(options.schema);
     const response = await fetch(provider.endpoint, {
       method: "POST",
-      headers: { ...(provider.key ? { Authorization: "Bearer " + provider.key } : {}), "Content-Type": "application/json", ...(provider.headers || {}) },
+      headers: { Authorization: "Bearer " + provider.key, "Content-Type": "application/json", ...(provider.headers || {}) },
       body: JSON.stringify({
         model,
         messages: [{ role: "system", content: options.system }, { role: "user", content: user }],
