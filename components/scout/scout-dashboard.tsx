@@ -169,7 +169,9 @@ function ScoreBadge({ score }: { score: number }) {
   return <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-sm font-semibold tabular-nums" style={{ color, borderColor: color }}>{score}</span>;
 }
 
-function Chip({ children, tone = "muted" }: { children: ReactNode; tone?: "muted" | "gold" | "green" | "red" | "blue" | "violet" }) {
+type ChipTone = "muted" | "gold" | "green" | "red" | "blue" | "violet";
+
+function Chip({ children, tone = "muted" }: Readonly<{ children: ReactNode; tone?: ChipTone }>) {
   const tones = { muted: "border-[var(--line-soft)] text-[var(--text-muted)]", gold: "border-[var(--gold)]/40 text-[var(--gold-bright)]", green: "border-[#34c759]/40 text-[#34c759]", red: "border-[#ff375f]/40 text-[#ff375f]", blue: "border-[#0a84ff]/40 text-[#0a84ff]", violet: "border-[#af52de]/40 text-[#af52de]" };
   return <span className={"inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] " + tones[tone]}>{children}</span>;
 }
@@ -796,16 +798,21 @@ function SettingsTab({ state, act }: { state: State; act: Act }) {
   );
 }
 
-function TasksTab({ state, act }: { state: State; act: Act }) {
-  const tasks = state.researchTasks || [];
-  const active = tasks.filter((t) => t.state === "running" || t.state === "clarifying");
-  const failed = tasks.filter((t) => t.state === "failed");
-  const complete = tasks.filter((t) => t.state === "done");
+function taskTone(state: string): ChipTone {
+  if (state === "done") return "green";
+  if (state === "failed") return "red";
+  if (state === "stopped") return "muted";
+  return "blue";
+}
 
-  const toneFor = (task: ResearchTaskRow) => task.state === "done" ? "green" : task.state === "failed" ? "red" : task.state === "stopped" ? "muted" : "blue";
+function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
+  const tasks = state.researchTasks || [];
+  const active = tasks.filter((task) => task.state === "running" || task.state === "clarifying");
+  const failed = tasks.filter((task) => task.state === "failed");
+  const complete = tasks.filter((task) => task.state === "done");
 
   return (
-    <>
+    <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi label="Активные" value={active.length} color="#64d2ff" />
         <Kpi label="Завершены" value={complete.length} color="#34c759" />
@@ -820,7 +827,7 @@ function TasksTab({ state, act }: { state: State; act: Act }) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs text-[var(--text-faint)]">{task.id}</span>
-                    <Chip tone={toneFor(task) as any}>{task.state}</Chip>
+                    <Chip tone={taskTone(task.state)}>{task.state}</Chip>
                     <Chip tone="blue">{task.stage || task.state}</Chip>
                     <Chip>attempt {task.attempt || 0}</Chip>
                     <Chip>round {task.round}</Chip>
@@ -847,11 +854,85 @@ function TasksTab({ state, act }: { state: State; act: Act }) {
           </div>
         )}
       </Panel>
-    </>
+    </div>
   );
 }
 
-function HealthTab({ headers }: { headers: () => Record<string, string> }) {
+function healthTone(level: HealthCheckRow["level"]): ChipTone {
+  if (level === "ok") return "green";
+  if (level === "warning") return "gold";
+  return "red";
+}
+
+function healthStatus(value: boolean, okLabel: string, failLabel: string, okColor: string, failColor: string) {
+  return value ? { value: okLabel, color: okColor } : { value: failLabel, color: failColor };
+}
+
+function HealthSummary({ health }: Readonly<{ health: HealthState }>) {
+  const overall = healthStatus(health.ok, "OK", "ATTN", "#34c759", "#ff9500");
+  const redis = healthStatus(health.persistence.roundTrip, "OK", "FAIL", "#34c759", "#ff375f");
+  const telegram = healthStatus(health.telegram.apiOk, "OK", "FAIL", "#34c759", "#ff375f");
+  const zeroCost = healthStatus(health.ai.zeroCost, "ON", "OFF", "#34c759", "#ffd60a");
+
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <Kpi label="Общий статус" value={overall.value} color={overall.color} />
+      <Kpi label="Redis" value={redis.value} color={redis.color} />
+      <Kpi label="Telegram" value={telegram.value} color={telegram.color} />
+      <Kpi label="Zero-cost" value={zeroCost.value} color={zeroCost.color} />
+    </div>
+  );
+}
+
+function HealthChecks({ checks }: Readonly<{ checks: HealthCheckRow[] }>) {
+  return (
+    <div className="space-y-2">
+      {checks.map((item) => (
+        <div key={item.id} className="glass-soft flex flex-col gap-1 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <Chip tone={healthTone(item.level)}>{item.level.toUpperCase()}</Chip>
+            <span className="font-medium">{item.label}</span>
+          </div>
+          <span className="text-xs text-[var(--text-muted)] sm:max-w-[65%] sm:text-right">{item.detail}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HealthDetails({ health }: Readonly<{ health: HealthState }>) {
+  const searchLabel = health.search.providers.join(", ") || "none";
+  const directReadLabel = health.search.directRead ? " + direct read" : "";
+  const aiLabel = health.ai.providers.length
+    ? health.ai.providers.map((provider) => provider.provider + ":" + provider.model).join(", ")
+    : "deterministic fallback only";
+
+  return (
+    <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="glass-soft rounded-2xl p-3 text-xs text-[var(--text-muted)]">
+        <div className="mb-1 font-medium text-[var(--text)]">Search</div>
+        {searchLabel}{directReadLabel}
+      </div>
+      <div className="glass-soft rounded-2xl p-3 text-xs text-[var(--text-muted)]">
+        <div className="mb-1 font-medium text-[var(--text)]">AI</div>
+        {aiLabel}
+      </div>
+    </div>
+  );
+}
+
+function HealthContent({ health }: Readonly<{ health: HealthState | null }>) {
+  if (!health) return <Empty>Проверяю Telegram, Redis, AI route, search и security…</Empty>;
+  return (
+    <div>
+      <HealthSummary health={health} />
+      <HealthChecks checks={health.checks} />
+      <HealthDetails health={health} />
+    </div>
+  );
+}
+
+function HealthTab({ headers }: Readonly<{ headers: () => Record<string, string> }>) {
   const [health, setHealth] = useState<HealthState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -878,42 +959,15 @@ function HealthTab({ headers }: { headers: () => Record<string, string> }) {
   useEffect(() => { void refresh(); }, [refresh]);
 
   return (
-    <>
-      <Panel title="Production health" icon={Activity} color="#30d158" actions={<Button onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />{loading ? "Проверяю…" : "Проверить снова"}</Button>}>
-        {error && <div className="mb-3 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-3 text-sm text-[#ff7a93]">{error}</div>}
-        {!health ? <Empty>Проверяю Telegram, Redis, AI route, search и security…</Empty> : (
-          <>
-            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Kpi label="Общий статус" value={health.ok ? "OK" : "ATTN"} color={health.ok ? "#34c759" : "#ff9500"} />
-              <Kpi label="Redis" value={health.persistence.roundTrip ? "OK" : "FAIL"} color={health.persistence.roundTrip ? "#34c759" : "#ff375f"} />
-              <Kpi label="Telegram" value={health.telegram.apiOk ? "OK" : "FAIL"} color={health.telegram.apiOk ? "#34c759" : "#ff375f"} />
-              <Kpi label="Zero-cost" value={health.ai.zeroCost ? "ON" : "OFF"} color={health.ai.zeroCost ? "#34c759" : "#ffd60a"} />
-            </div>
-            <div className="space-y-2">
-              {health.checks.map((item) => {
-                const tone = item.level === "ok" ? "green" : item.level === "warning" ? "gold" : "red";
-                return (
-                  <div key={item.id} className="glass-soft flex flex-col gap-1 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2"><Chip tone={tone as any}>{item.level.toUpperCase()}</Chip><span className="font-medium">{item.label}</span></div>
-                    <span className="text-xs text-[var(--text-muted)] sm:max-w-[65%] sm:text-right">{item.detail}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="glass-soft rounded-2xl p-3 text-xs text-[var(--text-muted)]">
-                <div className="mb-1 font-medium text-[var(--text)]">Search</div>
-                {health.search.providers.join(", ") || "none"}{health.search.directRead ? " + direct read" : ""}
-              </div>
-              <div className="glass-soft rounded-2xl p-3 text-xs text-[var(--text-muted)]">
-                <div className="mb-1 font-medium text-[var(--text)]">AI</div>
-                {health.ai.providers.length ? health.ai.providers.map((p) => p.provider + ":" + p.model).join(", ") : "deterministic fallback only"}
-              </div>
-            </div>
-          </>
-        )}
-      </Panel>
-    </>
+    <Panel
+      title="Production health"
+      icon={Activity}
+      color="#30d158"
+      actions={<Button onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} />{loading ? "Проверяю…" : "Проверить снова"}</Button>}
+    >
+      {error && <div className="mb-3 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-3 text-sm text-[#ff7a93]">{error}</div>}
+      <HealthContent health={health} />
+    </Panel>
   );
 }
 
