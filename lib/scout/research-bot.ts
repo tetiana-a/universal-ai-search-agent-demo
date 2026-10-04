@@ -181,15 +181,42 @@ function checkpoint(task: ResearchTask, stage: ResearchStage, note?: string) {
   return task;
 }
 
+function operationalStageFor(state: TaskState): ResearchStage {
+  if (state === "done") return "completed";
+  if (state === "failed") return "failed";
+  if (state === "stopped") return "stopped";
+  if (state === "clarifying") return "clarifying";
+  return "searching";
+}
+
+function deliveryStageFor(state: TaskState): ResearchStage {
+  if (state === "done") return "delivering";
+  if (state === "stopped") return "stopped";
+  return "failed";
+}
+
 export type ResearchTaskSummary = Pick<ResearchTask, "id" | "chatId" | "ownerId" | "query" | "kind" | "state" | "stage" | "attempt" | "round" | "counters" | "quality" | "error" | "startedAt" | "updatedAt">;
 
 export async function listRecentResearchTasks(limit = 30): Promise<ResearchTaskSummary[]> {
   const tasks = await listAll<ResearchTask>("research_tasks");
-  return tasks
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const ordered = tasks.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return ordered
     .slice(0, Math.max(1, Math.min(limit, 100)))
     .map(({ id, chatId, ownerId, query, kind, state, stage, attempt, round, counters, quality, error, startedAt, updatedAt }) => ({
-      id, chatId, ownerId, query, kind, state, stage: stage || (state === "done" ? "completed" : state === "failed" ? "failed" : state === "stopped" ? "stopped" : state === "clarifying" ? "clarifying" : "searching"), attempt: attempt || 0, round, counters, quality: quality || researchQuality([]), error, startedAt, updatedAt,
+      id,
+      chatId,
+      ownerId,
+      query,
+      kind,
+      state,
+      stage: stage || operationalStageFor(state),
+      attempt: attempt || 0,
+      round,
+      counters,
+      quality: quality || researchQuality([]),
+      error,
+      startedAt,
+      updatedAt,
     }));
 }
 
@@ -462,7 +489,7 @@ export async function runRounds(chatId: string, runner: RoundRunner = defaultRun
   }
   if (await superseded()) return;
   if (task.state === "running") task.state = "done";
-  checkpoint(task, task.state === "done" ? "delivering" : task.state === "stopped" ? "stopped" : "failed", "research rounds finished");
+  checkpoint(task, deliveryStageFor(task.state), "research rounds finished");
   await deleteValue(STOP_KEY + chatId);
   await saveTask(task);
   await logAction({ actor: "bot", action: "research." + task.state, detail: task.results.length + " results · " + task.query.slice(0, 80) });
@@ -540,7 +567,7 @@ export async function applyCriteriaChange(chatId: string, text: string, runner: 
     answers: {}, questions: [], step: 0, round: 0, seenUrls: [], canContinue: true,
     results: [], sources: [], counters: { ...EMPTY_COUNTERS }, quality: researchQuality([]), error: undefined,
     stage: "queued",
-    events: [...(task.events || []), { at: new Date().toISOString(), stage: "queued", note: "criteria changed" }].slice(-40),
+    events: [...(task.events || []), { at: new Date().toISOString(), stage: "queued" as const, note: "criteria changed" }].slice(-40),
   };
   await deleteValue(STOP_KEY + chatId);
   await logAction({ actor: "human", action: "research.criteria", detail: text.slice(0, 120) });
