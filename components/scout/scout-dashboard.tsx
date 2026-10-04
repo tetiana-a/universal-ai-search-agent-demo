@@ -25,6 +25,14 @@ type ResearchTaskRow = {
     matchingCriteria: number;
     needsReview: number;
   };
+  quality?: {
+    score: number;
+    evidenceCoverage: number;
+    gatePassRate: number;
+    verifiedRate: number;
+    reviewRate: number;
+    sourceDiversity: number;
+  };
   error?: string;
   startedAt: string;
   updatedAt: string;
@@ -820,12 +828,13 @@ function TasksTab({ state, act }: { state: State; act: Act }) {
                   <span className="text-xs text-[var(--text-faint)]">{when(task.updatedAt)}</span>
                 </div>
                 <p className="mt-2 text-sm text-[var(--text)]">{task.query}</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
                   <div><span className="text-[var(--text-faint)]">Источники</span><div className="text-lg tabular-nums">{task.counters.sourcesChecked}</div></div>
                   <div><span className="text-[var(--text-faint)]">Найдено</span><div className="text-lg tabular-nums">{task.counters.afterDedupe}</div></div>
                   <div><span className="text-[var(--text-faint)]">Verified</span><div className="text-lg tabular-nums text-[#34c759]">{task.counters.matchingCriteria}</div></div>
                   <div><span className="text-[var(--text-faint)]">Review</span><div className="text-lg tabular-nums text-[#ffd60a]">{task.counters.needsReview}</div></div>
-                  <div><span className="text-[var(--text-faint)]">Discovered</span><div className="text-lg tabular-nums">{task.counters.sourcesDiscovered}</div></div>
+                  <div><span className="text-[var(--text-faint)]">Quality</span><div className="text-lg tabular-nums">{task.quality?.score ?? 0}%</div></div>
+                  <div><span className="text-[var(--text-faint)]">Evidence</span><div className="text-lg tabular-nums">{task.quality?.evidenceCoverage ?? 0}%</div></div>
                 </div>
                 {task.error && <p className="mt-2 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-2 text-xs text-[#ff7a93]">{task.error}</p>}
                 {(task.state === "running" || task.state === "clarifying") && (
