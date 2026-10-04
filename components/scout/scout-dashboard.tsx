@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CalendarPlus, Check, Database, Flame, Handshake, KeyRound, Landmark, Link2, ListChecks, MapPin, MessageSquare, Pencil, Plug,
-  Radar, RefreshCw, ScrollText, Send, Settings2, ShieldCheck, Sparkles, Telescope, Trash2, Upload, Users, X,
+  Moon, PanelLeft, Radar, RefreshCw, ScrollText, Send, Settings2, ShieldCheck, Sparkles, Sun, Telescope, Trash2, Upload, Users, X,
 } from "lucide-react";
 import type { AgencyCard, Draft, InvestorCard, Lead, LogEntry, Match, Meeting, ObjectCard, ScanStats, ScoutSettings, ScoutSource, WatchItem } from "@/lib/scout/types";
 
+type Theme = "dark" | "light";
 type AdapterInfo = { id: string; label: string; enabled: boolean; needs: string; note: string };
 type ResearchTaskRow = {
   id: string;
@@ -202,6 +203,18 @@ function Empty({ children }: { children: ReactNode }) {
 
 const inputClass = "w-full rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--line)]";
 
+function dashboardCounts(state: State | null): Partial<Record<Tab, number>> {
+  if (!state) return {};
+  return {
+    drafts: state.drafts.filter((draft) => draft.state === "pending").length,
+    leads: state.leads.filter((lead) => lead.state === "qualified" || lead.state === "escalated").length,
+    intel: state.sources.filter((source) => source.state === "candidate").length,
+    matches: state.matches.filter((match) => match.state === "proposed").length,
+    tasks: state.researchTasks.filter((task) => task.state === "running" || task.state === "clarifying").length,
+    health: state.persistent && state.telegram.token ? 0 : 1,
+  };
+}
+
 export default function ScoutDashboard() {
   const [state, setState] = useState<State | null>(null);
   const [tab, setTab] = useState<Tab>("report");
@@ -213,10 +226,14 @@ export default function ScoutDashboard() {
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState("");
   const [advanced, setAdvanced] = useState(false);
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     try {
-      document.documentElement.classList.toggle("light", window.localStorage.getItem("aurelius-theme") === "light");
+      const savedTheme = window.localStorage.getItem("aurelius-theme") === "light" ? "light" : "dark";
+      setTheme(savedTheme);
+      document.documentElement.classList.toggle("light", savedTheme === "light");
       setKey(window.localStorage.getItem(KEY_STORAGE) || "");
     } catch {}
     const params = new URLSearchParams(window.location.search);
@@ -259,7 +276,10 @@ export default function ScoutDashboard() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 5000); return () => clearTimeout(t); } }, [toast]);
 
   const changeTab = (next: Tab) => {
-    setTab(next); setFocusId(""); setPlace("");
+    setTab(next);
+    setFocusId("");
+    setPlace("");
+    setMobileOpen(false);
     window.history.replaceState(null, "", "/scout?tab=" + next);
   };
 
@@ -271,82 +291,215 @@ export default function ScoutDashboard() {
     if (!next && !SIMPLE_TABS.has(tab)) changeTab("report");
   };
 
-  const counts: Partial<Record<Tab, number>> = state ? {
-    drafts: state.drafts.filter((d) => d.state === "pending").length,
-    leads: state.leads.filter((l) => l.state === "qualified" || l.state === "escalated").length,
-    intel: state.sources.filter((s) => s.state === "candidate").length,
-    matches: state.matches.filter((m) => m.state === "proposed").length,
-    tasks: state.researchTasks.filter((t) => t.state === "running" || t.state === "clarifying").length,
-    health: state.persistent && state.telegram.token ? 0 : 1,
-  } : {};
+  const toggleTheme = () => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.classList.toggle("light", next === "light");
+    try { window.localStorage.setItem("aurelius-theme", next); } catch {}
+  };
+
+  const counts = dashboardCounts(state);
+
+  const activeTab = TABS.find((item) => item.id === tab);
 
   return (
-    <div className="relative min-h-screen">
-      <div className="app-grid pointer-events-none fixed inset-0" />
-      <header className="sticky top-0 z-30 border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_80%,transparent)] backdrop-blur-2xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <a href="/" className="flex min-w-0 items-baseline gap-3">
-            <span className="brand-mark font-display text-2xl font-semibold tracking-[.2em]">AURELIUS</span>
-            <span className="hidden truncate text-xs uppercase tracking-[.2em] text-[var(--text-muted)] sm:inline">Разведчик</span>
-          </a>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => void load()} title="Обновить"><RefreshCw size={14} /></Button>
-            <Button onClick={toggleAdvanced}>{advanced ? "Простой режим" : "Ещё"}</Button>
-            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("scan", {}, "scan")}><Radar size={14} /><span className="hidden whitespace-nowrap sm:inline">{busy === "scan" ? "Обновляю…" : "Обновить данные"}</span></Button>
-          </div>
-        </div>
-        <div className="spectrum-line h-[2px] w-full opacity-70" />
-        <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 py-2 sm:px-5" aria-label="Разделы">
-          {visibleTabs.map(({ id, label, icon: Icon, color }) => (
-            <button key={id} type="button" onClick={() => changeTab(id)}
-              className={"flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition " + (tab === id ? "bg-[var(--surface-strong)] text-[var(--text)] shadow" : "text-[var(--text-muted)] hover:text-[var(--text)]")}>
-              <Icon size={14} style={{ color }} />{label}
-              {counts[id] ? <span className="rounded-full bg-[#ff375f] px-1.5 text-[10px] font-semibold text-white">{counts[id]}</span> : null}
+    <main className="relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
+      <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
+
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
+        <aside
+          className={"fixed inset-y-0 left-0 z-50 w-[280px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 " +
+            (mobileOpen ? "translate-x-0" : "-translate-x-full")}
+        >
+          <div className="flex h-full flex-col">
+            <div className="flex items-start justify-between">
+              <a href="/" className="block min-w-0">
+                <div className="brand-mark font-display text-[32px] font-semibold leading-none tracking-[.2em]">AURELIUS</div>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
+                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">AI Scout · Разведчик</span>
+                </div>
+              </a>
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-xl p-2 text-[var(--text-muted)] lg:hidden"
+                aria-label="Закрыть меню"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <nav className="mt-10 space-y-1" aria-label="Разделы Разведчика">
+              {visibleTabs.map(({ id, label, icon: Icon }) => {
+                const active = tab === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => changeTab(id)}
+                    className={"group flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-sm transition " +
+                      (active
+                        ? "border-[var(--line)] bg-[var(--gold)]/7 text-[var(--text)]"
+                        : "border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]")}
+                  >
+                    <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={17} />
+                    <span>{label}</span>
+                    {counts[id] ? (
+                      <span className="ml-auto rounded-full bg-[#ff375f] px-2 py-0.5 text-[10px] font-semibold text-white">{counts[id]}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <button
+              type="button"
+              onClick={toggleAdvanced}
+              className="panel-hover mt-4 flex w-full items-center justify-between rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3.5 py-3 text-left text-sm text-[var(--text-muted)]"
+            >
+              <span>{advanced ? "Скрыть служебные разделы" : "Ещё разделы"}</span>
+              <span className="text-[var(--gold-bright)]">{advanced ? "−" : "+"}</span>
             </button>
-          ))}
-        </nav>
-      </header>
 
-      <main className="relative mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6">
-        {needKey && (
-          <Panel title="Доступ к дашборду" icon={KeyRound} color="#ffd60a">
-            <p className="mb-3 text-sm text-[var(--text-muted)]">CRM содержит персональные данные, поэтому дашборд защищён ключом SCOUT_ADMIN_KEY.</p>
-            <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); }}>
-              <input className={inputClass} type="password" value={key} onChange={(e) => setKey(e.target.value)} aria-label="Ключ доступа" placeholder="Ключ доступа" />
-              <Button variant="spectrum" onClick={() => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); }}>Войти</Button>
-            </form>
-          </Panel>
-        )}
+            <div className="glass panel-hover mt-6 rounded-2xl p-4">
+              <div className="text-[10px] uppercase tracking-[.2em] text-[var(--gold)]">Состояние системы</div>
+              <div className="mt-3 space-y-2 text-xs text-[var(--text-muted)]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Хранилище</span>
+                  <Chip tone={state?.persistent ? "green" : "gold"}>{state?.persistent ? "подключено" : "временно"}</Chip>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Telegram</span>
+                  <Chip tone={state?.telegram.token ? "green" : "red"}>{state?.telegram.token ? "готов" : "не настроен"}</Chip>
+                </div>
+              </div>
+            </div>
 
-        {!state && !needKey && <Empty>Загружаю данные Разведчика…</Empty>}
-
-        {state && !state.persistent && (
-          <div className="rounded-2xl border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3 text-sm text-[var(--warning)]">
-            <Database size={14} className="mr-1 inline" /> Хранилище не подключено: данные живут до перезапуска сервера. Подключите бесплатный Upstash Redis в Vercel → Storage (переменные KV_REST_API_URL и KV_REST_API_TOKEN появятся сами), регион — Европа.
+            <div className="mt-auto border-t border-[var(--line-soft)] pt-4">
+              <a
+                href="/"
+                className="group flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+              >
+                <Sparkles size={17} className="icon-foil opacity-70 group-hover:opacity-100" />
+                <span className="min-w-0 flex-1">
+                  <span className="block">AI Research Engine</span>
+                  <span className="block text-[10px] text-[var(--text-faint)]">Вернуться на основной сайт</span>
+                </span>
+              </a>
+            </div>
           </div>
+        </aside>
+
+        {mobileOpen && (
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-label="Закрыть меню"
+          />
         )}
-        {state && !state.protected && (
-          <div className="rounded-2xl border border-[var(--line-soft)] p-3 text-xs text-[var(--text-muted)]">
-            <ShieldCheck size={13} className="mr-1 inline text-[#0a84ff]" /> Демо-режим: дашборд открыт всем, у кого есть ссылка. Для работы с реальными контактами задайте SCOUT_ADMIN_KEY в Vercel.
+
+        <section className="min-w-0 flex-1">
+          <div className="sticky top-0 z-30">
+            <header className="flex h-[74px] items-center justify-between border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_78%,transparent)] px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileOpen(true)}
+                  className="rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] p-2 text-[var(--text-muted)] lg:hidden"
+                  aria-label="Открыть меню"
+                >
+                  <PanelLeft size={18} />
+                </button>
+                <div className="min-w-0">
+                  <div className="hidden items-center gap-2 text-xs text-[var(--text-faint)] sm:flex">
+                    <span>Разведчик</span>
+                    <span>/</span>
+                    <span className="truncate text-[var(--text-soft)]">{activeTab?.label || "Главная"}</span>
+                  </div>
+                  <div className="font-display truncate text-xl text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {state?.persistent ? (
+                  <div className="hidden items-center gap-2 rounded-full border border-[var(--success)]/30 bg-[var(--success)]/7 px-3 py-1.5 text-[11px] text-[var(--success)] xl:flex">
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    <span>Память подключена</span>
+                  </div>
+                ) : null}
+                {state?.telegram.token ? (
+                  <div className="hidden items-center gap-2 rounded-full border border-[var(--gold)]/30 bg-[var(--gold)]/8 px-3 py-1.5 text-[11px] text-[var(--gold-bright)] xl:flex">
+                    <Send size={13} />
+                    Telegram
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="panel-hover grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
+                  aria-label={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+                  title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+                >
+                  {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+                </button>
+
+                <Button onClick={() => void load()} title="Обновить"><RefreshCw size={14} /></Button>
+                <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("scan", {}, "scan")}>
+                  <Radar size={14} />
+                  <span className="hidden whitespace-nowrap sm:inline">{busy === "scan" ? "Обновляю…" : "Обновить данные"}</span>
+                </Button>
+              </div>
+            </header>
+            <div className="spectrum-line h-[2px] w-full opacity-70" />
           </div>
-        )}
 
-        {state && tab === "report" && <ReportTab state={state} act={act} busy={busy} headers={headers} setToast={setToast} />}
-        {state && tab === "tasks" && <TasksTab state={state} act={act} />}
-        {state && tab === "health" && <HealthTab headers={headers} />}
-        {state && tab === "objects" && <ObjectsTab state={state} act={act} focusId={focusId} place={place} query={query} setQuery={setQuery} />}
-        {state && tab === "investors" && <InvestorsTab state={state} act={act} focusId={focusId} />}
-        {state && tab === "agencies" && <AgenciesTab state={state} act={act} />}
-        {state && tab === "matches" && <MatchesTab state={state} act={act} focusId={focusId} />}
-        {state && tab === "leads" && <LeadsTab state={state} act={act} />}
-        {state && tab === "drafts" && <DraftsTab state={state} act={act} />}
-        {state && tab === "intel" && <IntelTab state={state} act={act} />}
-        {state && tab === "settings" && <SettingsTab state={state} act={act} />}
-        {state && tab === "log" && <LogTab state={state} />}
-      </main>
+          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-14 lg:pt-9">
+            <div className="space-y-5 soft-focus">
+              {needKey && (
+                <Panel title="Доступ к кабинету" icon={KeyRound} color="#ffd60a">
+                  <p className="mb-3 text-sm text-[var(--text-muted)]">Введите ключ доступа к рабочему кабинету.</p>
+                  <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); }}>
+                    <input className={inputClass} type="password" value={key} onChange={(e) => setKey(e.target.value)} aria-label="Ключ доступа" placeholder="Ключ доступа" />
+                    <Button variant="spectrum" onClick={() => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); }}>Войти</Button>
+                  </form>
+                </Panel>
+              )}
 
-      {toast && <output className="glass fixed bottom-4 left-1/2 z-50 block max-w-[92vw] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm">{toast}</output>}
-    </div>
+              {!state && !needKey && <Empty>Загружаю кабинет…</Empty>}
+
+              {state && !state.persistent && (
+                <div className="rounded-2xl border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3 text-sm text-[var(--warning)]">
+                  <Database size={14} className="mr-1 inline" /> Хранилище пока не подключено. Для постоянной памяти подключите бесплатный Upstash Redis.
+                </div>
+              )}
+              {state && !state.protected && (
+                <div className="rounded-2xl border border-[var(--line-soft)] bg-[var(--surface)]/50 p-3 text-xs text-[var(--text-muted)]">
+                  <ShieldCheck size={13} className="mr-1 inline text-[var(--gold-bright)]" /> Демо-режим: кабинет открыт по ссылке. Перед работой с реальными контактами включите защиту ключом.
+                </div>
+              )}
+
+              {state && tab === "report" && <ReportTab state={state} act={act} busy={busy} headers={headers} setToast={setToast} />}
+              {state && tab === "tasks" && <TasksTab state={state} act={act} />}
+              {state && tab === "health" && <HealthTab headers={headers} />}
+              {state && tab === "objects" && <ObjectsTab state={state} act={act} focusId={focusId} place={place} query={query} setQuery={setQuery} />}
+              {state && tab === "investors" && <InvestorsTab state={state} act={act} focusId={focusId} />}
+              {state && tab === "agencies" && <AgenciesTab state={state} act={act} />}
+              {state && tab === "matches" && <MatchesTab state={state} act={act} focusId={focusId} />}
+              {state && tab === "leads" && <LeadsTab state={state} act={act} />}
+              {state && tab === "drafts" && <DraftsTab state={state} act={act} />}
+              {state && tab === "intel" && <IntelTab state={state} act={act} />}
+              {state && tab === "settings" && <SettingsTab state={state} act={act} />}
+              {state && tab === "log" && <LogTab state={state} />}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {toast && <output className="glass fixed bottom-4 left-1/2 z-[80] block max-w-[92vw] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm shadow-2xl">{toast}</output>}
+    </main>
   );
 }
 
