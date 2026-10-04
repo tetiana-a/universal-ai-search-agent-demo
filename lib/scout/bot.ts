@@ -6,10 +6,12 @@ import { advanceDialog, GREETING, leadSummary, questionFor, missingItems } from 
 import { collectReport, renderReport } from "@/lib/scout/report";
 import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
-import { deleteValue, getOne, getValue, listAll, logAction, putOne, setValue } from "@/lib/scout/store";
+import { deleteValue, getOne, getValue, listAll, logAction, putOne, setValue, storeIsPersistent } from "@/lib/scout/store";
 import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingCriteria, loadTask, startResearch, statusKeyboard, statusText } from "@/lib/scout/research-bot";
-import { answerCallback, controlIds, editMessage, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
+import { answerCallback, controlIds, editMessage, reportChatId, sendLong, sendMessage, tgCall, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
+import { configuredAiProviders } from "@/lib/free-ai";
+import { keylessProviders } from "@/lib/keyless-search";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -100,6 +102,7 @@ function mainPanelKeyboard(): Keyboard {
       { text: "👥 Лиды", callback_data: "menu:leads" },
       { text: "⚙️ Настройки", callback_data: "menu:settings" },
     ],
+    [{ text: "🩺 Диагностика", callback_data: "menu:health" }],
     [{ text: "🖥 Открыть дашборд", url: dashboardUrl() }],
   ];
 }
@@ -119,6 +122,57 @@ async function showPanel(chatId: string) {
   );
 }
 
+async function diagnosticText(chatId: string, userId: string) {
+  const [me, hook, reportId] = await Promise.all([
+    tgCall("getMe", {}),
+    tgCall("getWebhookInfo", {}),
+    reportChatId(),
+  ]);
+
+  const probeKey = "health-probe:" + userId;
+  let redisRoundTrip = false;
+  if (storeIsPersistent()) {
+    const probe = { at: Date.now(), nonce: Math.random().toString(36).slice(2, 10) };
+    await setValue(probeKey, probe, 60);
+    const readBack = await getValue<typeof probe>(probeKey);
+    redisRoundTrip = Boolean(readBack && readBack.nonce === probe.nonce);
+    await deleteValue(probeKey);
+  }
+
+  const ai = configuredAiProviders("pro").map((provider) => provider.id + ":" + provider.model);
+  const search = keylessProviders();
+  const currentHook = String(hook?.result?.url || "");
+  const hookError = String(hook?.result?.last_error_message || "");
+  const lines = [
+    "<b>AURELIUS · диагностика</b>",
+    "",
+    "Telegram API: " + (me?.ok ? "✅ @" + escapeHtml(String(me?.result?.username || "bot")) : "❌ " + escapeHtml(String(me?.description || "ошибка"))),
+    "Webhook: " + (currentHook ? "✅ " + escapeHtml(currentHook) : "❌ не установлен"),
+    "Webhook error: " + (hookError ? "⚠️ " + escapeHtml(hookError) : "✅ нет"),
+    "Control access: " + (isControl(chatId, userId) ? "✅" : "❌"),
+    "User ID: <code>" + escapeHtml(userId) + "</code>",
+    "Chat ID: <code>" + escapeHtml(chatId) + "</code>",
+    "Redis persistence: " + (storeIsPersistent() ? (redisRoundTrip ? "✅ read/write" : "⚠️ configured, probe failed") : "❌"),
+    "AI route: " + (ai.length ? "✅ " + escapeHtml(ai.join(", ")) : "⚠️ rules only"),
+    "Search: " + (search.length ? "✅ " + escapeHtml(search.join(", ")) : "❌ disabled"),
+    "Report chat: " + (reportId ? "<code>" + escapeHtml(reportId) + "</code>" : "—"),
+    "Zero-cost: " + (process.env.ZERO_COST_MODE === "on" ? "✅ on" : "⚠️ off"),
+  ];
+  return lines.join("\n");
+}
+
+function identityText(message: any) {
+  const chatId = String(message.chat?.id || "");
+  const userId = String(message.from?.id || "");
+  return [
+    "<b>Telegram ID</b>",
+    "User ID: <code>" + escapeHtml(userId) + "</code>",
+    "Chat ID: <code>" + escapeHtml(chatId) + "</code>",
+    "Chat type: " + escapeHtml(String(message.chat?.type || "unknown")),
+    "Control access: " + (isControl(chatId, userId) ? "✅ YES" : "❌ NO"),
+  ].join("\n");
+}
+
 // ---- Commands -------------------------------------------------------------------
 
 async function handleCommand(chatId: string, userId: string, userName: string, cmd: string, args: string): Promise<BotResult> {
@@ -126,6 +180,10 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "start":
     case "panel":
       await showPanel(chatId);
+      return {};
+
+    case "health":
+      await sendMessage(chatId, await diagnosticText(chatId, userId), mainPanelKeyboard());
       return {};
 
     case "help":
@@ -326,7 +384,7 @@ async function handleCallback(query: any): Promise<BotResult> {
       await showPanel(chatId);
       return {};
     }
-    if (["status", "report", "scan", "sources", "drafts", "leads", "settings"].includes(action)) {
+    if (["status", "report", "scan", "sources", "drafts", "leads", "settings", "health"].includes(action)) {
       return handleCommand(chatId, userId, by, action, "");
     }
     return {};
@@ -490,8 +548,21 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   const chatId = String(message.chat?.id || "");
   const userId = String(message.from?.id || "");
   const userName = message.from?.username ? "@" + message.from.username : message.from?.first_name || userId;
+  const command = commandOf(message.text);
 
-  if (isControl(chatId, userId)) {
+  // /id is always safe: it only returns IDs from the caller's own update.
+  if (command?.cmd === "id") {
+    await sendMessage(chatId, identityText(message));
+    return {};
+  }
+
+  const control = isControl(chatId, userId);
+  if (!control && command && ["panel", "find", "search", "status", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health"].includes(command.cmd)) {
+    await sendMessage(chatId, "⛔ Нет доступа к панели управления. Отправьте /id и добавьте ваш <b>User ID</b> в TELEGRAM_ALLOWED_CHAT_IDS или SCOUT_ADMIN_TELEGRAM_IDS в Vercel.");
+    return {};
+  }
+
+  if (control) {
     // A reply with new text for a draft being edited.
     const editing = await getValue<{ draftId: string; chatId: string }>("edit:" + userId);
     if (editing && !message.text.startsWith("/")) {
@@ -500,7 +571,6 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       if (result.draft) await sendMessage(chatId, draftText(result.draft) + "\n\n" + escapeHtml(result.message), result.ok ? draftKeyboard(result.draft) : undefined);
       return {};
     }
-    const command = commandOf(message.text);
     if (command) return handleCommand(chatId, userId, userName, command.cmd, command.args);
     return handleResearchText(message, chatId, userId);
   }
