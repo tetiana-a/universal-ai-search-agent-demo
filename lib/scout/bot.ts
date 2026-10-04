@@ -132,7 +132,7 @@ async function diagnosticText(chatId: string, userId: string) {
   const probeKey = "health-probe:" + userId;
   let redisRoundTrip = false;
   if (storeIsPersistent()) {
-    const probe = { at: Date.now(), nonce: Math.random().toString(36).slice(2, 10) };
+    const probe = { at: Date.now(), nonce: userId + ":" + Date.now() };
     await setValue(probeKey, probe, 60);
     const readBack = await getValue<typeof probe>(probeKey);
     redisRoundTrip = Boolean(readBack && readBack.nonce === probe.nonce);
