@@ -15,9 +15,28 @@ export function splitIds(value: string | number | undefined | null) {
   return String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-// Who may control the agent: the configured group(s) and personal ids.
+// Who may control the agent directly: configured personal ids and chats.
 export function controlIds() {
   return new Set([...splitIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS), ...splitIds(process.env.TELEGRAM_CHAT_ID), ...splitIds(process.env.SCOUT_ADMIN_TELEGRAM_IDS)]);
+}
+
+export function openGroupAccessEnabled() {
+  return String(process.env.TELEGRAM_OPEN_GROUP_ACCESS || "").trim().toLowerCase() === "on";
+}
+
+export function openGroupIds() {
+  return new Set(splitIds(process.env.TELEGRAM_OPEN_GROUP_IDS));
+}
+
+// When open group access is enabled, either explicitly listed groups or the report group
+// are shared workspaces: every human member can use commands/buttons with the same rules.
+export async function isOpenGroup(chatId: string, chatType?: string) {
+  if (!openGroupAccessEnabled() || chatType === "private") return false;
+  const resolved = await resolveChatId(chatId);
+  const explicit = openGroupIds();
+  if (explicit.size) return explicit.has(chatId) || explicit.has(resolved);
+  const report = await reportChatId();
+  return Boolean(report) && (report === chatId || report === resolved);
 }
 
 // Webhook secret: TELEGRAM_WEBHOOK_SECRET, or derived from the bot token so no extra setup is needed.
