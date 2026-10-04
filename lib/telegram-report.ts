@@ -10,7 +10,7 @@ export const TELEGRAM_MESSAGE_LIMIT = 3900;
 const TONE_ICON: Record<StatusTone, string> = { ok: "🟢", partial: "🟡", review: "⚪️", fail: "🔴" };
 const COUNTER_ICON: Record<string, string> = {
   sourcesDiscovered: "🌐", sourcesChecked: "✅", sourcesUnavailable: "🚧", resultsFound: "📥",
-  afterDedupe: "🧹", matchingCriteria: "🎯", needsReview: "👀", sourcesInBase: "🗂",
+  afterDedupe: "🧹", filteredOut: "🚫", matchingCriteria: "🎯", needsReview: "👀", sourcesInBase: "🗂",
 };
 
 function summaryMessage(payload: ResearchExportPayload, shown: number) {
