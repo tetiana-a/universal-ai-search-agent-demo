@@ -95,6 +95,6 @@ describe("free AI chain", () => {
     vi.stubEnv("PRO_GEMINI_MODEL", "gemini-2.5-pro");
     const providers = configuredAiProviders("pro").map((p) => p.id + ":" + p.model);
     expect(providers[0]).toMatch(/^openrouter:/);
-    expect(providers.slice(1)).toEqual(["gemini:gemini-2.5-flash", "groq:llama-3.3-70b-versatile"]);
+    expect(providers.slice(1)).toEqual(["gemini:gemini-2.5-flash-lite", "groq:llama-3.3-70b-versatile"]);
   });
 });

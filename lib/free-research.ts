@@ -172,8 +172,8 @@ async function englishSubject(query: string, edition: "free" | "pro", deadlineAt
 }
 
 const B2B_PLATFORMS = new Set(["made-in-china", "alibaba", "globalsources", "europages", "tradeindia", "indiamart", "ec21", "ecplaza", "tradekey", "dhgate"]);
-const JUNK_HOSTS = new Set(["login", "passport", "sso", "auth", "account", "accounts", "my", "member", "members", "cart", "buy", "checkout", "pay", "payment", "static", "asset", "assets", "image", "images", "pic", "pics", "photo", "photos", "media", "m", "help", "service", "sale", "offer", "insights", "activity", "message", "messages", "feedback", "i"]);
-const JUNK_SEGMENTS = new Set(["login", "log-in", "logout", "signin", "sign-in", "signup", "sign-up", "register", "join", "cart", "basket", "checkout", "wishlist", "favorites", "favourites", "compare", "account", "myaccount", "my-account", "user", "member", "passport", "auth", "sso", "privacy", "terms", "cookie", "cookies", "contact", "contact-us", "about", "about-us", "blog", "news", "faq", "help", "search", "tag", "tags", "category", "static", "assets", "img", "images", "upload", "uploads", "media", "cdn", "feedback", "inquiry", "sitemap"]);
+const JUNK_HOSTS = new Set(["carp", "myconnections", "buyer", "login", "passport", "sso", "auth", "account", "accounts", "my", "member", "members", "cart", "buy", "checkout", "pay", "payment", "static", "asset", "assets", "image", "images", "pic", "pics", "photo", "photos", "media", "m", "help", "service", "sale", "offer", "insights", "activity", "message", "messages", "feedback", "i"]);
+const JUNK_SEGMENTS = new Set(["purchaselist", "buyer", "orders", "quick-start", "login", "log-in", "logout", "signin", "sign-in", "signup", "sign-up", "register", "join", "cart", "basket", "checkout", "wishlist", "favorites", "favourites", "compare", "account", "myaccount", "my-account", "user", "member", "passport", "auth", "sso", "privacy", "terms", "cookie", "cookies", "contact", "contact-us", "about", "about-us", "blog", "news", "faq", "help", "search", "tag", "tags", "category", "static", "assets", "img", "images", "upload", "uploads", "media", "cdn", "feedback", "inquiry", "sitemap"]);
 const JUNK_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "ico", "svg", "pdf", "css", "js", "json", "xml", "zip", "rar", "mp4", "mp3", "woff", "woff2", "ttf"]);
 
 function isB2bPlatform(domain: string) {
@@ -201,6 +201,10 @@ function aiFailureLine(ru: boolean, hadPages: boolean, quota: boolean, error: st
   return ru
     ? "ИИ-проверка не сработала: " + error + " Поля взяты правилами, результаты нужно проверить вручную."
     : "AI verification failed: " + error + " Fields were extracted by rules and need manual review.";
+}
+
+export function isJunkUrl(url: string) {
+  try { return isJunkLink(new URL(url)); } catch { return true; }
 }
 
 // Stage 3 of the spec: a list page (a portal's search results, a directory) is opened
@@ -473,7 +477,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
 
   // Forums and videos are never results for an entity search, so they are not read.
   const kindForRead = sourceMap.kind;
-  const toRead = candidateHits.filter((hit) => !isNoiseSource(hit.url, kindForRead));
+  const toRead = candidateHits.filter((hit) => !isNoiseSource(hit.url, kindForRead) && !isJunkUrl(hit.url));
   const readerLimit = Math.min(toRead.length, input.testMode ? 3 : edition === "pro" ? 14 : 8);
   // Stage 3: a list page (portal search, B2B category) is opened and the item pages it links
   // to are read right away, in parallel with the other reads. Reading stops early enough
@@ -568,9 +572,12 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const criteria = parseNumericCriteria(input.query);
   const hasAi = configuredAiProviders(edition).length > 0;
   const rejected: Array<{ title: string; url: string; reason: string; score: number }> = [];
-  const noiseHits = candidateHits.filter((hit) => isNoiseSource(hit.url, kind));
+  // Forums, videos, social feeds and service pages (cart, account, login, static files)
+  // are never results, whether they came from search or from a followed link.
+  const isNoise = (url: string) => isNoiseSource(url, kind) || isJunkUrl(url);
+  const noiseHits = candidateHits.filter((hit) => isNoise(hit.url));
   for (const hit of noiseHits) rejected.push({ title: hit.title || hit.domain, url: hit.url, reason: "forum_video_or_social", score: 5 });
-  const usableHits = candidateHits.filter((hit) => !isNoiseSource(hit.url, kind));
+  const usableHits = candidateHits.filter((hit) => !isNoise(hit.url));
   const readHits = usableHits.filter((hit) => Boolean(hit.content));
   const aiPages = readHits.slice(0, input.testMode ? 6 : edition === "pro" ? 18 : 12)
     .map((hit, index) => ({ id: index + 1, url: hit.url, title: hit.title, domain: hit.domain, content: String(hit.content || "") }));

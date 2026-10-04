@@ -278,6 +278,9 @@ describe("Gemini free tier", () => {
     ]);
     const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
     expect(out.quotaExhausted).toBe(true);
-    expect(calls).toBe(1);
+    // flash-lite, then flash (each has its own daily cap); a later call skips both.
+    expect(calls).toBe(2);
+    await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(calls).toBe(2);
   });
 });

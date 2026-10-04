@@ -153,3 +153,14 @@ describe("place names", () => {
     expect(placeFromQuery("Найди участки в Мадриде", "Участки в Мадриде. Мадрид, район Valdebebas")).toBe("Мадрид");
   });
 });
+
+describe("third live test", () => {
+  it("drops Alibaba cart and buyer pages and catches unnumbered top lists", async () => {
+    const { isJunkUrl } = await import("@/lib/free-research");
+    const { classifyPage } = await import("@/lib/page-kind");
+    expect(isJunkUrl("https://carp.alibaba.com/purchaseList")).toBe(true);
+    expect(isJunkUrl("https://myconnections.alibaba.com/buyer/ds/center/quick-start")).toBe(true);
+    expect(isJunkUrl("https://lohasled.en.alibaba.com/company_profile.html")).toBe(false);
+    expect(classifyPage({ url: "https://electronics.alibaba.com/supplier/top-led-manufacturers-in-china", title: "Top LED Manufacturers in China: Verified Suppliers Guide", text: "" }, "company")).toBe("article");
+  });
+});

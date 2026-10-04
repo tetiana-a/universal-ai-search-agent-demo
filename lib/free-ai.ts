@@ -152,12 +152,16 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   // models and ignores the Pro model overrides.
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
   if (geminiKey) {
+    const geminiModel = (!zeroCost && edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
     out.push({
       id: "gemini",
       label: "Google Gemini",
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       key: geminiKey,
-      model: (!zeroCost && edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: geminiModel,
+      // Each Gemini model has its own free daily cap: flash-lite allows the most requests,
+      // flash is the fallback when its cap is used up.
+      models: [...new Set([geminiModel, "gemini-2.5-flash-lite", "gemini-2.5-flash"])],
     });
   }
 
@@ -239,7 +243,7 @@ export async function runStructuredExtraction(options: {
   for (const provider of providers) {
     // OpenRouter: the configured model first, then current free models as a fallback.
     const models = provider.id !== "openrouter"
-      ? [provider.model]
+      ? provider.models || [provider.model]
       : orderByHealth([...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...(await freeOpenRouterModels())])]);
     for (const model of models.slice(0, 4)) {
       // Free models of one account share one quota; a paid model has its own.
@@ -285,6 +289,9 @@ export async function runStructuredExtraction(options: {
             // (which has other free routes) is skipped for later calls.
             if (daily || provider.id === "openrouter") blockProvider(quotaKey, daily);
             attempts.push({ provider: provider.id, model, ok: false, quota: true, message });
+            // Another Gemini model has its own daily cap; a per-minute limit or OpenRouter's
+            // shared free quota ends this provider.
+            if (daily && provider.id !== "openrouter") continue;
             break;
           }
           attempts.push({ provider: provider.id, model, ok: false, message });
