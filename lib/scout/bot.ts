@@ -8,7 +8,7 @@ import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
 import { deleteValue, getOne, getValue, listAll, logAction, putOne, setValue } from "@/lib/scout/store";
 import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingCriteria, listRecentResearchTasks, loadTask, startResearch, statusKeyboard, statusText } from "@/lib/scout/research-bot";
-import { answerCallback, controlIds, editMessage, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
+import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
@@ -37,9 +37,10 @@ function commandOf(text: string) {
   return m ? { cmd: m[1].toLowerCase(), args: m[2].trim() } : null;
 }
 
-function isControl(chatId: string, userId: string) {
+async function isControl(chatId: string, userId: string, chatType?: string) {
   const ids = controlIds();
-  return ids.has(chatId) || ids.has(userId);
+  if (ids.has(chatId) || ids.has(userId)) return true;
+  return isOpenGroup(chatId, chatType);
 }
 
 function healthIcon(level: "ok" | "warning" | "error") {
@@ -158,7 +159,7 @@ async function diagnosticText(chatId: string, userId: string) {
     "",
     ...health.checks.map((item) => healthIcon(item.level) + "<b>" + escapeHtml(item.label) + "</b>: " + escapeHtml(item.detail)),
     "",
-    "Control access: " + (isControl(chatId, userId) ? "✅" : "❌"),
+    "Control access: " + ((await isControl(chatId, userId)) ? "✅" : "❌"),
     "User ID: <code>" + escapeHtml(userId) + "</code>",
     "Chat ID: <code>" + escapeHtml(chatId) + "</code>",
     "Report chat: " + (health.telegram.reportChatId ? "<code>" + escapeHtml(health.telegram.reportChatId) + "</code>" : "—"),
@@ -167,7 +168,7 @@ async function diagnosticText(chatId: string, userId: string) {
   return lines.join("\n");
 }
 
-function identityText(message: any) {
+async function identityText(message: any) {
   const chatId = String(message.chat?.id || "");
   const userId = String(message.from?.id || "");
   return [
@@ -175,7 +176,7 @@ function identityText(message: any) {
     "User ID: <code>" + escapeHtml(userId) + "</code>",
     "Chat ID: <code>" + escapeHtml(chatId) + "</code>",
     "Chat type: " + escapeHtml(String(message.chat?.type || "unknown")),
-    "Control access: " + (isControl(chatId, userId) ? "✅ YES" : "❌ NO"),
+    "Control access: " + ((await isControl(chatId, userId, String(message.chat?.type || ""))) ? "✅ YES" : "❌ NO"),
   ].join("\n");
 }
 
@@ -419,7 +420,7 @@ async function handleCallback(query: any): Promise<BotResult> {
   const messageId = Number(query.message?.message_id || 0);
   const userId = String(query.from?.id || "");
   const by = query.from?.username ? "@" + query.from.username : query.from?.first_name || userId;
-  if (!isControl(chatId, userId)) { await answerCallback(query.id, "Нет доступа"); return {}; }
+  if (!(await isControl(chatId, userId, String(query.message?.chat?.type || "")))) { await answerCallback(query.id, "Нет доступа"); return {}; }
   const [kind, action, id] = data.split(":");
   if (kind === "menu") {
     await answerCallback(query.id, "✓");
@@ -603,11 +604,11 @@ export async function handleUpdate(update: any): Promise<BotResult> {
 
   // /id is always safe: it only returns IDs from the caller's own update.
   if (command?.cmd === "id") {
-    await sendMessage(chatId, identityText(message));
+    await sendMessage(chatId, await identityText(message));
     return {};
   }
 
-  const control = isControl(chatId, userId);
+  const control = await isControl(chatId, userId, String(message.chat?.type || ""));
   if (!control && message.chat?.type === "private" && command && ["panel", "find", "search", "status", "tasks", "results", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health"].includes(command.cmd)) {
     await sendMessage(chatId, "⛔ Нет доступа к панели управления. Отправьте /id и добавьте ваш <b>User ID</b> в TELEGRAM_ALLOWED_CHAT_IDS или SCOUT_ADMIN_TELEGRAM_IDS в Vercel.");
     return {};
