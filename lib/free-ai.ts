@@ -2,10 +2,10 @@
 // answers. Every provider here has a free tier; Pro can point OpenRouter at a
 // stronger paid model with PRO_OPENROUTER_MODEL.
 
-export type AiProviderId = "openrouter" | "gemini" | "groq";
+export type AiProviderId = "ollama" | "openrouter" | "gemini" | "groq";
 export type Edition = "free" | "pro";
 
-type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: string; model: string; models?: string[]; headers?: Record<string, string> };
+type AiProvider = { id: AiProviderId; label: string; endpoint: string; key?: string; model: string; models?: string[]; headers?: Record<string, string> };
 
 // Free OpenRouter model IDs come and go. When OPENROUTER_MODEL is not set, the current
 // free models are read from OpenRouter's public model list and the best few are tried in
@@ -86,6 +86,21 @@ async function freeOpenRouterModels(): Promise<string[]> {
 
 export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   const out: AiProvider[] = [];
+  const ollamaBase = String(process.env.OLLAMA_BASE_URL || "").trim().replace(/\/$/, "");
+  if (ollamaBase) {
+    out.push({
+      id: "ollama",
+      label: "Ollama Local",
+      endpoint: ollamaBase + "/v1/chat/completions",
+      model: String(process.env.OLLAMA_MODEL || "qwen2.5:7b").trim(),
+    });
+  }
+
+  // Strict zero-cost mode never calls hosted AI providers, even when old keys
+  // accidentally remain in the environment. With no Ollama, deterministic
+  // extraction continues and results are marked for manual review.
+  if (process.env.ZERO_COST_MODE === "on") return out;
+
   const openRouterKey = String(process.env.OPENROUTER_API_KEY || "").trim();
   if (openRouterKey) {
     const configured = String((edition === "pro" && process.env.PRO_OPENROUTER_MODEL) || process.env.OPENROUTER_MODEL || "").trim();
@@ -157,14 +172,14 @@ export async function runStructuredExtraction(options: {
   const providers = configuredAiProviders(options.edition || "free");
   const attempts: AiAttempt[] = [];
   if (!providers.length) {
-    return { parsed: null, usage: null, attempts, error: "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY); results were extracted by rules and need manual review." };
+    return { parsed: null, usage: null, attempts, error: "No local AI is configured. Set OLLAMA_BASE_URL for fully local AI, or continue with deterministic extraction and manual review." };
   }
   // One call to one model. A model that rejects response_format is retried once without it.
   async function call(provider: AiProvider, model: string, timeoutMs: number, withFormat: boolean) {
     const user = options.user + "\n\nJSON SCHEMA (follow exactly, return only the JSON object):\n" + JSON.stringify(options.schema);
     const response = await fetch(provider.endpoint, {
       method: "POST",
-      headers: { Authorization: "Bearer " + provider.key, "Content-Type": "application/json", ...(provider.headers || {}) },
+      headers: { ...(provider.key ? { Authorization: "Bearer " + provider.key } : {}), "Content-Type": "application/json", ...(provider.headers || {}) },
       body: JSON.stringify({
         model,
         messages: [{ role: "system", content: options.system }, { role: "user", content: user }],
