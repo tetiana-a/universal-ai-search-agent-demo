@@ -1063,28 +1063,17 @@ html.light .music-atmosphere.is-live {
 .scout-ui strong,
 .scout-ui .font-bold { font-weight: 600; }
 
-.scout-ui .scout-panel-title {
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 500;
-  font-variation-settings: normal;
-  font-variant-numeric: lining-nums;
-  letter-spacing: .003em;
-}
-
-.scout-ui .scout-kpi-value {
-  font-family: var(--font-display);
-  font-size: 36px;
-  font-weight: 500;
-  font-variant-numeric: lining-nums tabular-nums;
-  letter-spacing: -.01em;
-}
-
+/* Titles and figures share the serif display face. */
+.scout-ui .scout-panel-title,
+.scout-ui .scout-kpi-value,
 .scout-ui .scout-mobile-title {
   font-family: var(--font-display);
   font-weight: 500;
-  letter-spacing: 0;
+  font-variant-numeric: lining-nums;
 }
+.scout-ui .scout-panel-title { font-size: 22px; font-variation-settings: normal; letter-spacing: .003em; }
+.scout-ui .scout-kpi-value { font-size: 36px; font-variant-numeric: lining-nums tabular-nums; letter-spacing: -.01em; }
+.scout-ui .scout-mobile-title { letter-spacing: 0; }
 
 .scout-ui .scout-nav-item { font-size: 13px; letter-spacing: .005em; }
 .scout-ui .scout-button { font-weight: 400; letter-spacing: .01em; }
