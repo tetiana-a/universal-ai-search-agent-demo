@@ -2976,8 +2976,8 @@ export default function Home() {
           </p>
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {summary.map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
-                <div className="text-2xl font-medium text-[var(--text)]">{value}</div>
+              <div key={label} className="stat-tile rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
+                <div className="font-display text-[32px] font-medium leading-none tabular-nums text-[var(--text)]">{value}</div>
                 <div className="mt-1 text-[10px] uppercase tracking-[.12em] text-[var(--text-faint)]">{label}</div>
               </div>
             ))}

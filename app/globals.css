@@ -597,6 +597,16 @@ body:has(.radio-live) .dev-badge-ring {
   animation-duration: 2s;
 }
 
+/* Counter tiles: a thin spectrum hairline on top, brighter while the radio plays */
+.stat-tile { position: relative; overflow: hidden; }
+.stat-tile::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; opacity: .55;
+  background: linear-gradient(90deg, transparent, #d9b46a 25%, #8fd3c7 50%, #b9a3ff 75%, transparent);
+  background-size: 200% 100%; animation: brand-sheen 9s linear infinite;
+}
+body:has(.radio-live) .stat-tile::before { opacity: .95; animation-duration: 4s; }
+@media (prefers-reduced-motion: reduce) { .stat-tile::before { animation: none; } }
+
 @keyframes float-in {
   from {
     opacity: 0;
