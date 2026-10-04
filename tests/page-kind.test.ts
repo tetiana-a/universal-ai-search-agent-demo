@@ -103,3 +103,64 @@ describe("export file names", () => {
     expect(safeFilenamePart("")).toBe("research");
   });
 });
+
+describe("junk links and placeholder contacts", () => {
+  it("drops cart, account, login, static, image and bare home-page links", async () => {
+    const { itemLinks } = await import("@/lib/free-research");
+    const content = [
+      "[Cart](https://cart.example-shop.com/cart/view-12345)",
+      "[Account](https://www.example-shop.com/my-account/orders/12345)",
+      "[Login](https://www.example-shop.com/user/login?next=12345)",
+      "[Static](https://static.example-shop.com/files/plot-12345.html)",
+      "[Image](https://www.example-shop.com/photos/plot-12345.jpg)",
+      "[CDN](https://img1.example-shop.com/plot/12345)",
+      "[Home](https://news.example-shop.com/)",
+      "[Plot](https://www.example-shop.com/plots/finca-rustica-toledo-12345)",
+    ].join(" ");
+    expect(itemLinks("https://www.example-shop.com/plots/toledo/", content)).toEqual(["https://www.example-shop.com/plots/finca-rustica-toledo-12345"]);
+  });
+
+  it("rejects placeholder emails and phones", async () => {
+    const { heuristicFields, isPlaceholderEmail, isPlaceholderPhone, cleanContact } = await import("@/lib/task-profile");
+    expect(isPlaceholderEmail("test1234@126.com")).toBe(true);
+    expect(isPlaceholderEmail("name@example.com")).toBe(true);
+    expect(isPlaceholderEmail("logo@2x.png")).toBe(true);
+    expect(isPlaceholderEmail("sales@shenzhen-led.com")).toBe(false);
+    expect(isPlaceholderPhone("001234")).toBe(true);
+    expect(isPlaceholderPhone("+00 000 000 000")).toBe(true);
+    expect(isPlaceholderPhone("+86 123 4567 8901")).toBe(true);
+    expect(isPlaceholderPhone("+34 912 75 30 64")).toBe(false);
+    expect(heuristicFields("company", "Mail test1234@126.com or sales@shenzhen-led.com, tel +00 1234 5678 / +86 755 2861 9043").contact)
+      .toBe("sales@shenzhen-led.com · +86 755 2861 9043");
+    expect(cleanContact("test1234@126.com, +86 755 2861 9043")).toBe("+86 755 2861 9043");
+    expect(cleanContact("test@example.com")).toBe("");
+  });
+});
+
+describe("ranked lists in other languages", () => {
+  it("treats machine-translated top lists as articles", async () => {
+    const { classifyPage } = await import("@/lib/page-kind");
+    expect(classifyPage({ url: "https://comledlamp.com/top-8-led-manufacturers", title: "Вершина 8 Производители светодиодных ламп в Китае", text: "" }, "company")).toBe("article");
+    expect(classifyPage({ url: "https://hqgled.com/news/smd-led", title: "Ведущие производители SMD светодиодов", text: "" }, "company")).toBe("article");
+    expect(classifyPage({ url: "https://shenzhenled.en.made-in-china.com/", title: "Shenzhen LED Lighting Co., Ltd", text: "We manufacture LED lamps." }, "company")).toBe("entity");
+  });
+});
+
+describe("place names", () => {
+  it("uses the dictionary form of a place", async () => {
+    const { placeFromQuery } = await import("@/lib/page-kind");
+    expect(placeFromQuery("Найди юристов в Испании", "Юристы в Испании для иностранцев")).toBe("Испания");
+    expect(placeFromQuery("Найди участки в Мадриде", "Участки в Мадриде. Мадрид, район Valdebebas")).toBe("Мадрид");
+  });
+});
+
+describe("third live test", () => {
+  it("drops Alibaba cart and buyer pages and catches unnumbered top lists", async () => {
+    const { isJunkUrl } = await import("@/lib/free-research");
+    const { classifyPage } = await import("@/lib/page-kind");
+    expect(isJunkUrl("https://carp.alibaba.com/purchaseList")).toBe(true);
+    expect(isJunkUrl("https://myconnections.alibaba.com/buyer/ds/center/quick-start")).toBe(true);
+    expect(isJunkUrl("https://lohasled.en.alibaba.com/company_profile.html")).toBe(false);
+    expect(classifyPage({ url: "https://electronics.alibaba.com/supplier/top-led-manufacturers-in-china", title: "Top LED Manufacturers in China: Verified Suppliers Guide", text: "" }, "company")).toBe("article");
+  });
+});

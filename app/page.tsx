@@ -440,6 +440,15 @@ const labels = {
 
 const PLAN_KEY_STORAGE = "aurelius-plan-key-v1";
 
+function aiFailureText(check: { quotaExhausted?: boolean; pagesChecked?: number; message?: string }, lang: string) {
+  if (check.quotaExhausted && !check.pagesChecked) {
+    return lang === "ru"
+      ? "⚠ ИИ-проверка недоступна: дневной лимит бесплатного ИИ исчерпан. Результаты отобраны правилами, проверьте их вручную. Лимит обновится в 03:00 по Москве."
+      : "⚠ AI check unavailable: the free daily AI limit is reached. Results were selected by rules; review them manually. The limit resets at 00:00 UTC.";
+  }
+  return (lang === "ru" ? "ИИ-проверка не сработала: " : "AI verification failed: ") + String(check.message || "");
+}
+
 function readPlanKey() {
   try { return window.localStorage.getItem(PLAN_KEY_STORAGE) || ""; } catch { return ""; }
 }
@@ -515,7 +524,7 @@ export default function Home() {
   const [searchBranches, setSearchBranches] = useState<string[]>([]);
   const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
   const [researchSummary, setResearchSummary] = useState("");
-  const [aiCheck, setAiCheck] = useState<{ ok: boolean; configured?: boolean; provider?: string; model?: string; pagesChecked?: number; kept?: number; dropped?: number; message?: string } | null>(null);
+  const [aiCheck, setAiCheck] = useState<{ ok: boolean; configured?: boolean; provider?: string; model?: string; pagesChecked?: number; kept?: number; dropped?: number; message?: string; quotaExhausted?: boolean } | null>(null);
   const [liveBilling, setLiveBilling] = useState<Record<string, unknown> | undefined>(undefined);
   const [activeTask, setActiveTask] = useState<{ id: string; responseId: string; query: string; language: Lang; depth: "Quick" | "Balanced" | "Deep"; maxResults: number; maxSources: number; maxPages: number } | null>(null);
   const pollingTaskRef = useRef<string | null>(null);
@@ -2110,7 +2119,7 @@ export default function Home() {
                     ? (lang === "ru" ? "ИИ-проверка работает" : "AI verification ran") + ` · ${aiCheck.provider} · ${aiCheck.model} · ` + (lang === "ru" ? `страниц ${aiCheck.pagesChecked}, подошло ${aiCheck.kept}, отсеяно ${aiCheck.dropped}` : `${aiCheck.pagesChecked} pages, ${aiCheck.kept} kept, ${aiCheck.dropped} dropped`)
                     : !aiCheck.configured
                       ? (lang === "ru" ? "ИИ-проверка не подключена (нет OPENROUTER_API_KEY / GEMINI_API_KEY / GROQ_API_KEY): результаты отобраны правилами." : "AI verification is not configured: results were selected by rules.")
-                      : (lang === "ru" ? "ИИ-проверка не сработала: " : "AI verification failed: ") + String(aiCheck.message || "")}
+                      : aiFailureText(aiCheck, lang)}
                 </div>
               ) : null}
               {researchSummary ? <div className="mt-3 rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3 text-[10px] leading-4 text-[var(--text-muted)]">{researchSummary}</div> : null}

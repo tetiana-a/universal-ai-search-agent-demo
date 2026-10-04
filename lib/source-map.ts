@@ -247,6 +247,17 @@ function toSources(seeds: Seed[]): MappedSource[] {
 
 // hints.subjectEn: the task in English (from the AI, when one is configured), so English
 // templates and portal searches do not carry Russian words.
+// Portals whose item pages share a path prefix: a site: search on it returns single
+// offers instead of result lists.
+const ITEM_PATHS: Record<string, string> = {
+  "idealista.com": "idealista.com/inmueble",
+  "idealista.it": "idealista.it/immobile",
+  "idealista.pt": "idealista.pt/imovel",
+  "immobiliare.it": "immobiliare.it/annunci",
+};
+// Manufacturing hubs: factory sites name the city, not just the country.
+const CHINA_HUBS = "Shenzhen OR Guangdong OR Zhongshan OR Ningbo";
+
 export function buildSourceMap(query: string, hints: { subjectEn?: string } = {}): SourceMap {
   const kind = inferResearchKind(query);
   const country = detectCountry(query);
@@ -273,8 +284,12 @@ export function buildSourceMap(query: string, hints: { subjectEn?: string } = {}
 
   if (kind === "real_estate") {
     const sale = SALE[country?.lang || "en"] || SALE.en;
+    const itemTerm = objectWord || local[0] || "property";
+    for (const source of sources.filter((x) => ITEM_PATHS[x.domain]).slice(0, 2)) {
+      branches.push({ classId: "portals", query: `site:${ITEM_PATHS[source.domain]} ${itemTerm} ${where}`.trim() });
+    }
     branches.push(
-      { classId: "portals", query: `${objectWord || local[0] || "property"} ${sale} ${where}`.trim() },
+      { classId: "portals", query: `${itemTerm} ${sale} ${where}`.trim() },
       ...(objectLocal ? [] : local.slice(1, 2)).map((term) => ({ classId: "portals", query: `${term} ${where}`.trim() })),
       { classId: "agencies", query: `real estate agency ${where} ${objectWord || ""}`.trim() },
       { classId: "banks", query: `bank owned ${objectWord || "property"} ${where} for sale`.trim() },
@@ -295,6 +310,9 @@ export function buildSourceMap(query: string, hints: { subjectEn?: string } = {}
     const product = subject.replace(/\b(manufacturers?|suppliers?|factory|factories|distributors?)\b/gi, "").replace(new RegExp("\\b" + (where || "#none#") + "\\b", "i"), "").replace(/\s+/g, " ").trim() || subject;
     for (const source of sources.filter((s) => s.classId === "b2b" && s.access === "open").slice(0, 3)) {
       branches.push({ classId: "b2b", query: `site:${source.domain} ${product} manufacturer` });
+    }
+    if (c === "cn" || /china/i.test(where)) {
+      branches.push({ classId: "manufacturers", query: `${product} factory ${CHINA_HUBS} "Co., Ltd"` });
     }
     branches.push(
       { classId: "manufacturers", query: `${product} manufacturer factory ${where} "Co., Ltd"`.replace(/\s+/g, " ").trim() },

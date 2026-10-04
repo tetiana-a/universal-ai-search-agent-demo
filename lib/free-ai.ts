@@ -66,7 +66,42 @@ export function orderByHealth(models: string[]) {
   return [...list].sort((a, b) => (modelHealth.get(b)?.goodAt || 0) - (modelHealth.get(a)?.goodAt || 0));
 }
 
-export function resetFreeModelCache() { freeModelCache = null; modelHealth.clear(); }
+// A provider that answered 429 (rate or daily quota) is skipped by every later call in this
+// instance: a per-day quota until the next UTC midnight, a per-minute limit for a minute.
+// Without this one search burns the whole free daily quota on retries.
+const providerBlocked = new Map<string, { until: number; daily: boolean }>();
+export function isDailyQuotaMessage(text: string) {
+  return /per[- ]?day|daily/i.test(String(text || ""));
+}
+export function blockProvider(id: string, daily: boolean, now = Date.now()) {
+  const midnight = new Date(now);
+  midnight.setUTCHours(24, 0, 0, 0);
+  providerBlocked.set(id, { until: daily ? midnight.getTime() : now + 60_000, daily });
+}
+export function providerBlock(id: string, now = Date.now()) {
+  const b = providerBlocked.get(id);
+  return b && b.until > now ? b : null;
+}
+
+// Seconds to wait before retrying a per-minute 429: the Retry-After header, Gemini's
+// RetryInfo ("retryDelay": "7s"), or a few seconds by default.
+export function retryDelayMs(headerValue: string | null, body: unknown) {
+  const header = Number(headerValue);
+  if (Number.isFinite(header) && header > 0) return Math.min(header * 1000, 15_000);
+  const match = /retryDelay"?\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(JSON.stringify(body || ""));
+  return match ? Math.min(Number(match[1]) * 1000, 15_000) : 6_000;
+}
+
+// Gemini's free tier allows only a few requests a minute, so parallel batches from one
+// search go out at most two at a time.
+const inFlight = new Map<string, number>();
+async function acquireSlot(id: string, limit: number, deadlineAt: number) {
+  while ((inFlight.get(id) || 0) >= limit && Date.now() < deadlineAt - 5000) await new Promise((r) => setTimeout(r, 250));
+  inFlight.set(id, (inFlight.get(id) || 0) + 1);
+  return () => inFlight.set(id, Math.max(0, (inFlight.get(id) || 1) - 1));
+}
+
+export function resetFreeModelCache() { freeModelCache = null; modelHealth.clear(); providerBlocked.clear(); inFlight.clear(); }
 
 async function freeOpenRouterModels(): Promise<string[]> {
   if (freeModelCache && Date.now() - freeModelCache.at < 60 * 60 * 1000) return freeModelCache.models;
@@ -112,18 +147,21 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
     });
   }
 
-  // Strict zero-cost mode must never fall through to a provider whose selected
-  // model could become billable. Deterministic extraction remains the fallback.
-  if (zeroCost) return out;
-
+  // Gemini (Google AI Studio key) and Groq both have free tiers and are the fallback once
+  // the OpenRouter free quota is used up. Strict zero-cost mode keeps them on their free
+  // models and ignores the Pro model overrides.
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
   if (geminiKey) {
+    const geminiModel = (!zeroCost && edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
     out.push({
       id: "gemini",
       label: "Google Gemini",
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       key: geminiKey,
-      model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: geminiModel,
+      // Each Gemini model has its own free daily cap: flash-lite allows the most requests,
+      // flash is the fallback when its cap is used up.
+      models: [...new Set([geminiModel, "gemini-2.5-flash-lite", "gemini-2.5-flash"])],
     });
   }
 
@@ -157,8 +195,8 @@ export function parseJsonLoose(text: string) {
   throw new Error("invalid structured output");
 }
 
-export type AiAttempt = { provider: AiProviderId; model: string; ok: boolean; message?: string };
-export type AiExtraction = { parsed: any | null; usage: any; provider?: AiProviderId; model?: string; attempts: AiAttempt[]; error: string };
+export type AiAttempt = { provider: AiProviderId; model: string; ok: boolean; message?: string; quota?: boolean };
+export type AiExtraction = { parsed: any; usage: any; provider?: AiProviderId; model?: string; attempts: AiAttempt[]; error: string; quotaExhausted?: boolean };
 
 // Tries each configured provider until one returns valid JSON or the time budget runs out.
 export async function runStructuredExtraction(options: {
@@ -190,27 +228,53 @@ export async function runStructuredExtraction(options: {
         // OpenRouter: route only to models that honour response_format (the free router
         // otherwise lands on models that answer in prose).
         ...(withFormat && provider.id === "openrouter" ? { provider: { require_parameters: true } } : {}),
+        // Gemini 2.5 thinks by default and the thinking counts against max_tokens, which
+        // leaves no room for the JSON. Flash models can turn it off.
+        ...(provider.id === "gemini" ? { reasoning_effort: /flash/i.test(model) ? "none" : "low" } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    const raw: any = await response.json().catch(() => null);
+    const body: any = await response.json().catch(() => null);
+    // Gemini wraps errors in an array.
+    const raw: any = Array.isArray(body) ? body[0] || null : body;
     return { response, raw };
   }
 
   for (const provider of providers) {
     // OpenRouter: the configured model first, then current free models as a fallback.
     const models = provider.id !== "openrouter"
-      ? [provider.model]
+      ? provider.models || [provider.model]
       : orderByHealth([...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...(await freeOpenRouterModels())])]);
     for (const model of models.slice(0, 4)) {
+      // Free models of one account share one quota; a paid model has its own.
+      const quotaKey = provider.id + ":" + (model.endsWith(":free") ? "free" : model);
+      const blocked = providerBlock(quotaKey);
+      if (blocked) {
+        if (!attempts.some((a) => a.quota && a.provider === provider.id)) {
+          attempts.push({ provider: provider.id, model, ok: false, quota: true, message: provider.label + (blocked.daily ? ": daily free limit reached, skipped until it resets." : ": rate limit, skipped for a minute.") });
+        }
+        continue;
+      }
       const remaining = options.deadlineAt - Date.now() - 1500;
       const timeoutMs = Math.min(options.perCallTimeoutMs, remaining);
       if (timeoutMs < 4000) {
         attempts.push({ provider: provider.id, model, ok: false, message: provider.label + ": not enough time left for AI verification." });
         break;
       }
+      const release = provider.id === "gemini" ? await acquireSlot(provider.id, 2, options.deadlineAt) : () => {};
       try {
         let { response, raw } = await call(provider, model, timeoutMs, true);
+        // A per-minute limit on Gemini/Groq (the last fallbacks): wait as asked and try once
+        // more while there is time. OpenRouter moves straight on to the next provider.
+        if (response.status === 429 && provider.id !== "openrouter" && !isDailyQuotaMessage(JSON.stringify(raw || ""))) {
+          const wait = retryDelayMs(response.headers.get("retry-after"), raw);
+          const left = options.deadlineAt - Date.now() - 1500 - wait;
+          if (left >= 6000) {
+            console.warn("[ai] " + provider.label + " " + model + " rate limit, retrying in " + Math.round(wait / 1000) + "s");
+            await new Promise((r) => setTimeout(r, wait));
+            ({ response, raw } = await call(provider, model, Math.min(timeoutMs, left), true));
+          }
+        }
         const errText = String(raw?.error?.message || raw?.error || "");
         if (!response.ok && (response.status === 400 || response.status === 404 || response.status === 422) && /response_format|json|structured|parameter/i.test(errText)) {
           ({ response, raw } = await call(provider, model, Math.min(timeoutMs, options.deadlineAt - Date.now() - 1500), false));
@@ -218,8 +282,20 @@ export async function runStructuredExtraction(options: {
         if (!response.ok || raw?.error) {
           const message = provider.label + " " + model + " HTTP " + response.status + ": " + String(raw?.error?.message || raw?.error?.metadata?.raw || "request failed").slice(0, 240);
           console.warn("[ai] " + message);
+          if (response.status === 429) {
+            // The limit is per account, not per model: stop this provider, go to the next one.
+            const daily = isDailyQuotaMessage(JSON.stringify(raw || ""));
+            // Gemini/Groq per-minute limits clear quickly; only a daily limit or OpenRouter
+            // (which has other free routes) is skipped for later calls.
+            if (daily || provider.id === "openrouter") blockProvider(quotaKey, daily);
+            attempts.push({ provider: provider.id, model, ok: false, quota: true, message });
+            // Another Gemini model has its own daily cap; a per-minute limit or OpenRouter's
+            // shared free quota ends this provider.
+            if (daily && provider.id !== "openrouter") continue;
+            break;
+          }
           attempts.push({ provider: provider.id, model, ok: false, message });
-          if (response.status !== 429) markModel(model, false);
+          markModel(model, false);
           continue;
         }
         try {
@@ -242,9 +318,12 @@ export async function runStructuredExtraction(options: {
           : provider.label + " " + model + " request failed: " + (error instanceof Error ? error.message : "network error");
         console.warn("[ai] " + message);
         attempts.push({ provider: provider.id, model, ok: false, message });
+      } finally {
+        release();
       }
     }
   }
+  const quotaExhausted = attempts.some((a) => a.quota);
   const error = attempts.filter((a) => a.message).map((a) => a.message).join(" ") + " Candidates are shown for manual review.";
-  return { parsed: null, usage: null, attempts, error };
+  return { parsed: null, usage: null, attempts, error, quotaExhausted };
 }

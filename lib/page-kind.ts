@@ -9,6 +9,9 @@ export type PageType = "entity" | "listing_index" | "article" | "catalog";
 
 const ARTICLE_PATH = /\/(blog|news|novosti|article|articles|stati|statya|faq|wiki|journal|magazine|media|guide|guides|insights|post|posts|press)(\/|$|-)/iu;
 const ARTICLE_TITLE = /(что такое|как (?:найти|выбрать|привлечь|купить|получить)|как работает|руководство|гид по|обзор|советы|топ[- ]?\d+|\d+ (?:лучших|способов|шагов|крупнейших|ведущих|главных|популярных|надежных|надёжных)|рейтинг|what is|how to|guide to|\btips\b|\btop[- ]?\d+|\d+ (?:best|top|leading|largest|biggest|major|popular)\b|\bbest (?:[\p{L}\d-]+ ){1,3}(?:in|for)\b|explained|\blist of\b)/iu;
+// Ranked lists of companies, often machine-translated ("Вершина 8 Производители…",
+// "Ведущие производители SMD…", "Leading LED manufacturers in China").
+const RANKING_TITLE = /(вершина\s+\d+|\d+\s+(?:производител|поставщик|компани|manufacturer|supplier|compan)\p{L}*|(?:^|[\s:|-])(?:ведущие|лучшие|крупнейшие|топ|top|leading|largest|biggest)\s+(?:[\p{L}\d-]+\s+){0,3}(?:производител|поставщик|manufacturers|suppliers|companies|factories|brands))/iu;
 const LISTING_PATH = /\/(search|category|categories|catalog|catalogue|katalog|listing|listings|tag|tags|filter|results|kupit|prodazha|for-sale|sale)(\/|$|\?|-)|[?&](page|sort|q|query)=/iu;
 const LISTING_TEXT = /(найден[оa]?\s*(?:объект|объявлен|предложен)\p{L}*\s*:?\s*\d|\d[\d\s]*\s+(?:объявлен|предложен|объект)\p{L}*\s+(?:по запросу|найдено|в продаже)|\b\d[\d,.\s]*\s+(?:results|listings|properties|homes|plots)\s+(?:found|for sale|available)|сортир\p{L}+ по|sort by|показать ещ[её]|load more|все объявления|view all listings)/iu;
 const LISTING_TITLE = /^(?:купить|продажа|снять|аренда|buy|sale of|for sale|properties for sale)(?=\s).*(?:участк|квартир|дом[аов]?(?![\p{L}])|вилл|недвижимост|апартамент|plots|land|houses|apartments|villas|properties)/iu;
@@ -42,7 +45,7 @@ export function classifyPage(input: { url?: string; title?: string; text?: strin
   const title = String(input.title || "");
   const text = String(input.text || "").slice(0, 4000);
 
-  if (ARTICLE_PATH.test(path) || ARTICLE_TITLE.test(title)) return "article";
+  if (ARTICLE_PATH.test(path) || ARTICLE_TITLE.test(title) || RANKING_TITLE.test(title)) return "article";
   if (isB2bListing(url)) return "listing_index";
   if (LISTING_TEXT.test(text) || LISTING_TITLE.test(title)) return "listing_index";
   const itemId = /\d{5,}/.test(path);
@@ -90,6 +93,18 @@ export function termCoverage(query: string, text: string) {
 
 // A place named in the query (a capitalised word: Мадрид, Амстердаме, Китае) that the
 // page also mentions. Returned in the page's own spelling, so it is grounded in the page.
+// The dictionary form of a place among the forms a page uses ("Мадрид" over "Мадриде",
+// "Испания" over "Испании"); a lone "-ии" form is turned into "-ия".
+function basePlaceForm(forms: string[], stemLower: string) {
+  if (!forms.length) return "";
+  const exact = forms.find((w) => w.toLowerCase() === stemLower);
+  if (exact) return exact;
+  const nominative = forms.find((w) => /(ия|ья)$/.test(w));
+  if (nominative) return nominative;
+  const shortest = [...forms].sort((a, b) => a.length - b.length)[0];
+  return shortest.endsWith("ии") ? shortest.slice(0, -2) + "ия" : shortest;
+}
+
 export function placeFromQuery(query: string, text: string) {
   // Whole capitalised words only, so acronyms such as SaaS or LED are not taken for places.
   const names = String(query || "").match(/(?<![\p{L}])\p{Lu}[\p{Ll}-]{2,}(?![\p{L}])/gu) || [];
@@ -98,7 +113,7 @@ export function placeFromQuery(query: string, text: string) {
   for (const name of names) {
     if (STOP.has(name.toLowerCase()) || /^(Найди|Найти|Нужны|Ищу|Find|Список|List|Уточнения|Details)$/.test(name)) continue;
     const s = stem(name);
-    const hit = pageWords.find((w) => w.toLowerCase().startsWith(s));
+    const hit = basePlaceForm(pageWords.filter((w) => w.toLowerCase().startsWith(s)), s);
     if (hit && !found.includes(hit)) found.push(hit);
   }
   return found.slice(0, 2).join(", ");

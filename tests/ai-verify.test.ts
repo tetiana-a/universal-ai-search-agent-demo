@@ -53,17 +53,15 @@ describe("AI provider", () => {
     expect(rankFreeModels(list)).toEqual(["meta-llama/llama-3.3-70b-instruct:free", "mistralai/mistral-small-3.2-24b-instruct:free"]);
   });
 
-  it("moves to the next free model on a rate limit and retries without response_format when a model rejects it", async () => {
+  it("retries without response_format when a model rejects it", async () => {
     const bodies: any[] = [];
     mockFetch([
       { match: (u) => u.endsWith("/api/v1/models"), respond: () => json({ data: [
-        { id: "a/first:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000 },
         { id: "b/second:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000 },
       ] }) },
       { match: (u) => u.endsWith("/chat/completions"), respond: (_u, init) => {
         const body = JSON.parse(String(init?.body));
         bodies.push(body);
-        if (body.model === "a/first:free") return json({ error: { message: "Rate limit exceeded: free-models-per-min" } }, 429);
         if (body.response_format) return json({ error: { message: "response_format is not supported by this model" } }, 400);
         return openRouterReply({ ok: true });
       } },
@@ -71,9 +69,43 @@ describe("AI provider", () => {
     const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
     expect(out.parsed).toEqual({ ok: true });
     expect(out.model).toBe("b/second:free");
-    expect(out.attempts[0]).toMatchObject({ ok: false, model: "a/first:free" });
-    expect(out.attempts[0].message).toContain("429");
-    expect(bodies.map((b) => [b.model, Boolean(b.response_format)])).toEqual([["a/first:free", true], ["b/second:free", true], ["b/second:free", false]]);
+    expect(bodies.map((b) => [b.model, Boolean(b.response_format)])).toEqual([["b/second:free", true], ["b/second:free", false]]);
+  });
+
+  it("stops OpenRouter after the first 429 and goes straight to the next provider", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    const calls: string[] = [];
+    mockFetch([
+      { match: (u) => u.endsWith("/api/v1/models"), respond: () => json({ data: [
+        { id: "a/first:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000 },
+        { id: "b/second:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000 },
+      ] }) },
+      { match: (u) => u.includes("openrouter.ai") && u.endsWith("/chat/completions"), respond: (_u, init) => {
+        calls.push("openrouter:" + JSON.parse(String(init?.body)).model);
+        return json({ error: { message: "Rate limit exceeded: free-models-per-min" } }, 429);
+      } },
+      { match: (u) => u.includes("generativelanguage.googleapis.com"), respond: () => { calls.push("gemini"); return openRouterReply({ ok: true }); } },
+    ]);
+    const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(out.parsed).toEqual({ ok: true });
+    expect(out.provider).toBe("gemini");
+    expect(calls).toEqual(["openrouter:a/first:free", "gemini"]);
+    expect(out.attempts[0]).toMatchObject({ ok: false, quota: true });
+  });
+
+  it("remembers an exhausted daily quota and reports it without spending more requests", async () => {
+    let chatCalls = 0;
+    mockFetch([
+      { match: (u) => u.endsWith("/api/v1/models"), respond: () => json({ data: [{ id: "a/first:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000 }] }) },
+      { match: (u) => u.endsWith("/chat/completions"), respond: () => { chatCalls += 1; return json({ error: { message: "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day" } }, 429); } },
+    ]);
+    const first = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(first.parsed).toBeNull();
+    expect(first.quotaExhausted).toBe(true);
+    const second = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(second.quotaExhausted).toBe(true);
+    expect(second.error).toMatch(/daily free limit/);
+    expect(chatCalls).toBe(1);
   });
 });
 
@@ -216,5 +248,39 @@ describe("after the third live test", () => {
     expect(body.aiStatus.ok).toBe(true);
     expect(body.results).toEqual([]);
     expect(body.outcome).toBe("all_candidates_rejected");
+  });
+});
+
+describe("Gemini free tier", () => {
+  it("turns off thinking for flash and retries once after a per-minute 429", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    const bodies: any[] = [];
+    mockFetch([
+      { match: (u) => u.includes("generativelanguage.googleapis.com"), respond: (_u, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        if (bodies.length === 1) return json([{ error: { code: 429, message: "Quota exceeded for metric: generate_content_free_tier_requests, limit: 10 per minute", details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "0.01s" }] } }], 429);
+        return openRouterReply({ ok: true });
+      } },
+    ]);
+    const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(out.parsed).toEqual({ ok: true });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].reasoning_effort).toBe("none");
+  });
+
+  it("treats a Gemini per-day 429 as the daily quota", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    let calls = 0;
+    mockFetch([
+      { match: (u) => u.includes("generativelanguage.googleapis.com"), respond: () => { calls += 1; return json([{ error: { code: 429, message: "Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel-FreeTier" } }], 429); } },
+    ]);
+    const out = await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(out.quotaExhausted).toBe(true);
+    // flash-lite, then flash (each has its own daily cap); a later call skips both.
+    expect(calls).toBe(2);
+    await runStructuredExtraction({ system: "s", user: "u", schema: {}, deadlineAt: Date.now() + 30000, maxTokens: 50, perCallTimeoutMs: 10000 });
+    expect(calls).toBe(2);
   });
 });
