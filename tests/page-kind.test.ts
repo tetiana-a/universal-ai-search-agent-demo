@@ -103,3 +103,36 @@ describe("export file names", () => {
     expect(safeFilenamePart("")).toBe("research");
   });
 });
+
+describe("junk links and placeholder contacts", () => {
+  it("drops cart, account, login, static, image and bare home-page links", async () => {
+    const { itemLinks } = await import("@/lib/free-research");
+    const content = [
+      "[Cart](https://cart.example-shop.com/cart/view-12345)",
+      "[Account](https://www.example-shop.com/my-account/orders/12345)",
+      "[Login](https://www.example-shop.com/user/login?next=12345)",
+      "[Static](https://static.example-shop.com/files/plot-12345.html)",
+      "[Image](https://www.example-shop.com/photos/plot-12345.jpg)",
+      "[CDN](https://img1.example-shop.com/plot/12345)",
+      "[Home](https://news.example-shop.com/)",
+      "[Plot](https://www.example-shop.com/plots/finca-rustica-toledo-12345)",
+    ].join(" ");
+    expect(itemLinks("https://www.example-shop.com/plots/toledo/", content)).toEqual(["https://www.example-shop.com/plots/finca-rustica-toledo-12345"]);
+  });
+
+  it("rejects placeholder emails and phones", async () => {
+    const { heuristicFields, isPlaceholderEmail, isPlaceholderPhone, cleanContact } = await import("@/lib/task-profile");
+    expect(isPlaceholderEmail("test1234@126.com")).toBe(true);
+    expect(isPlaceholderEmail("name@example.com")).toBe(true);
+    expect(isPlaceholderEmail("logo@2x.png")).toBe(true);
+    expect(isPlaceholderEmail("sales@shenzhen-led.com")).toBe(false);
+    expect(isPlaceholderPhone("001234")).toBe(true);
+    expect(isPlaceholderPhone("+00 000 000 000")).toBe(true);
+    expect(isPlaceholderPhone("+86 123 4567 8901")).toBe(true);
+    expect(isPlaceholderPhone("+34 912 75 30 64")).toBe(false);
+    expect(heuristicFields("company", "Mail test1234@126.com or sales@shenzhen-led.com, tel +00 1234 5678 / +86 755 2861 9043").contact)
+      .toBe("sales@shenzhen-led.com · +86 755 2861 9043");
+    expect(cleanContact("test1234@126.com, +86 755 2861 9043")).toBe("+86 755 2861 9043");
+    expect(cleanContact("test@example.com")).toBe("");
+  });
+});

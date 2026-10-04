@@ -57,8 +57,34 @@ export function fieldSchemaFor(kind: ResearchKind): FieldDef[] {
 
 const PRICE = /(?:€|eur|euro|\$|usd|£|gbp|₽|руб|¥|cny|rmb)\s?\d[\d\s.,]*(?:\s?(?:k|m|mln|млн|тыс|million|thousand))?|\d[\d\s.,]*\s?(?:€|eur|euro|\$|usd|£|₽|руб\.?|млн|million)/i;
 const AREA = /\d[\d\s.,]*\s?(?:m²|m2|кв\.?\s?м|м²|sq\.?\s?m|sqm|ha|hectares?|га|гектар\w*|acres?)/i;
-const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-const PHONE = /(?:\+|00)\d[\d\s().-]{7,}\d/;
+const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const PHONE = /(?:\+|00)\d[\d\s().-]{7,}\d/g;
+
+// Template and demo contacts (test1234@126.com, name@example.com, +00 1234 5678) are not
+// real contacts and must not reach the table.
+export function isPlaceholderEmail(email: string) {
+  const [local = "", domain = ""] = String(email || "").toLowerCase().split("@");
+  if (/\.(png|jpe?g|gif|webp|svg|css|js)$/.test(domain)) return true;
+  if (/^(example|test|sample|demo|domain|email|yourdomain|yoursite|company|mysite|site)\.(com|net|org)$|(^|\.)(example|invalid|test|localhost)$|sentry|wixpress/.test(domain)) return true;
+  return /^(test|tester|example|sample|demo|user|username|name|yourname|your-?email|email|mail|someone|somebody|john\.?doe|jane\.?doe|no-?reply|do-?not-?reply|xxx+|abc|asdf|qwerty)[\d._-]*$/.test(local);
+}
+export function isPlaceholderPhone(phone: string) {
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (/^\s*00/.test(phone)) digits = digits.slice(2);
+  if (digits.length < 8 || digits.length > 15) return true;
+  if (/^(\d)\1+$/.test(digits) || /0{6,}/.test(digits)) return true;
+  if (/^0/.test(digits)) return true; // no country code starts with 0
+  return /123456|234567|345678|456789|987654|876543/.test(digits);
+}
+// A contact string from the AI or a page with placeholder emails and phones removed.
+export function cleanContact(value: string) {
+  return String(value || "")
+    .replace(EMAIL, (e) => (isPlaceholderEmail(e) ? "" : e))
+    .replace(PHONE, (p) => (isPlaceholderPhone(p) ? "" : p))
+    .replace(/(\s*[·,;|]\s*){2,}/g, " · ")
+    .replace(/^[\s·,;|]+|[\s·,;|]+$/g, "")
+    .trim();
+}
 const TICKET = /(?:ticket|cheque|check|чек|invest(?:s|ing)?)\D{0,30}((?:€|eur|\$|usd|£)\s?\d[\d.,]*\s?(?:k|m|mln|million)?(?:\s?(?:-|–|to|до)\s?(?:€|eur|\$|usd|£)?\s?\d[\d.,]*\s?(?:k|m|mln|million)?)?)/i;
 const STAGE = /\b(pre-seed|seed|series [a-e]|growth|early[- ]stage|late[- ]stage)\b/i;
 
@@ -70,8 +96,8 @@ function clip(value: string | undefined, limit = 120) {
 // taken when they literally appear in the text, so nothing is invented.
 export function heuristicFields(kind: ResearchKind, text: string) {
   const out: Record<string, string> = {};
-  const email = text.match(EMAIL)?.[0];
-  const phone = text.match(PHONE)?.[0];
+  const email = (text.match(EMAIL) || []).find((e) => !isPlaceholderEmail(e));
+  const phone = (text.match(PHONE) || []).find((p) => !isPlaceholderPhone(p));
   if (email || phone) out.contact = clip([email, phone].filter(Boolean).join(" · "));
   if (kind === "real_estate" || kind === "general") {
     const price = text.match(PRICE)?.[0];

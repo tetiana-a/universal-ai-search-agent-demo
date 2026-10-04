@@ -4,6 +4,7 @@ import { POST as CLARIFY } from "@/app/api/research/clarify/route";
 import { GET as MODE } from "@/app/api/research/mode/route";
 import { clearReaderCache } from "@/lib/free-research";
 import { resetLocalQuotaCounters } from "@/lib/plans";
+import { resetFreeModelCache } from "@/lib/free-ai";
 import { parseDuckDuckGoHtml, parseDuckDuckGoLite, unwrapDuckDuckGoUrl } from "@/lib/keyless-search";
 import { parseRobots, robotsAllows, htmlToText } from "@/lib/direct-reader";
 import { applyClarifications, clarifyingQuestions, heuristicFields } from "@/lib/task-profile";
@@ -42,6 +43,7 @@ function keylessReader(pages: Record<string, string>) {
 }
 
 beforeEach(() => {
+  resetFreeModelCache();
   clearReaderCache();
   resetLocalQuotaCounters();
   vi.stubEnv("PLAN_ENFORCEMENT", "on");

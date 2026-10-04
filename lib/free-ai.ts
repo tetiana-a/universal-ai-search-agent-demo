@@ -66,7 +66,24 @@ export function orderByHealth(models: string[]) {
   return [...list].sort((a, b) => (modelHealth.get(b)?.goodAt || 0) - (modelHealth.get(a)?.goodAt || 0));
 }
 
-export function resetFreeModelCache() { freeModelCache = null; modelHealth.clear(); }
+// A provider that answered 429 (rate or daily quota) is skipped by every later call in this
+// instance: a per-day quota until the next UTC midnight, a per-minute limit for a minute.
+// Without this one search burns the whole free daily quota on retries.
+const providerBlocked = new Map<string, { until: number; daily: boolean }>();
+export function isDailyQuotaMessage(text: string) {
+  return /per[- ]?day|daily|free-models-per-day|quota/i.test(String(text || ""));
+}
+export function blockProvider(id: string, daily: boolean, now = Date.now()) {
+  const midnight = new Date(now);
+  midnight.setUTCHours(24, 0, 0, 0);
+  providerBlocked.set(id, { until: daily ? midnight.getTime() : now + 60_000, daily });
+}
+export function providerBlock(id: string, now = Date.now()) {
+  const b = providerBlocked.get(id);
+  return b && b.until > now ? b : null;
+}
+
+export function resetFreeModelCache() { freeModelCache = null; modelHealth.clear(); providerBlocked.clear(); }
 
 async function freeOpenRouterModels(): Promise<string[]> {
   if (freeModelCache && Date.now() - freeModelCache.at < 60 * 60 * 1000) return freeModelCache.models;
@@ -157,8 +174,8 @@ export function parseJsonLoose(text: string) {
   throw new Error("invalid structured output");
 }
 
-export type AiAttempt = { provider: AiProviderId; model: string; ok: boolean; message?: string };
-export type AiExtraction = { parsed: any | null; usage: any; provider?: AiProviderId; model?: string; attempts: AiAttempt[]; error: string };
+export type AiAttempt = { provider: AiProviderId; model: string; ok: boolean; message?: string; quota?: boolean };
+export type AiExtraction = { parsed: any | null; usage: any; provider?: AiProviderId; model?: string; attempts: AiAttempt[]; error: string; quotaExhausted?: boolean };
 
 // Tries each configured provider until one returns valid JSON or the time budget runs out.
 export async function runStructuredExtraction(options: {
@@ -203,6 +220,15 @@ export async function runStructuredExtraction(options: {
       ? [provider.model]
       : orderByHealth([...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...(await freeOpenRouterModels())])]);
     for (const model of models.slice(0, 4)) {
+      // Free models of one account share one quota; a paid model has its own.
+      const quotaKey = provider.id + ":" + (/:free$/.test(model) ? "free" : model);
+      const blocked = providerBlock(quotaKey);
+      if (blocked) {
+        if (!attempts.some((a) => a.quota && a.provider === provider.id)) {
+          attempts.push({ provider: provider.id, model, ok: false, quota: true, message: provider.label + (blocked.daily ? ": daily free limit reached, skipped until it resets." : ": rate limit, skipped for a minute.") });
+        }
+        continue;
+      }
       const remaining = options.deadlineAt - Date.now() - 1500;
       const timeoutMs = Math.min(options.perCallTimeoutMs, remaining);
       if (timeoutMs < 4000) {
@@ -218,8 +244,15 @@ export async function runStructuredExtraction(options: {
         if (!response.ok || raw?.error) {
           const message = provider.label + " " + model + " HTTP " + response.status + ": " + String(raw?.error?.message || raw?.error?.metadata?.raw || "request failed").slice(0, 240);
           console.warn("[ai] " + message);
+          if (response.status === 429) {
+            // The limit is per account, not per model: stop this provider, go to the next one.
+            const daily = isDailyQuotaMessage(String(raw?.error?.message || errText) + " " + JSON.stringify(raw?.error?.metadata || ""));
+            blockProvider(quotaKey, daily);
+            attempts.push({ provider: provider.id, model, ok: false, quota: true, message });
+            break;
+          }
           attempts.push({ provider: provider.id, model, ok: false, message });
-          if (response.status !== 429) markModel(model, false);
+          markModel(model, false);
           continue;
         }
         try {
@@ -245,6 +278,7 @@ export async function runStructuredExtraction(options: {
       }
     }
   }
+  const quotaExhausted = attempts.some((a) => a.quota);
   const error = attempts.filter((a) => a.message).map((a) => a.message).join(" ") + " Candidates are shown for manual review.";
-  return { parsed: null, usage: null, attempts, error };
+  return { parsed: null, usage: null, attempts, error, quotaExhausted };
 }

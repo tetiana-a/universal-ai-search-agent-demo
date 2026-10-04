@@ -1,5 +1,5 @@
 import { type BackgroundResearchRequest, normalizeCompletedResearch, progressCounters } from "@/lib/background-research";
-import { buildSourceMap, classLabel, pickBranches, type SourceMap } from "@/lib/source-map";
+import { buildSourceMap, classLabel, pickBranches, roughEnglish, type SourceMap } from "@/lib/source-map";
 import { buildAccessEscalationPlan } from "@/lib/access-escalation";
 import { filterResearchResults } from "@/lib/relevance-gate";
 import { configuredFallbackProviders, searchFallbackProviders } from "@/lib/provider-search";
@@ -9,7 +9,7 @@ import { isQuoteGrounded, normalizeResultUrl, registrableDomain } from "@/lib/re
 import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
 import { directRead } from "@/lib/direct-reader";
 import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
-import { fieldSchemaFor, heuristicFields } from "@/lib/task-profile";
+import { cleanContact, fieldSchemaFor, heuristicFields } from "@/lib/task-profile";
 import { verifyPagesWithAi, type VerifyOutcome } from "@/lib/ai-verify";
 import { checkNumericCriteria, describeCriteria, hasNumericCriteria, parseNumericCriteria } from "@/lib/criteria";
 import { classifyPage, isNoiseSource, pageTypeLabel, placeFromQuery, profileFromText, termCoverage, type PageType } from "@/lib/page-kind";
@@ -150,8 +150,14 @@ function buildBranches(map: SourceMap, testMode = false, sourceMemory: Backgroun
 
 // Search engines and foreign portals match English (or local) words far better than a
 // Russian sentence. With an AI key the task is turned into a short English phrase first.
+// The free AI quota is small (about 50 requests a day on OpenRouter), so the AI is asked
+// only when the built-in dictionary cannot translate the subject.
+// Pages per AI call: fewer calls per search keeps the free daily quota for more searches.
+const AI_BATCH_SIZE = Math.max(1, Number(process.env.FREE_AI_BATCH_SIZE || 6));
+
 async function englishSubject(query: string, edition: "free" | "pro", deadlineAt: number) {
   if (!/[^\x00-\x7F]/.test(query) || !configuredAiProviders(edition).length || process.env.TRANSLATE_QUERY === "off") return "";
+  if (roughEnglish(query, inferResearchKind(query), "")) return "";
   const out = await runStructuredExtraction({
     system: "Rewrite the user's search task as one short English web-search phrase (at most 12 words). Keep names, places, numbers and units. Return JSON {\"en\": \"...\"}.",
     user: query.slice(0, 600),
@@ -163,6 +169,17 @@ async function englishSubject(query: string, edition: "free" | "pro", deadlineAt
   }).catch(() => null);
   const en = String(out?.parsed?.en || "").replace(/\s+/g, " ").trim();
   return /^[\x00-\x7F€£]+$/.test(en) ? en.slice(0, 160) : "";
+}
+
+const B2B_PLATFORM = /(^|\.)(made-in-china|alibaba|globalsources|europages|tradeindia|indiamart|ec21|ecplaza|tradekey|dhgate)\.[a-z.]+$/i;
+const JUNK_HOST = /^(www\.)?(login|passport|sso|auth|accounts?|my|member|members|cart|buy|checkout|pay|payment|static|assets?|img\d*|images?|image\d*|pic|pics|photo|photos|media|cdn\d*|s\d*|m|help|service|sale|offer|insights|activity|message|messages|feedback|i)\./i;
+const JUNK_PATH = /\/(login|log-in|logout|signin|sign-in|signup|sign-up|register|join|cart|basket|checkout|wishlist|favou?rites?|compare|account|my-?account|user|member|passport|auth|sso|privacy|terms|cookies?|contact|contact-us|about|about-us|blog|news|faq|help|search|tag|tags|category|static|assets|img|images|uploads?|media|cdn|feedback|inquiry|sitemap)(\/|$|\.)/i;
+const JUNK_EXT = /\.(jpe?g|png|gif|webp|avif|bmp|ico|svg|pdf|css|js|json|xml|zip|rar|mp4|mp3|woff2?|ttf)$/i;
+
+// Links that are never an item: login, cart, account, static files, images, CDN hosts.
+export function isJunkLink(url: URL) {
+  return JUNK_HOST.test(url.hostname) || JUNK_PATH.test(url.pathname) || JUNK_EXT.test(url.pathname)
+    || /[?&](action|do)=(login|cart|add|register)/i.test(url.search);
 }
 
 // Stage 3 of the spec: a list page (a portal's search results, a directory) is opened
@@ -179,10 +196,11 @@ export function itemLinks(listUrl: string, content: string, limit = 6) {
     if (registrableDomain(url.toString()) !== registrableDomain(base.toString())) continue;
     const subdomain = url.hostname.replace(/^www\./, "") !== base.hostname.replace(/^www\./, "");
     const path = url.pathname;
-    if (/\.(jpg|jpeg|png|gif|webp|svg|pdf|css|js)$/i.test(path)) continue;
-    if (/\/(login|signin|register|cart|basket|account|privacy|terms|contact|about|blog|news|faq|help|search|tag|category)(\/|$)/i.test(path)) continue;
+    if (isJunkLink(url)) continue;
     if (subdomain) {
-      if (/^(www|m|s|login|passport|my|help|service|sale|offer|insights|activity)\./i.test(url.hostname)) continue;
+      // A bare subdomain home page is only an item on B2B platforms (a supplier's shop).
+      // Elsewhere a subdomain link must look like a detail page.
+      if (!B2B_PLATFORM.test(registrableDomain(base.toString())) && !/\d{3,}|[a-z]+(?:-[a-z0-9]+){3,}/i.test(path)) continue;
     } else {
       if (path === base.pathname || path.split("/").filter(Boolean).length < 2) continue;
       // Detail pages usually carry an id or a long slug.
@@ -538,9 +556,12 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
 
   let verify: VerifyOutcome | null = null;
   if (hasAi && aiPages.length) {
-    verify = await verifyPagesWithAi({ query: input.query, kind, criteria, language: input.language, pages: aiPages, edition, deadlineAt, batchSize: 3 });
+    verify = await verifyPagesWithAi({ query: input.query, kind, criteria, language: input.language, pages: aiPages, edition, deadlineAt, batchSize: AI_BATCH_SIZE });
   }
-  const aiError = !hasAi ? "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY)." : verify && verify.error ? verify.error : "";
+  const aiQuota = Boolean(verify?.quotaExhausted) && !verify?.checkedPages;
+  const aiError = !hasAi ? "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY)."
+    : aiQuota ? "AI check unavailable: the free daily AI limit is reached. " + (verify?.error || "")
+    : verify && verify.error ? verify.error : "";
   const verifiedById = new Map((verify?.items || []).map((item) => [item.id, item]));
   const pageById = new Map(aiPages.map((page) => [page.id, page]));
   const hitByUrl = new Map(candidateHits.map((hit) => [hit.url, hit]));
@@ -572,7 +593,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       specialization: item.specialization || profileFromText(kind, pageText),
       geography: place,
       location: place,
-      contact: item.contact,
+      contact: cleanContact(item.contact),
       investment_type: item.investment_type,
       stage: item.stage,
       ticket: item.ticket,
@@ -660,6 +681,8 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       ? (ru
           ? `ИИ-проверка (${verify.provider} · ${verify.model}): проверено страниц ${verify.checkedPages}, подошло ${aiKept}, отсеяно ${aiDropped}.` + (verify.error ? " Часть страниц ИИ не проверил: " + verify.error : "")
           : `AI verification (${verify.provider} · ${verify.model}): ${verify.checkedPages} pages checked, ${aiKept} kept, ${aiDropped} dropped.` + (verify.error ? " Some pages were not checked: " + verify.error : ""))
+      : aiPages.length && aiQuota
+        ? (ru ? "ИИ-проверка недоступна: дневной лимит бесплатного ИИ исчерпан. Результаты отобраны правилами, проверьте их вручную. Лимит обновится в 03:00 по Москве; чтобы снять его, добавьте бесплатный GEMINI_API_KEY или пополните OpenRouter на $10." : "AI check unavailable: the free daily AI limit is reached. Results were selected by rules and need manual review. The limit resets at 00:00 UTC; add a free GEMINI_API_KEY or $10 of OpenRouter credit to lift it.")
       : aiPages.length
         ? (ru ? "ИИ-проверка не сработала: " + aiError + " Поля взяты правилами, результаты нужно проверить вручную." : "AI verification failed: " + aiError + " Fields were extracted by rules and need manual review.")
         : "";
@@ -731,6 +754,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     kept: aiKept,
     dropped: aiDropped,
     message: aiError || (verify?.checkedPages ? "ok" : "skipped"),
+    quotaExhausted: Boolean(verify?.quotaExhausted),
     attempts: verify?.attempts || [],
   };
   normalized.stats.candidatesFound = discoveredTotal;

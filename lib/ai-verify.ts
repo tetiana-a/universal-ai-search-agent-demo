@@ -81,6 +81,8 @@ function excerpt(content: string, max = 2200) {
 }
 
 export function buildVerifyPrompt(query: string, kind: ResearchKind, criteria: NumericCriteria, lang: "ru" | "en", pages: VerifyPage[]) {
+  // Larger batches get shorter excerpts so the request stays small for a free model.
+  const perPage = pages.length > 3 ? 1500 : 2200;
   const numeric = describeCriteria(criteria, "en");
   const system = [
     "You verify web pages for a research task and extract structured facts. Use only text from the pages; never invent facts or URLs.",
@@ -94,7 +96,7 @@ export function buildVerifyPrompt(query: string, kind: ResearchKind, criteria: N
   const user = [
     "TASK: " + query,
     "",
-    ...pages.map((p) => "PAGE id=" + p.id + "\nURL: " + p.url + "\nTITLE: " + p.title + "\nTEXT:\n" + excerpt(p.content) + "\n"),
+    ...pages.map((p) => "PAGE id=" + p.id + "\nURL: " + p.url + "\nTITLE: " + p.title + "\nTEXT:\n" + excerpt(p.content, perPage) + "\n"),
   ].join("\n");
   return { system, user };
 }
@@ -107,6 +109,7 @@ export type VerifyOutcome = {
   usage: any;
   error: string;
   checkedPages: number;
+  quotaExhausted: boolean;
 };
 
 export async function verifyPagesWithAi(options: {
@@ -119,7 +122,7 @@ export async function verifyPagesWithAi(options: {
   deadlineAt: number;
   batchSize?: number;
 }): Promise<VerifyOutcome> {
-  const size = Math.max(1, options.batchSize || 3);
+  const size = Math.max(1, options.batchSize || 6);
   const batches: VerifyPage[][] = [];
   for (let i = 0; i < options.pages.length; i += size) batches.push(options.pages.slice(i, i + size));
   const outcomes = await Promise.all(batches.map((batch) => {
@@ -131,7 +134,7 @@ export async function verifyPagesWithAi(options: {
       edition: options.edition,
       deadlineAt: options.deadlineAt,
       // Generous: some free models think before answering and return nothing when cut off.
-      maxTokens: 700 * batch.length + 600,
+      maxTokens: 500 * batch.length + 600,
       perCallTimeoutMs: Number(process.env.FREE_AI_TIMEOUT_MS || 25000),
     }).then((out) => ({ out, batch }));
   }));
@@ -176,5 +179,6 @@ export async function verifyPagesWithAi(options: {
   }
   const failed = outcomes.length - outcomes.filter((o) => o.out.parsed).length;
   const error = failed ? [...new Set(errors)].join(" ").slice(0, 600) : "";
-  return { items, attempts, provider, model, usage, error, checkedPages };
+  const quotaExhausted = outcomes.some((o) => !o.out.parsed && o.out.quotaExhausted);
+  return { items, attempts, provider, model, usage, error, checkedPages, quotaExhausted };
 }
