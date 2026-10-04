@@ -86,22 +86,36 @@ async function freeOpenRouterModels(): Promise<string[]> {
 
 export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   const out: AiProvider[] = [];
+  const zeroCost = process.env.ZERO_COST_MODE === "on";
   const openRouterKey = String(process.env.OPENROUTER_API_KEY || "").trim();
+
   if (openRouterKey) {
-    const configured = String((edition === "pro" && process.env.PRO_OPENROUTER_MODEL) || process.env.OPENROUTER_MODEL || "").trim();
+    const requested = String(
+      (edition === "pro" && process.env.PRO_OPENROUTER_MODEL) ||
+      process.env.OPENROUTER_MODEL ||
+      "",
+    ).trim();
+    const freeOnlyModel = requested === "openrouter/free" || requested.endsWith(":free")
+      ? requested
+      : "openrouter/free";
+
     out.push({
       id: "openrouter",
-      label: "OpenRouter",
+      label: zeroCost ? "OpenRouter Free" : "OpenRouter",
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
       key: openRouterKey,
-      // "auto-free" means: pick from the current free models at call time.
-      model: configured || "auto-free",
+      model: zeroCost ? freeOnlyModel : requested || "auto-free",
       headers: {
         "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://universal-ai-search-agent-demo.vercel.app",
         "X-Title": "Aurelius Universal AI Research Engine",
       },
     });
   }
+
+  // Strict zero-cost mode must never fall through to a provider whose selected
+  // model could become billable. Deterministic extraction remains the fallback.
+  if (zeroCost) return out;
+
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
   if (geminiKey) {
     out.push({
@@ -112,6 +126,7 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
     });
   }
+
   const groqKey = String(process.env.GROQ_API_KEY || "").trim();
   if (groqKey) {
     out.push({
@@ -122,6 +137,7 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
     });
   }
+
   return out;
 }
 
@@ -157,7 +173,7 @@ export async function runStructuredExtraction(options: {
   const providers = configuredAiProviders(options.edition || "free");
   const attempts: AiAttempt[] = [];
   if (!providers.length) {
-    return { parsed: null, usage: null, attempts, error: "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY); results were extracted by rules and need manual review." };
+    return { parsed: null, usage: null, attempts, error: "No eligible AI provider is configured; results were extracted by rules and need manual review." };
   }
   // One call to one model. A model that rejects response_format is retried once without it.
   async function call(provider: AiProvider, model: string, timeoutMs: number, withFormat: boolean) {

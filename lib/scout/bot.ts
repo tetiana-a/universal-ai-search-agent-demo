@@ -82,13 +82,54 @@ function sourceText(s: ScoutSource) {
     (s.summary ? "\n" + escapeHtml(s.summary.slice(0, 220)) : "") + "\n" + escapeHtml(s.url);
 }
 
+function mainPanelKeyboard(): Keyboard {
+  return [
+    [
+      { text: "🔎 Новый поиск", callback_data: "menu:find" },
+      { text: "📍 Статус", callback_data: "menu:status" },
+    ],
+    [
+      { text: "📊 Отчёт", callback_data: "menu:report" },
+      { text: "🛰 Обход", callback_data: "menu:scan" },
+    ],
+    [
+      { text: "🌐 Источники", callback_data: "menu:sources" },
+      { text: "✉️ Черновики", callback_data: "menu:drafts" },
+    ],
+    [
+      { text: "👥 Лиды", callback_data: "menu:leads" },
+      { text: "⚙️ Настройки", callback_data: "menu:settings" },
+    ],
+    [{ text: "🖥 Открыть дашборд", url: dashboardUrl() }],
+  ];
+}
+
+async function showPanel(chatId: string) {
+  const task = await loadTask(chatId);
+  const state = task
+    ? "Текущая задача: <b>" + escapeHtml(task.query.slice(0, 120)) + "</b>\nСтатус: " + escapeHtml(task.state)
+    : "Активной задачи сейчас нет.";
+  await sendMessage(
+    chatId,
+    "<b>AURELIUS · центр управления</b>\n" +
+      "Одна панель для поиска, источников, отчётов и действий.\n\n" +
+      state +
+      "\n\nВыберите действие:",
+    mainPanelKeyboard(),
+  );
+}
+
 // ---- Commands -------------------------------------------------------------------
 
 async function handleCommand(chatId: string, userId: string, userName: string, cmd: string, args: string): Promise<BotResult> {
   switch (cmd) {
     case "start":
+    case "panel":
+      await showPanel(chatId);
+      return {};
+
     case "help":
-      await sendMessage(chatId, HELP);
+      await sendMessage(chatId, HELP, mainPanelKeyboard());
       return {};
 
     case "find":
@@ -275,6 +316,21 @@ async function handleCallback(query: any): Promise<BotResult> {
   const by = query.from?.username ? "@" + query.from.username : query.from?.first_name || userId;
   if (!isControl(chatId, userId)) { await answerCallback(query.id, "Нет доступа"); return {}; }
   const [kind, action, id] = data.split(":");
+  if (kind === "menu") {
+    await answerCallback(query.id, "✓");
+    if (action === "find") {
+      await tgForceReply(chatId, "🔎 Напишите одним сообщением, что нужно найти. Я запущу поиск по бесплатному маршруту.");
+      return {};
+    }
+    if (action === "panel") {
+      await showPanel(chatId);
+      return {};
+    }
+    if (["status", "report", "scan", "sources", "drafts", "leads", "settings"].includes(action)) {
+      return handleCommand(chatId, userId, by, action, "");
+    }
+    return {};
+  }
   if (kind === "rs") return { background: await handleResearchCallback(chatId, action, query.id) };
 
   if (kind === "src") {
