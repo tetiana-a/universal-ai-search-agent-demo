@@ -149,18 +149,23 @@ export function mergeRound(task: ResearchTask, outcome: RoundOutcome): ResearchT
   }
   results.sort((a, b) => Number(b?.match || 0) - Number(a?.match || 0));
 
+  // The source map is re-sent every round: a known source is updated when a later round
+  // actually checked it (or found it unavailable), and is not counted as discovered again.
   const sources = [...task.sources];
-  const sourceSeen = new Set(sources.map((s) => urlKey(s?.url) || String(s?.domain || "")));
+  const sourceIndex = new Map(sources.map((s, i) => [urlKey(s?.url) || String(s?.domain || ""), i] as const));
+  let alreadyKnown = 0;
   for (const item of outcome.sourceRegistry || []) {
     const key = urlKey(item?.url) || String(item?.domain || "");
-    if (!key || sourceSeen.has(key)) continue;
-    sourceSeen.add(key);
-    sources.push(item);
+    if (!key) continue;
+    const at = sourceIndex.get(key);
+    if (at === undefined) { sourceIndex.set(key, sources.length); sources.push(item); continue; }
+    alreadyKnown += 1;
+    if (sources[at]?.accessStatus === "partial" && item?.accessStatus && item.accessStatus !== "partial") sources[at] = item;
   }
 
   const round = outcome.progressCounters || {};
   const counters: ReportCounters = {
-    sourcesDiscovered: task.counters.sourcesDiscovered + Number(round.sourcesDiscovered || 0),
+    sourcesDiscovered: task.counters.sourcesDiscovered + Math.max(0, Number(round.sourcesDiscovered || 0) - alreadyKnown),
     sourcesInBase: Math.max(task.counters.sourcesInBase, Number(round.sourcesInBase || 0)),
     sourcesChecked: sources.filter((s) => s?.accessStatus === "checked").length,
     sourcesUnavailable: sources.filter((s) => UNAVAILABLE.has(String(s?.accessStatus))).length,

@@ -99,10 +99,24 @@ describe("universal research in Telegram", () => {
       continuation: { round: 2, seenUrls: ["https://angels.nl/"], canContinue: false },
     });
     expect(task.results.map((r) => r.url)).toEqual(["https://angels.nl/", "https://northwave.vc/", "https://seedfund.nl/"]);
-    expect(task.counters).toMatchObject({ sourcesDiscovered: 55, sourcesChecked: 2, sourcesUnavailable: 1, resultsFound: 20, afterDedupe: 3, matchingCriteria: 2, needsReview: 1 });
+    expect(task.counters).toMatchObject({ sourcesDiscovered: 54, sourcesChecked: 2, sourcesUnavailable: 1, resultsFound: 20, afterDedupe: 3, matchingCriteria: 2, needsReview: 1 });
     expect(task.round).toBe(2);
     expect(task.seenUrls).toEqual(["https://northwave.vc/", "https://angels.nl/"]);
     expect(task.canContinue).toBe(false);
+  });
+
+  it("does not count the re-sent source map twice and upgrades sources checked later", () => {
+    const map = [
+      { url: "https://idealista.com/", accessStatus: "partial" },
+      { url: "https://linkedin.com/", accessStatus: "auth_required" },
+      { url: "https://facebook.com/groups/x", accessStatus: "not_automatable" },
+    ];
+    let task = newTask(OWNER, OWNER, "Найди земельные участки в Мадриде от 10 000 м², до 2 млн €, под застройку");
+    task = mergeRound(task, { sourceRegistry: map, progressCounters: { sourcesDiscovered: 10 }, results: [] });
+    task = mergeRound(task, { sourceRegistry: [{ ...map[0], accessStatus: "checked" }, map[1], map[2]], progressCounters: { sourcesDiscovered: 5 }, results: [] });
+    expect(task.counters.sourcesDiscovered).toBe(12);
+    expect(task.counters.sourcesChecked).toBe(1);
+    expect(task.counters.sourcesUnavailable).toBe(2);
   });
 
   it("runs rounds, updates the status message and delivers Excel + CSV", async () => {
