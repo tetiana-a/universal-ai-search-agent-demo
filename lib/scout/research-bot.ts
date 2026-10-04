@@ -24,6 +24,14 @@ export type ResearchLang = "ru" | "en";
 export type TaskState = "clarifying" | "running" | "stopped" | "done" | "failed";
 export type ResearchStage = "clarifying" | "queued" | "searching" | "merging" | "delivering" | "completed" | "stopped" | "failed";
 export type ResearchTaskEvent = { at: string; stage: ResearchStage; note?: string };
+export type ResearchQuality = {
+  score: number;
+  evidenceCoverage: number;
+  gatePassRate: number;
+  verifiedRate: number;
+  reviewRate: number;
+  sourceDiversity: number;
+};
 
 export type ResearchTask = {
   id: string;
@@ -46,6 +54,7 @@ export type ResearchTask = {
   results: any[];
   sources: any[];
   counters: ReportCounters;
+  quality: ResearchQuality;
   summary?: string;
   statusMessageId?: number;
   runId?: string;
@@ -135,12 +144,33 @@ export function newTask(chatId: string, ownerId: string, text: string): Research
     attempt: 0,
     events: [{ at: now, stage: analysis.questions.length ? "clarifying" : "queued", note: "task created" }],
     round: 0, seenUrls: [], canContinue: true, results: [], sources: [],
-    counters: { ...EMPTY_COUNTERS }, startedAt: now, updatedAt: now,
+    counters: { ...EMPTY_COUNTERS }, quality: { score: 0, evidenceCoverage: 0, gatePassRate: 0, verifiedRate: 0, reviewRate: 0, sourceDiversity: 0 }, startedAt: now, updatedAt: now,
   };
 }
 
 function urlKey(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase().replace(/[#?].*$/, "").replace(/\/$/, "") : "";
+}
+
+function researchQuality(results: any[]): ResearchQuality {
+  if (!results.length) return { score: 0, evidenceCoverage: 0, gatePassRate: 0, verifiedRate: 0, reviewRate: 0, sourceDiversity: 0 };
+  const pct = (n: number) => Math.round((100 * n) / results.length);
+  const evidence = results.filter((r) => Boolean(r?.qualityGate?.checks?.evidenceGrounded || r?.evidenceQuote || r?.evidence)).length;
+  const pass = results.filter((r) => String(r?.qualityGate?.gate || "").toUpperCase() === "PASS").length;
+  const verified = results.filter((r) => r?.status === "Verified").length;
+  const review = results.filter((r) => r?.status === "Manual review" || String(r?.qualityGate?.gate || "").toUpperCase() === "REVIEW").length;
+  const domains = new Set(results.map((r) => {
+    try { return new URL(String(r?.url || "")).hostname.replace(/^www\./, ""); } catch { return String(r?.sourceDomain || ""); }
+  }).filter(Boolean));
+  const sourceDiversity = Math.min(100, Math.round((100 * domains.size) / results.length));
+  const evidenceCoverage = pct(evidence);
+  const gatePassRate = pct(pass);
+  const verifiedRate = pct(verified);
+  const reviewRate = pct(review);
+  // Aggregate score is a reporting signal only; individual critical failures still keep
+  // their own result in REVIEW/FAIL and are never hidden by this average.
+  const score = Math.round(evidenceCoverage * 0.4 + gatePassRate * 0.3 + verifiedRate * 0.2 + sourceDiversity * 0.1);
+  return { score, evidenceCoverage, gatePassRate, verifiedRate, reviewRate, sourceDiversity };
 }
 
 function checkpoint(task: ResearchTask, stage: ResearchStage, note?: string) {
@@ -151,15 +181,15 @@ function checkpoint(task: ResearchTask, stage: ResearchStage, note?: string) {
   return task;
 }
 
-export type ResearchTaskSummary = Pick<ResearchTask, "id" | "chatId" | "ownerId" | "query" | "kind" | "state" | "stage" | "attempt" | "round" | "counters" | "error" | "startedAt" | "updatedAt">;
+export type ResearchTaskSummary = Pick<ResearchTask, "id" | "chatId" | "ownerId" | "query" | "kind" | "state" | "stage" | "attempt" | "round" | "counters" | "quality" | "error" | "startedAt" | "updatedAt">;
 
 export async function listRecentResearchTasks(limit = 30): Promise<ResearchTaskSummary[]> {
   const tasks = await listAll<ResearchTask>("research_tasks");
   return tasks
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, Math.max(1, Math.min(limit, 100)))
-    .map(({ id, chatId, ownerId, query, kind, state, stage, attempt, round, counters, error, startedAt, updatedAt }) => ({
-      id, chatId, ownerId, query, kind, state, stage, attempt: attempt || 0, round, counters, error, startedAt, updatedAt,
+    .map(({ id, chatId, ownerId, query, kind, state, stage, attempt, round, counters, quality, error, startedAt, updatedAt }) => ({
+      id, chatId, ownerId, query, kind, state, stage: stage || (state === "done" ? "completed" : state === "failed" ? "failed" : state === "stopped" ? "stopped" : state === "clarifying" ? "clarifying" : "searching"), attempt: attempt || 0, round, counters, quality: quality || researchQuality([]), error, startedAt, updatedAt,
     }));
 }
 
@@ -212,6 +242,7 @@ export function mergeRound(task: ResearchTask, outcome: RoundOutcome): ResearchT
     results: results.slice(0, 200),
     sources: sources.slice(0, 600),
     counters,
+    quality: researchQuality(results),
     round: Math.max(task.round + 1, Number(next.round || 0)),
     seenUrls: [...new Set([...task.seenUrls, ...(next.seenUrls || [])])].slice(-400),
     canContinue: next.canContinue !== false,
@@ -231,7 +262,7 @@ export function toPayload(task: ResearchTask): ResearchExportPayload {
     results: task.results,
     sourceRegistry: task.sources,
     progressCounters: task.counters,
-    stats: { rounds: task.round },
+    stats: { rounds: task.round, qualityScore: task.quality?.score || 0, evidenceCoverage: task.quality?.evidenceCoverage || 0, verifiedRate: task.quality?.verifiedRate || 0 },
   };
 }
 
@@ -243,6 +274,7 @@ export function statusText(task: ResearchTask) {
   const lines = [
     head + (task.round ? " · " + t.round(task.round + (task.state === "running" ? 1 : 0)) : ""),
     "Этап: <b>" + escapeHtml(task.stage || task.state) + "</b> · попытка: <b>" + String(task.attempt || 0) + "</b>",
+    ...(task.results.length ? ["Качество: <b>" + String(task.quality?.score || 0) + "%</b> · evidence <b>" + String(task.quality?.evidenceCoverage || 0) + "%</b> · verified <b>" + String(task.quality?.verifiedRate || 0) + "%</b>"] : []),
     "<blockquote>" + escapeHtml(task.query.slice(0, 500)) + "</blockquote>",
     ...rows,
   ];
@@ -506,7 +538,7 @@ export async function applyCriteriaChange(chatId: string, text: string, runner: 
     ...task,
     baseQuery: applyClarifications(task.baseQuery, task.answers, task.lang) + "\n" + label + ": " + text.trim().slice(0, 400),
     answers: {}, questions: [], step: 0, round: 0, seenUrls: [], canContinue: true,
-    results: [], sources: [], counters: { ...EMPTY_COUNTERS }, error: undefined,
+    results: [], sources: [], counters: { ...EMPTY_COUNTERS }, quality: researchQuality([]), error: undefined,
     stage: "queued",
     events: [...(task.events || []), { at: new Date().toISOString(), stage: "queued", note: "criteria changed" }].slice(-40),
   };
