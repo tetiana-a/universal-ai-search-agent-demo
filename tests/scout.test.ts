@@ -257,6 +257,23 @@ describe("scout Telegram bot", () => {
     expect(sent(calls)).toHaveLength(1);
   });
 
+  it("shows the caller IDs even when the private chat is not authorized", async () => {
+    const calls = botFetch();
+    await handleUpdate({ message: { text: "/id", chat: { id: 555, type: "private" }, from: { id: 555, first_name: "Ana" } } });
+    expect(sent(calls)).toHaveLength(1);
+    expect(sent(calls)[0].text).toContain("User ID: <code>555</code>");
+    expect(sent(calls)[0].text).toContain("Chat ID: <code>555</code>");
+    expect(sent(calls)[0].text).toContain("Control access: ❌ NO");
+  });
+
+  it("explains missing control access instead of starting the lead dialogue", async () => {
+    const calls = botFetch();
+    await handleUpdate({ message: { text: "/panel", chat: { id: 555, type: "private" }, from: { id: 555, first_name: "Ana" } } });
+    expect(sent(calls)).toHaveLength(1);
+    expect(sent(calls)[0].text).toContain("Нет доступа к панели управления");
+    expect(sent(calls)[0].text).toContain("/id");
+  });
+
   it("approves a new source from an inline button", async () => {
     const calls = botFetch();
     await putMany("sources", [{ id: "src_1", name: "Crowd X", url: "https://crowdx.pt", domain: "crowdx.pt", kind: "platform", state: "candidate", discoveredAt: new Date().toISOString(), usefulCount: 0, checkedCount: 0 } as ScoutSource]);
