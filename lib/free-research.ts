@@ -351,6 +351,20 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const allHits = excluded.size ? discovery.hits.filter((hit) => !excluded.has(hit.url.toLowerCase())) : discovery.hits;
   const providerDiagnostics = discovery.diagnostics;
 
+  // A search engine that answers with a human check (CAPTCHA) is reported as such, with
+  // what to configure instead. It is never solved or bypassed, and never shown as "nothing found".
+  const challenged = providerDiagnostics.filter((d) => d.status === "rate_limited");
+  if (!discoveredTotal && challenged.length) {
+    const ru = input.language === "ru";
+    throw new ResearchError(
+      "SEARCH_RATE_LIMITED",
+      (ru
+        ? "Поисковик " + challenged.map((d) => d.provider).join(", ") + " попросил подтвердить, что запрос делает человек (капча), и не выдал результатов. Обходить проверку мы не будем. Для стабильного бесплатного поиска добавьте в Vercel JINA_API_KEY (бесплатный ключ на jina.ai) или SEARXNG_URL, затем повторите поиск."
+        : "Search engine " + challenged.map((d) => d.provider).join(", ") + " asked for a human check (CAPTCHA) and returned no results. It is not bypassed. For stable free search add JINA_API_KEY (free key at jina.ai) or SEARXNG_URL in Vercel and retry."),
+      503,
+      { providers: providerDiagnostics },
+    );
+  }
   if (!discoveredTotal && providerDiagnostics.every((d) => d.status === "error" || d.status === "not_configured" || d.status === "rate_limited")) {
     const reason = providerDiagnostics.filter((d) => d.message).map((d) => d.provider + ": " + d.message).join(" ");
     throw new ResearchError(
@@ -562,6 +576,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       ? "AI-извлечение не подключено: добавьте бесплатный OPENROUTER_API_KEY (или GEMINI_API_KEY / GROQ_API_KEY) в Vercel. Сейчас поля взяты со страниц правилами, результаты нужно проверить вручную."
       : "AI: " + aiError) : "",
     usedMemoryFallback ? "Search returned nothing; learned sources from memory were re-read." : "",
+    challenged.length ? (input.language === "ru" ? "Часть поисковых запросов остановлена капчей " + challenged.map((d) => d.provider).join(", ") + "; результаты неполные. Добавьте JINA_API_KEY или SEARXNG_URL." : "Some searches were stopped by a CAPTCHA from " + challenged.map((d) => d.provider).join(", ") + "; results are incomplete. Add JINA_API_KEY or SEARXNG_URL.") : "",
     usedCandidateFallback ? "Results are live search candidates kept for Manual review." : "",
     hallucinatedUrls > 0 ? hallucinatedUrls + " AI result(s) dropped because their URL was not among retrieved sources." : "",
     outcome === "no_candidates" ? (input.language === "ru" ? "Поисковые провайдеры ответили, но не нашли ни одной страницы по запросу. Попробуйте переформулировать запрос или расширить географию." : "Search providers responded but found no pages for this query. Try rephrasing or widening the geography.") : "",

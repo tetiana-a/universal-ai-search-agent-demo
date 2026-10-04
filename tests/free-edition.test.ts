@@ -151,9 +151,24 @@ describe("Free edition without any keys", () => {
     ]);
     const response = await POST(request({ testMode: true }));
     const body = await response.json();
-    expect(response.status).toBe(502);
-    expect(body.code).toBe("SEARCH_PROVIDERS_FAILED");
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("SEARCH_RATE_LIMITED");
+    expect(body.error).toContain("JINA_API_KEY");
     expect(body.diagnostics.providers.find((p: any) => p.provider === "duckduckgo").status).toBe("rate_limited");
+  });
+
+  it("uses SearXNG when it is configured and DuckDuckGo shows a CAPTCHA", async () => {
+    vi.stubEnv("SEARXNG_URL", "https://searx.example.org");
+    mockFetch([
+      { match: (u) => u.includes("duckduckgo.com"), respond: () => new Response('<div class="anomaly-modal">', { status: 202 }) },
+      { match: (u) => u.startsWith("https://searx.example.org"), respond: () => json({ results: [{ title: "Terreno urbano Madrid 12.500 m²", url: "https://fincas-madrid.es/terreno-valdebebas", content: "Terreno de 12.500 m² en Madrid." }] }) },
+      { match: (u) => u.includes("r.jina.ai") || u.includes("fincas-madrid.es"), respond: () => new Response("Terreno urbano en Valdebebas, Madrid. 12.500 m². 3.200.000 €", { status: 200 }) },
+    ]);
+    const response = await POST(request({ testMode: true }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.providers.find((p: any) => p.provider === "searxng").status).toBe("ok");
+    expect(body.results.length).toBeGreaterThan(0);
   });
 
   it("falls back from OpenRouter to Gemini when the first free model fails", async () => {

@@ -80,3 +80,26 @@ describe("source map for the spec's examples", () => {
     ]);
   });
 });
+
+import { clarifyingQuestions } from "@/lib/task-profile";
+import { safeFilenamePart } from "@/lib/research-report";
+
+describe("clarifying questions skip what the query already says", () => {
+  it("does not ask for the area, the specialisation or the product when given", () => {
+    expect(clarifyingQuestions("Найди земельные участки в Мадриде площадью от 10 000 м²").questions.map((q) => q.id)).not.toContain("area");
+    expect(clarifyingQuestions("участки в Мадриде от 10 000 м²").questions.map((q) => q.id)).not.toContain("area");
+    const lawyers = clarifyingQuestions("юристы по недвижимости в Испании");
+    expect(lawyers.kind).toBe("person");
+    expect(lawyers.questions.map((q) => q.id)).not.toContain("profile");
+    expect(clarifyingQuestions("Найти производителей светодиодных ламп в Китае").questions.map((q) => q.id)).not.toContain("product");
+    expect(clarifyingQuestions("Найди участок в Мадриде под застройку").questions.map((q) => q.id)).not.toContain("purpose");
+  });
+});
+
+describe("export file names", () => {
+  it("transliterates a Russian query", () => {
+    expect(safeFilenamePart("Найди земельные участки в Мадриде от 10 000 м²")).toBe("naydi-zemelnye-uchastki-v-madride-ot-10-000-m2");
+    expect(safeFilenamePart("Investors in Amsterdam")).toBe("investors-in-amsterdam");
+    expect(safeFilenamePart("")).toBe("research");
+  });
+});
