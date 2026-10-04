@@ -26,6 +26,9 @@ beforeEach(() => {
   vi.stubEnv("TELEGRAM_CHAT_ID", "-5415363237");
   vi.stubEnv("TELEGRAM_ALLOWED_CHAT_IDS", "-5415363237,8213865630");
   vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "");
+  vi.stubEnv("TELEGRAM_OPEN_GROUP_ACCESS", "off");
+  vi.stubEnv("TELEGRAM_OPEN_GROUP_IDS", "");
+  vi.stubEnv("SCOUT_PUBLIC_DASHBOARD", "off");
   vi.stubEnv("SCOUT_ADMIN_KEY", "");
   vi.stubEnv("CRON_SECRET", "");
   vi.stubEnv("SCOUT_TIMEZONE", "Europe/Madrid");
@@ -272,6 +275,43 @@ describe("scout Telegram bot", () => {
     expect(sent(calls)[0].text).toContain("Добавлено в watchlist: person — @valencia_invest");
     await handleUpdate({ message: { text: "/report", chat: { id: -999, type: "group" }, from: { id: 2 } } });
     expect(sent(calls)).toHaveLength(1);
+  });
+
+  it("allows every member of the shared report group when open group access is enabled", async () => {
+    const calls = botFetch();
+    vi.stubEnv("TELEGRAM_ALLOWED_CHAT_IDS", "");
+    vi.stubEnv("TELEGRAM_CHAT_ID", "");
+    vi.stubEnv("SCOUT_REPORT_CHAT_ID", "-1004318201860");
+    vi.stubEnv("TELEGRAM_OPEN_GROUP_ACCESS", "on");
+
+    await handleUpdate({
+      message: {
+        text: "/panel",
+        chat: { id: -1004318201860, type: "supergroup" },
+        from: { id: 777, first_name: "Group member" },
+      },
+    });
+
+    expect(sent(calls)).toHaveLength(1);
+    expect(sent(calls)[0].text).toContain("<b>AURELIUS</b>");
+  });
+
+  it("keeps other groups closed even when shared group mode is enabled", async () => {
+    const calls = botFetch();
+    vi.stubEnv("TELEGRAM_ALLOWED_CHAT_IDS", "");
+    vi.stubEnv("TELEGRAM_CHAT_ID", "");
+    vi.stubEnv("SCOUT_REPORT_CHAT_ID", "-1004318201860");
+    vi.stubEnv("TELEGRAM_OPEN_GROUP_ACCESS", "on");
+
+    await handleUpdate({
+      message: {
+        text: "/panel",
+        chat: { id: -1009999999999, type: "supergroup" },
+        from: { id: 777, first_name: "Other group" },
+      },
+    });
+
+    expect(sent(calls)).toHaveLength(0);
   });
 
   it("self-diagnoses a private caller and explains missing control access", async () => {
