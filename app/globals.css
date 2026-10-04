@@ -566,7 +566,7 @@ svg.lucide {
 /* Last word of the hero headline in gold italic */
 .hero-accent {
   font-style: italic;
-  font-weight: 500;
+  font-weight: 400;
   background: linear-gradient(100deg, #b8924f 0%, #f3dca4 30%, #fff8e4 45%, #e6c47e 60%, #b8924f 100%);
   background-size: 220% 100%;
   -webkit-background-clip: text;
@@ -1047,3 +1047,44 @@ html.light .music-atmosphere.is-live {
     transition-duration: .001ms !important;
   }
 }
+
+
+/* ---------- Lighter, finer typography (T, 2026-10-04) ----------
+   Smaller sizes and thinner weights in the Scout dashboard; serif display for titles and figures. */
+.hero-title { font-weight: 300; }
+
+.scout-ui { font-weight: 300; }
+.scout-ui .text-sm { font-size: 13px; line-height: 1.6; }
+.scout-ui .text-xs { font-size: 11.5px; line-height: 1.55; }
+.scout-ui .text-lg { font-size: 16.5px; }
+.scout-ui .font-medium { font-weight: 400; }
+.scout-ui .font-semibold { font-weight: 500; }
+.scout-ui b,
+.scout-ui strong,
+.scout-ui .font-bold { font-weight: 600; }
+
+.scout-ui .scout-panel-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  font-variation-settings: normal;
+  font-variant-numeric: lining-nums;
+  letter-spacing: .003em;
+}
+
+.scout-ui .scout-kpi-value {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 500;
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: -.01em;
+}
+
+.scout-ui .scout-mobile-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.scout-ui .scout-nav-item { font-size: 13px; letter-spacing: .005em; }
+.scout-ui .scout-button { font-weight: 400; letter-spacing: .01em; }

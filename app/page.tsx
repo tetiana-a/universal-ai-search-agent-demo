@@ -112,7 +112,7 @@ const labels = {
     product: "Универсальный AI Research Engine",
     live: "Система активна",
     workspace: "Рабочее пространство",
-    tell: "Скажите агенту, что нужно найти.",
+    tell: "Что нужно найти?",
     sub: "Один запрос → источники → исследование → доказательства → дедупликация → структурированный результат.",
     start: "Начать поиск",
     pause: "Пауза",
@@ -276,7 +276,7 @@ const labels = {
     product: "Universal AI Research Engine",
     live: "System live",
     workspace: "Workspace",
-    tell: "Tell the agent what you need to find.",
+    tell: "What should we find?",
     sub: "One request → sources → research → evidence → deduplication → structured results.",
     start: "Start research",
     pause: "Pause",
@@ -2249,7 +2249,7 @@ export default function Home() {
               {t.product}
             </div>
 
-            <h1 className="font-display mt-5 max-w-4xl text-[40px] font-medium leading-[1.02] tracking-[-.012em] text-[var(--text)] sm:text-[52px] lg:text-[68px]">
+            <h1 className="hero-title font-display mt-4 max-w-4xl text-[34px] font-light leading-[1.06] tracking-[-.005em] text-[var(--text)] sm:text-[42px] lg:text-[50px]">
               {(() => {
                 const cut = t.tell.lastIndexOf(" ");
                 return (
