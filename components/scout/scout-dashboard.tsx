@@ -176,20 +176,23 @@ type ChipTone = "muted" | "gold" | "green" | "red" | "blue" | "violet";
 
 function Chip({ children, tone = "muted" }: Readonly<{ children: ReactNode; tone?: ChipTone }>) {
   const tones = { muted: "border-[var(--line-soft)] text-[var(--text-muted)]", gold: "border-[var(--gold)]/40 text-[var(--gold-bright)]", green: "border-[#34c759]/40 text-[#34c759]", red: "border-[#ff375f]/40 text-[#ff375f]", blue: "border-[#0a84ff]/40 text-[#0a84ff]", violet: "border-[#af52de]/40 text-[#af52de]" };
-  return <span className={"inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] " + tones[tone]}>{children}</span>;
+  return <span className={"scout-chip inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium " + tones[tone]}>{children}</span>;
 }
 
 function Button({ children, onClick, variant = "ghost", disabled, title }: { children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum" | "danger"; disabled?: boolean; title?: string }) {
-  const base = "inline-flex items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium transition disabled:opacity-40";
+  const base = "scout-button inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition disabled:opacity-40";
   const style = variant === "spectrum" ? "spectrum-button text-white shadow-lg" : variant === "danger" ? "border border-[#ff375f]/40 text-[#ff375f] hover:bg-[#ff375f]/10" : "border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-soft)] hover:border-[var(--line)] hover:text-[var(--text)]";
   return <button type="button" title={title} disabled={disabled} onClick={onClick} className={base + " " + style}>{children}</button>;
 }
 
 function Panel({ title, icon: Icon, color, children, actions }: { title: string; icon?: typeof Radar; color?: string; children: ReactNode; actions?: ReactNode }) {
   return (
-    <section className="glass rounded-3xl p-4 sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-xl sm:text-2xl">{Icon && <Icon size={18} style={{ color }} />}{title}</h2>
+    <section className="glass scout-panel rounded-[28px] p-4 sm:p-5 lg:p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="scout-panel-title flex items-center gap-3 text-[17px] font-semibold sm:text-lg">
+          {Icon && <span className="scout-panel-icon grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={17} style={{ color }} /></span>}
+          <span>{title}</span>
+        </h2>
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
       </div>
       {children}
@@ -198,10 +201,10 @@ function Panel({ title, icon: Icon, color, children, actions }: { title: string;
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="rounded-2xl border border-dashed border-[var(--line-soft)] p-6 text-center text-sm text-[var(--text-muted)]">{children}</div>;
+  return <div className="scout-empty rounded-2xl border border-dashed border-[var(--line-soft)] p-7 text-center text-sm leading-6 text-[var(--text-muted)]">{children}</div>;
 }
 
-const inputClass = "w-full rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--line)]";
+const inputClass = "scout-input w-full min-h-11 rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3.5 py-2.5 text-sm text-[var(--text)] outline-none focus:border-[var(--line)]";
 
 function dashboardCounts(state: State | null): Partial<Record<Tab, number>> {
   if (!state) return {};
@@ -310,7 +313,7 @@ export default function ScoutDashboard() {
   const telegramState = telegramStatus(state);
 
   return (
-    <main className="relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
+    <main className="scout-ui relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
       <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
@@ -345,13 +348,16 @@ export default function ScoutDashboard() {
                     key={id}
                     type="button"
                     onClick={() => changeTab(id)}
-                    className={"group flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-sm transition " +
+                    aria-current={active ? "page" : undefined}
+                    className={"scout-nav-item group flex w-full items-center gap-3 rounded-xl border px-2.5 py-2.5 text-left text-sm transition " +
                       (active
-                        ? "border-[var(--line)] bg-[var(--gold)]/7 text-[var(--text)]"
+                        ? "is-active border-[var(--line)] bg-[var(--gold)]/7 text-[var(--text)]"
                         : "border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]")}
                   >
-                    <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={17} />
-                    <span>{label}</span>
+                    <span className="scout-nav-icon grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-transparent">
+                      <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={16} />
+                    </span>
+                    <span className="font-medium tracking-[-.01em]">{label}</span>
                     {counts[id] ? (
                       <span className="ml-auto rounded-full bg-[#ff375f] px-2 py-0.5 text-[10px] font-semibold text-white">{counts[id]}</span>
                     ) : null}
@@ -425,7 +431,7 @@ export default function ScoutDashboard() {
                     <span>/</span>
                     <span className="truncate text-[var(--text-soft)]">{activeTab?.label || "Главная"}</span>
                   </div>
-                  <div className="font-display truncate text-xl text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
+                  <div className="scout-mobile-title truncate text-lg font-semibold text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
                 </div>
               </div>
 
@@ -463,8 +469,8 @@ export default function ScoutDashboard() {
             <div className="spectrum-line h-[2px] w-full opacity-70" />
           </div>
 
-          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-14 lg:pt-9">
-            <div className="space-y-5 soft-focus">
+          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-14 lg:pt-8">
+            <div className="scout-content space-y-5 soft-focus">
               {needKey && (
                 <Panel title="Доступ к кабинету" icon={KeyRound} color="#ffd60a">
                   <p className="mb-3 text-sm text-[var(--text-muted)]">Введите ключ доступа к рабочему кабинету.</p>
@@ -514,10 +520,10 @@ type Act = (action: string, payload?: Record<string, unknown>, label?: string) =
 
 function Kpi({ label, value, color, hint }: { label: string; value: ReactNode; color: string; hint?: string }) {
   return (
-    <div className="glass-soft rounded-2xl p-4">
-      <div className="text-[11px] uppercase tracking-[.14em] text-[var(--text-muted)]">{label}</div>
-      <div className="font-display mt-1 text-4xl tabular-nums" style={{ color }}>{value}</div>
-      {hint && <div className="mt-1 text-xs text-[var(--text-faint)]">{hint}</div>}
+    <div className="glass-soft scout-kpi rounded-2xl p-4 sm:p-[18px]">
+      <div className="scout-eyebrow text-[10px] uppercase tracking-[.16em] text-[var(--text-muted)]">{label}</div>
+      <div className="scout-kpi-value mt-2 text-[32px] font-semibold leading-none tabular-nums tracking-[-.045em]" style={{ color }}>{value}</div>
+      {hint && <div className="mt-2 text-[11px] leading-4 text-[var(--text-faint)]">{hint}</div>}
     </div>
   );
 }
@@ -1007,7 +1013,7 @@ function TasksTab({ state, act }: Readonly<{ state: State; act: Act }>) {
         {!tasks.length ? <Empty>Поисков пока нет. Напишите боту в Telegram, что нужно найти.</Empty> : (
           <div className="space-y-3">
             {tasks.map((task) => (
-              <article key={task.id} className="glass-soft rounded-2xl p-4">
+              <article key={task.id} className="glass-soft scout-row-card rounded-2xl p-4 sm:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Chip tone={taskTone(task.state)}>{taskLabel(task.state)}</Chip>

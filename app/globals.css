@@ -785,3 +785,265 @@ html.light .music-atmosphere.is-live {
     animation: none !important;
   }
 }
+
+
+/* ---------- Scout 2026 product polish ----------
+   Keeps the AURELIUS palette intact; only hierarchy, typography, spacing and motion change. */
+.scout-ui {
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  font-kerning: normal;
+  font-synthesis: none;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.scout-ui .brand-mark {
+  font-family: var(--font-display);
+}
+
+.scout-content {
+  container-type: inline-size;
+  container-name: scout-content;
+}
+
+.scout-panel {
+  position: relative;
+  overflow: clip;
+  isolation: isolate;
+  transition:
+    border-color 260ms ease,
+    box-shadow 320ms ease,
+    background 260ms ease;
+}
+
+.scout-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 22px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--gold) 38%, transparent), transparent);
+  opacity: .55;
+  pointer-events: none;
+}
+
+.scout-panel-title {
+  font-family: var(--font-sans);
+  font-variation-settings: "wght" 620;
+  letter-spacing: -.025em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.scout-panel-icon {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent),
+    0 8px 24px -16px color-mix(in srgb, var(--gold) 26%, transparent);
+  transition:
+    transform 260ms cubic-bezier(.22,1,.36,1),
+    border-color 240ms ease,
+    background 240ms ease;
+}
+
+.scout-nav-item {
+  position: relative;
+  min-height: 44px;
+  letter-spacing: -.012em;
+}
+
+.scout-nav-item::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  width: 2px;
+  height: 0;
+  border-radius: 999px;
+  background: var(--gold-bright);
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: height 260ms cubic-bezier(.22,1,.36,1), opacity 220ms ease;
+}
+
+.scout-nav-item.is-active::before {
+  height: 20px;
+  opacity: .9;
+}
+
+.scout-nav-icon {
+  background: color-mix(in srgb, var(--surface) 68%, transparent);
+  transition:
+    transform 260ms cubic-bezier(.22,1,.36,1),
+    border-color 220ms ease,
+    background 220ms ease;
+}
+
+.scout-nav-item.is-active .scout-nav-icon {
+  border-color: color-mix(in srgb, var(--gold) 24%, var(--line-soft));
+  background: color-mix(in srgb, var(--gold) 8%, var(--surface));
+}
+
+.scout-button {
+  letter-spacing: -.012em;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
+  transition:
+    transform 180ms cubic-bezier(.22,1,.36,1),
+    border-color 220ms ease,
+    background 220ms ease,
+    color 220ms ease,
+    box-shadow 260ms ease,
+    opacity 180ms ease;
+}
+
+.scout-button:active:not(:disabled) {
+  transform: translateY(1px) scale(.985);
+}
+
+.scout-chip {
+  line-height: 1.25;
+  letter-spacing: -.005em;
+  backdrop-filter: blur(10px);
+}
+
+.scout-kpi {
+  position: relative;
+  overflow: hidden;
+  min-height: 118px;
+  transition:
+    border-color 260ms ease,
+    background 260ms ease,
+    box-shadow 300ms ease,
+    transform 260ms cubic-bezier(.22,1,.36,1);
+}
+
+.scout-kpi::after {
+  content: "";
+  position: absolute;
+  inset: auto -18% -55% 32%;
+  height: 90%;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, currentColor 5%, transparent), transparent 68%);
+  pointer-events: none;
+}
+
+.scout-kpi-value {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.scout-eyebrow {
+  font-family: var(--font-accent);
+  font-weight: 400;
+  font-synthesis: none;
+}
+
+.scout-input {
+  font-variant-numeric: tabular-nums;
+  transition:
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.scout-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 8%, transparent);
+}
+
+.scout-row-card {
+  transition:
+    transform 260ms cubic-bezier(.22,1,.36,1),
+    border-color 240ms ease,
+    background 240ms ease,
+    box-shadow 300ms ease;
+}
+
+.scout-empty {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 42%, transparent), transparent);
+}
+
+.scout-mobile-title {
+  letter-spacing: -.025em;
+}
+
+.scout-ui table th {
+  font-family: var(--font-accent);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: .08em;
+}
+
+.scout-ui table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.scout-ui svg.lucide {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.scout-ui button,
+.scout-ui a,
+.scout-ui input,
+.scout-ui select,
+.scout-ui textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .scout-panel:hover {
+    border-color: color-mix(in srgb, var(--gold) 15%, var(--line-soft));
+    box-shadow:
+      0 24px 70px -42px color-mix(in srgb, var(--gold) 16%, transparent),
+      var(--shadow);
+  }
+
+  .scout-panel:hover .scout-panel-icon {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--gold) 22%, var(--line-soft));
+  }
+
+  .scout-nav-item:hover .scout-nav-icon {
+    transform: translateX(1px);
+  }
+
+  .scout-kpi:hover,
+  .scout-row-card:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--gold) 18%, var(--line-soft));
+  }
+
+  .scout-kpi:hover {
+    box-shadow: 0 18px 46px -34px color-mix(in srgb, var(--gold) 18%, transparent);
+  }
+}
+
+@container scout-content (min-width: 1100px) {
+  .scout-panel {
+    border-radius: 30px;
+  }
+}
+
+@media (max-width: 640px) {
+  .scout-panel::before {
+    inset-inline: 16px;
+  }
+
+  .scout-kpi {
+    min-height: 104px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scout-panel,
+  .scout-panel-icon,
+  .scout-nav-item::before,
+  .scout-nav-icon,
+  .scout-button,
+  .scout-kpi,
+  .scout-row-card {
+    transition-duration: .001ms !important;
+  }
+}
