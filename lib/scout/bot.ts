@@ -557,7 +557,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   }
 
   const control = isControl(chatId, userId);
-  if (!control && command && ["panel", "find", "search", "status", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health"].includes(command.cmd)) {
+  if (!control && message.chat?.type === "private" && command && ["panel", "find", "search", "status", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health"].includes(command.cmd)) {
     await sendMessage(chatId, "⛔ Нет доступа к панели управления. Отправьте /id и добавьте ваш <b>User ID</b> в TELEGRAM_ALLOWED_CHAT_IDS или SCOUT_ADMIN_TELEGRAM_IDS в Vercel.");
     return {};
   }
