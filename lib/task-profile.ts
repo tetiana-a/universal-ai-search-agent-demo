@@ -104,6 +104,10 @@ export function clarifyingQuestions(query: string): { kind: ResearchKind; questi
     geography: hasAny(query, GEO_HINT),
     numbers: NUMBER.test(q),
     budget: /€|\$|eur|usd|£|₽|руб|budget|бюджет|price|цен|ticket|чек/.test(q),
+    // A product named after "производители"/"suppliers of" counts as the company profile.
+    product: /(производител|поставщик|завод|фабрик|manufacturer|supplier|factor(?:y|ies)|maker)\S*\s+(?:of\s+)?[\p{L}\d-]{3,}/u.test(q),
+    // A profession named outright already says which specialist is wanted.
+    profession: /(юрист|адвокат|нотариус|архитектор|врач|бухгалтер|риэлтор|риелтор|консультант|lawyer|attorney|notary|architect|doctor|accountant|realtor|consultant)/.test(q),
     sector: /saas|b2b|fintech|proptech|software|ai\b|tech|медицин|health|food|retail|energy|логист|logistic|manufactur|производ|construction|строит|it\b|ит\b/.test(q),
   };
   const questions: ClarifyingQuestion[] = [];
@@ -112,18 +116,22 @@ export function clarifyingQuestions(query: string): { kind: ResearchKind; questi
   }
   if (kind === "real_estate") {
     if (!detected.budget) questions.push({ id: "budget", ru: "Какой бюджет?", en: "What is the budget?", placeholderRu: "например, до 2 млн €", placeholderEn: "e.g. up to €2M" });
-    if (!/m²|m2|кв|sq|га|ha|площад|area|size/.test(q)) questions.push({ id: "area", ru: "Какая площадь нужна?", en: "What size do you need?", placeholderRu: "например, от 10 000 м²", placeholderEn: "e.g. from 10,000 m²" });
-    questions.push({ id: "purpose", ru: "Назначение объекта (жильё, коммерция, застройка, сельхоз)?", en: "Intended use (residential, commercial, development, agricultural)?", placeholderRu: "например, под застройку", placeholderEn: "e.g. development" });
+    if (!/m²|m2|м²|м2|кв\.?\s?м|sq|\d\s*га|гектар|\bha\b|hectare|acre|площад|area|size/.test(q)) questions.push({ id: "area", ru: "Какая площадь нужна?", en: "What size do you need?", placeholderRu: "например, от 10 000 м²", placeholderEn: "e.g. from 10,000 m²" });
+    if (!/застро|жиль|жил\p{L}*\s|коммерч|сельхоз|строительств|инвестиц|аренд|residential|commercial|agricultur|development|building|rental|investment/u.test(q)) questions.push({ id: "purpose", ru: "Назначение объекта (жильё, коммерция, застройка, сельхоз)?", en: "Intended use (residential, commercial, development, agricultural)?", placeholderRu: "например, под застройку", placeholderEn: "e.g. development" });
   } else if (kind === "investor") {
     if (!detected.sector) questions.push({ id: "sector", ru: "В какой отрасли ваш проект?", en: "Which sector is your project in?", placeholderRu: "например, B2B SaaS", placeholderEn: "e.g. B2B SaaS" });
     questions.push({ id: "stage", ru: "Стадия и сумма раунда?", en: "Round stage and size?", placeholderRu: "например, seed, 500 тыс. €", placeholderEn: "e.g. seed, €500k" });
     questions.push({ id: "investorType", ru: "Какие инвесторы интересны: VC, бизнес-ангелы, family office?", en: "Which investors: VC, angels, family offices?", placeholderRu: "например, VC и ангелы", placeholderEn: "e.g. VC and angels" });
   } else if (kind === "company") {
-    if (!detected.sector) questions.push({ id: "product", ru: "Какой продукт или профиль компании нужен?", en: "Which product or company profile?", placeholderRu: "например, производители упаковки", placeholderEn: "e.g. packaging manufacturers" });
+    if (!detected.sector && !detected.product) questions.push({ id: "product", ru: "Какой продукт или профиль компании нужен?", en: "Which product or company profile?", placeholderRu: "например, производители упаковки", placeholderEn: "e.g. packaging manufacturers" });
     questions.push({ id: "size", ru: "Требования к размеру, сертификатам или минимальной партии?", en: "Requirements on size, certificates or MOQ?", placeholderRu: "например, ISO 9001, MOQ до 1000 шт.", placeholderEn: "e.g. ISO 9001, MOQ under 1000" });
   } else if (kind === "person") {
-    questions.push({ id: "profile", ru: "Какая специализация и опыт нужны?", en: "Which specialization and experience?", placeholderRu: "например, юрист по недвижимости, 5+ лет", placeholderEn: "e.g. real estate lawyer, 5+ years" });
-    questions.push({ id: "language", ru: "Языки общения?", en: "Languages?", placeholderRu: "например, русский, английский", placeholderEn: "e.g. English, Spanish" });
+    if (detected.profession) {
+      questions.push({ id: "experience", ru: "Нужен ли опыт или особые условия (лицензия, отзывы, цена услуг)?", en: "Any experience or other requirements (licence, reviews, fees)?", placeholderRu: "например, 5+ лет, работа с иностранцами", placeholderEn: "e.g. 5+ years, works with foreigners" });
+    } else {
+      questions.push({ id: "profile", ru: "Какая специализация и опыт нужны?", en: "Which specialization and experience?", placeholderRu: "например, юрист по недвижимости, 5+ лет", placeholderEn: "e.g. real estate lawyer, 5+ years" });
+    }
+    if (!/русск|английск|испанск|итальянск|немецк|французск|язык|speak|english|spanish|russian|italian|german|french|language/.test(q)) questions.push({ id: "language", ru: "Языки общения?", en: "Languages?", placeholderRu: "например, русский, английский", placeholderEn: "e.g. English, Spanish" });
   } else {
     questions.push({ id: "what", ru: "Что именно должно быть в результате (компании, люди, объявления, мероприятия)?", en: "What should each result be (companies, people, listings, events)?", placeholderRu: "например, фонды и гранты", placeholderEn: "e.g. funds and grants" });
   }
