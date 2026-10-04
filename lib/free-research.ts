@@ -1,5 +1,4 @@
-import { BACKGROUND_RESEARCH_SCHEMA, type BackgroundResearchRequest, normalizeCompletedResearch, progressCounters } from "@/lib/background-research";
-import { UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN, UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU, taskSpecificRules } from "@/lib/research-prompts";
+import { type BackgroundResearchRequest, normalizeCompletedResearch, progressCounters } from "@/lib/background-research";
 import { buildSourceMap, classLabel, pickBranches, type SourceMap } from "@/lib/source-map";
 import { buildAccessEscalationPlan } from "@/lib/access-escalation";
 import { filterResearchResults } from "@/lib/relevance-gate";
@@ -11,7 +10,9 @@ import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
 import { directRead } from "@/lib/direct-reader";
 import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
 import { fieldSchemaFor, heuristicFields } from "@/lib/task-profile";
-import { classifyPage, pageTypeLabel, placeFromQuery, profileFromText, termCoverage, type PageType } from "@/lib/page-kind";
+import { verifyPagesWithAi, type VerifyOutcome } from "@/lib/ai-verify";
+import { checkNumericCriteria, describeCriteria, hasNumericCriteria, parseNumericCriteria } from "@/lib/criteria";
+import { classifyPage, isNoiseSource, pageTypeLabel, placeFromQuery, profileFromText, termCoverage, type PageType } from "@/lib/page-kind";
 import { inferResearchKind } from "@/lib/relevance-gate";
 
 export type FreeSearchHit = {
@@ -279,7 +280,7 @@ async function discoverCandidates(queries: string[], language: "ru" | "en", dead
   // Keyless search keeps the Free edition working without any paid or registered key.
   const keyless = keylessProviders();
   if (keyless.length && (!key || hits.length < 5 || process.env.KEYLESS_SEARCH === "always")) {
-    const outcomes = await runKeylessSearch(queries, language, Math.min(deadlineAt - 25_000, Date.now() + 22_000));
+    const outcomes = await runKeylessSearch(queries, language, Math.min(deadlineAt - 34_000, Date.now() + 18_000));
     for (const provider of keyless) {
       const mine = outcomes.filter((o) => o.provider === provider);
       if (!mine.length) continue;
@@ -333,6 +334,15 @@ function assertSearchConfigured(language: "ru" | "en") {
     503,
     { providers: [{ provider: "jina", status: "not_configured" }] },
   );
+}
+
+// Waits for work until a moment in time; whatever is unfinished then is left out.
+async function untilDeadline(work: Promise<unknown>, at: number) {
+  const wait = at - Date.now();
+  if (wait <= 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, wait); })]);
+  if (timer) clearTimeout(timer);
 }
 
 // NOSONAR - the free pipeline is a linear sequence of bounded stages; splitting it further hides the data flow.
@@ -395,12 +405,13 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   }
 
   const readerLimit = Math.min(candidateHits.length, input.testMode ? 3 : edition === "pro" ? 14 : 8);
-  await Promise.all(candidateHits.slice(0, readerLimit).map(async (hit) => {
+  // Reading stops early enough to leave the AI check about 25 seconds.
+  await untilDeadline(Promise.all(candidateHits.slice(0, readerLimit).map(async (hit) => {
     if (hit.content) return;
     const read = await jinaRead(hit.url);
     hit.content = read.content;
     hit.readStatus = read.status;
-  }));
+  })), deadlineAt - 27_000);
   for (const hit of candidateHits.slice(readerLimit)) hit.readStatus = hit.readStatus || "skipped";
 
   // Open list pages and read the item pages they link to, within the time budget.
@@ -416,16 +427,16 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       followUrls.push(url);
     }
   }
-  if (followUrls.length && Date.now() < deadlineAt - 30_000) {
-    const followed = await Promise.all(followUrls.map(async (url) => {
+  if (followUrls.length && Date.now() < deadlineAt - 32_000) {
+    const followed: FreeSearchHit[] = [];
+    await untilDeadline(Promise.all(followUrls.map(async (url) => {
       const read = await jinaRead(url);
       const title = (read.content.match(/^Title:\s*(.+)$/m)?.[1] || read.content.match(/^#\s+(.+)$/m)?.[1] || host(url)).trim();
-      return { title, url, snippet: firstSentences(read.content.replace(/^(Title|URL Source|Markdown Content):.*$/gm, ""), 600), domain: host(url), content: read.content, provider: "followed_link", retrievedAt: new Date().toISOString(), readStatus: read.status } as FreeSearchHit;
-    }));
+      followed.push({ title, url, snippet: firstSentences(read.content.replace(/^(Title|URL Source|Markdown Content):.*$/gm, ""), 600), domain: host(url), content: read.content, provider: "followed_link", retrievedAt: new Date().toISOString(), readStatus: read.status });
+    })), deadlineAt - 26_000);
     candidateHits = [...followed.filter((hit) => hit.content), ...candidateHits];
   }
 
-  const researchedHits = candidateHits.filter((hit) => Boolean(hit.content));
   const sourceRegistry = candidateHits.map((hit) => {
     const status = hit.readStatus === "checked" || hit.content ? "checked" : hit.readStatus === "skipped" || !hit.readStatus ? "partial" : hit.readStatus;
     const reason = status === "checked"
@@ -482,115 +493,169 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     .filter((hit) => hit.readStatus && hit.readStatus !== "checked" && hit.readStatus !== "skipped")
     .map((hit) => ({ url: hit.url, status: hit.readStatus as string, method: "jina_reader", reason: "Reader could not retrieve the page.", fallback: "search_snippet_manual_review" }));
 
-  const evidencePack = researchedHits.map((hit, index) => ({
-    id: index + 1,
-    title: hit.title,
-    url: hit.url,
-    domain: hit.domain,
-    snippet: hit.snippet,
-    content: String(hit.content || "").slice(0, 6000),
-  }));
-  // Snippet-only candidates are listed so the model may cite them, but only with Manual review status.
-  const snippetPack = candidateHits.filter((hit) => !hit.content).slice(0, 10).map((hit) => ({ title: hit.title, url: hit.url, domain: hit.domain, snippet: hit.snippet }));
-
-  const basePrompt = input.language === "ru" ? UNIVERSAL_RESEARCH_SYSTEM_PROMPT_RU : UNIVERSAL_RESEARCH_SYSTEM_PROMPT_EN;
-  const system = basePrompt + taskSpecificRules(input.query, input.language);
-  const user = [
-    "USER QUERY:", input.query, "",
-    "MODE: " + input.depth,
-    "LIMITS: results=" + input.maxResults + ", sources=" + candidateHits.length, "",
-    "LIVE SEARCH BRANCHES:", ...queries.map((q) => "- " + q), "",
-    "LIVE EVIDENCE (full page text; quotes must be copied verbatim from here):", JSON.stringify(evidencePack), "",
-    "SEARCH SNIPPETS (page not read; Manual review only):", JSON.stringify(snippetPack), "",
-    "Return ONLY one JSON object matching the supplied schema. Do not add markdown fences.",
-  ].join("\n");
-
-  let parsed: any = null;
-  let aiError = "";
-  let ai: Awaited<ReturnType<typeof runStructuredExtraction>> | null = null;
-  if (candidateHits.length) {
-    ai = await runStructuredExtraction({
-      system,
-      user,
-      schema: BACKGROUND_RESEARCH_SCHEMA,
-      edition,
-      deadlineAt,
-      maxTokens: input.testMode ? 3000 : edition === "pro" ? 6000 : 4500,
-      perCallTimeoutMs: Number(process.env.FREE_AI_TIMEOUT_MS || (input.testMode ? 18000 : 30000)),
-    });
-    parsed = ai.parsed;
-    aiError = ai.error;
-  }
-  const raw: any = ai ? { usage: ai.usage } : null;
-
+  // Stage 4: verification and extraction. Forums, videos and social feeds are never
+  // results for an entity search; every read page goes to the AI check when a key is set.
   const kind = inferResearchKind(input.query);
-  const allowedUrls = new Map(candidateHits.map((hit) => [hit.url, hit]));
-  const groundedResults = Array.isArray(parsed?.results)
-    ? parsed.results
-        .filter((item: any) => allowedUrls.has(normalizeResultUrl(item?.url)))
-        .map((item: any) => {
-          const hit = allowedUrls.get(normalizeResultUrl(item?.url))!;
-          const pageText = [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n");
-          const place = placeFromQuery(input.query, pageText);
-          const ruleFields: Record<string, string> = { ...heuristicFields(kind, pageText), location: place, geography: place, specialization: profileFromText(kind, pageText) };
-          const filled: Record<string, string> = {};
-          for (const [k, v] of Object.entries(ruleFields)) if (v && !String(item?.[k] || "").trim()) filled[k] = v;
-          const pageType: PageType = classifyPage({ url: hit.url, title: hit.title, text: pageText }, kind);
-          return {
-            ...item,
-            ...filled,
-            url: hit.url,
-            source: item?.source || hit.domain,
-            source_type: item?.source_type || (hit.content ? "page_reader" : hit.provider + "_search"),
-            evidence: item?.evidence || hit.snippet,
-            evidence_quote: item?.evidence_quote || "",
-            // A result whose page was never read cannot be more than Manual review.
-            status: hit.content ? item?.status : "Manual review",
-            page_type: pageType,
-            match: pageType === "entity" ? item?.match : Math.max(0, Number(item?.match || 0) - 20),
-            retrieved_at: item?.retrieved_at || hit.retrievedAt,
-          };
-        })
-    : [];
-  const hallucinatedUrls = Array.isArray(parsed?.results) ? parsed.results.length - groundedResults.length : 0;
+  const criteria = parseNumericCriteria(input.query);
+  const hasAi = configuredAiProviders(edition).length > 0;
+  const rejected: Array<{ title: string; url: string; reason: string; score: number }> = [];
+  const noiseHits = candidateHits.filter((hit) => isNoiseSource(hit.url, kind));
+  for (const hit of noiseHits) rejected.push({ title: hit.title || hit.domain, url: hit.url, reason: "forum_video_or_social", score: 5 });
+  const usableHits = candidateHits.filter((hit) => !isNoiseSource(hit.url, kind));
+  const readHits = usableHits.filter((hit) => Boolean(hit.content));
+  const aiPages = readHits.slice(0, input.testMode ? 6 : edition === "pro" ? 18 : 12)
+    .map((hit, index) => ({ id: index + 1, url: hit.url, title: hit.title, domain: hit.domain, content: String(hit.content || "") }));
 
-  const relevance = filterResearchResults(groundedResults, input.query, { geography: parsed?.query_understanding?.geography });
-  let results = relevance.kept;
-  let rejected = relevance.rejected;
-  let usedCandidateFallback = false;
-  if (!results.length && candidateHits.length) {
-    const fallback = filterResearchResults(fallbackResults(researchedHits.length ? [...researchedHits, ...candidateHits.filter((h) => !h.content)] : candidateHits, { ...input, maxResults: input.maxResults * 2 }), input.query);
-    results = fallback.kept;
-    rejected = [...rejected, ...fallback.rejected];
-    usedCandidateFallback = results.length > 0;
+  let verify: VerifyOutcome | null = null;
+  if (hasAi && aiPages.length) {
+    verify = await verifyPagesWithAi({ query: input.query, kind, criteria, language: input.language, pages: aiPages, edition, deadlineAt, batchSize: input.testMode ? 3 : 4 });
   }
-  results = rankResults(results).slice(0, input.maxResults);
+  const aiError = !hasAi ? "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY)." : verify && verify.error ? verify.error : "";
+  const verifiedById = new Map((verify?.items || []).map((item) => [item.id, item]));
+  const pageById = new Map(aiPages.map((page) => [page.id, page]));
+  const hitByUrl = new Map(candidateHits.map((hit) => [hit.url, hit]));
+
+  type Candidate = Record<string, any> & { url: string; page_type: string; match: number; status: string };
+  const candidates: Candidate[] = [];
+  let aiKept = 0;
+  let aiDropped = 0;
+  for (const [id, item] of verifiedById) {
+    const page = pageById.get(id)!;
+    const hit = hitByUrl.get(page.url)!;
+    const pageText = [hit.title, hit.snippet, hit.content].filter(Boolean).join("\n");
+    if (!item.keep) {
+      aiDropped += 1;
+      rejected.push({ title: item.name || hit.title, url: hit.url, reason: "ai_rejected: " + (item.why || item.page_type), score: item.match });
+      continue;
+    }
+    aiKept += 1;
+    const quote = item.evidence_quote && String(hit.content || "").includes(item.evidence_quote.slice(0, 60)) ? item.evidence_quote : "";
+    const place = item.location || placeFromQuery(input.query, pageText);
+    const ruleType = classifyPage({ url: hit.url, title: hit.title, text: pageText }, kind);
+    candidates.push({
+      ...heuristicFields(kind, pageText),
+      title: item.name || hit.title || hit.domain,
+      organization: item.organization,
+      specialization: item.specialization || profileFromText(kind, pageText),
+      geography: place,
+      location: place,
+      contact: item.contact,
+      investment_type: item.investment_type,
+      stage: item.stage,
+      ticket: item.ticket,
+      area: item.area,
+      price: item.price,
+      match: item.match,
+      confidence: quote ? 80 : 60,
+      evidence: quote || firstSentences(hit.snippet || String(hit.content || "")),
+      // An AI quote that is not on the page is kept so the quality gate can flag it.
+      evidence_quote: item.evidence_quote,
+      status: quote ? (item.match >= 70 ? "Verified" : "Reviewed") : "Manual review",
+      source: hit.domain,
+      source_type: "ai_verified_page",
+      url: hit.url,
+      why: item.why,
+      // The AI judged it a single entity; the rule classifier is only a second opinion for list pages.
+      page_type: item.page_type === "entity" && ruleType !== "article" ? "entity" : item.page_type === "entity" ? ruleType : item.page_type,
+      retrieved_at: hit.retrievedAt,
+      freshness_days: 0,
+      independent_verification: false,
+    });
+  }
+  // Pages the AI did not answer for (no key, a failed batch) and pages that were not read
+  // are checked by rules and always need manual review.
+  const verifiedUrls = new Set([...verifiedById.keys()].map((id) => pageById.get(id)!.url));
+  const ruleHits = [...readHits.filter((hit) => !verifiedUrls.has(hit.url)), ...usableHits.filter((hit) => !hit.content)];
+  for (const item of fallbackResults(ruleHits, { ...input, maxResults: ruleHits.length })) candidates.push(item as Candidate);
+
+  // Hard filters: numeric criteria, then page type. Articles never count as results for
+  // an entity search; list and catalogue pages stay only when there are too few entities.
+  let belowCriteria = 0;
+  const entities: Candidate[] = [];
+  const listPages: Candidate[] = [];
+  for (const item of candidates) {
+    const hit = hitByUrl.get(item.url);
+    const pageText = [hit?.title, hit?.content || hit?.snippet].filter(Boolean).join("\n");
+    const check = checkNumericCriteria(criteria, { area: item.area, price: item.price, title: item.title }, pageText);
+    if (check.verdict === "fail") {
+      belowCriteria += 1;
+      rejected.push({ title: String(item.title || ""), url: item.url, reason: "criteria: " + check.reason, score: 0 });
+      continue;
+    }
+    if (check.verdict === "unknown") {
+      item.status = "Manual review";
+      item.match = Math.max(0, Number(item.match || 0) - 10);
+      item.why = [item.why, input.language === "ru" ? "Значение для критерия (" + describeCriteria(criteria, "ru") + ") на странице не указано." : "The page does not state a value for " + describeCriteria(criteria, "en") + "."].filter(Boolean).join(" ");
+    } else if (check.areaM2 && !item.area) {
+      item.area = Math.round(check.areaM2).toLocaleString("ru-RU") + " m²";
+    }
+    const type = String(item.page_type || "entity");
+    if (type === "entity") entities.push(item);
+    else if (kind !== "general" && (type === "article" || type === "forum_or_video" || type === "other")) {
+      rejected.push({ title: String(item.title || ""), url: item.url, reason: "not_an_entity: " + type, score: Number(item.match || 0) });
+    } else listPages.push({ ...item, status: "Manual review" });
+  }
+  const keepListPages = kind === "general" || entities.length < 3;
+  if (!keepListPages) for (const item of listPages) rejected.push({ title: String(item.title || ""), url: item.url, reason: "list_page_kept_as_source", score: Number(item.match || 0) });
+
+  const relevance = filterResearchResults([...entities, ...(keepListPages ? listPages : [])], input.query);
+  rejected.push(...relevance.rejected);
+  const results = rankResults(relevance.kept).slice(0, input.maxResults);
+  const usedCandidateFallback = results.length > 0 && !results.some((item) => item.status !== "Manual review");
 
   const outcome = results.length
     ? (usedCandidateFallback ? "candidates_for_review" : "results")
     : candidateHits.length ? "all_candidates_rejected" : "no_candidates";
 
+  const aiLine = !hasAi
+    ? (ru
+        ? "ИИ-проверка не подключена: добавьте бесплатный OPENROUTER_API_KEY (или GEMINI_API_KEY / GROQ_API_KEY) в Vercel. Сейчас поля взяты со страниц правилами, результаты нужно проверить вручную."
+        : "AI verification is not configured: add a free OPENROUTER_API_KEY (or GEMINI_API_KEY / GROQ_API_KEY). Fields were extracted by rules and need manual review.")
+    : verify && verify.checkedPages
+      ? (ru
+          ? `ИИ-проверка (${verify.provider} · ${verify.model}): проверено страниц ${verify.checkedPages}, подошло ${aiKept}, отсеяно ${aiDropped}.` + (verify.error ? " Часть страниц ИИ не проверил: " + verify.error : "")
+          : `AI verification (${verify.provider} · ${verify.model}): ${verify.checkedPages} pages checked, ${aiKept} kept, ${aiDropped} dropped.` + (verify.error ? " Some pages were not checked: " + verify.error : ""))
+      : aiPages.length
+        ? (ru ? "ИИ-проверка не сработала: " + aiError + " Поля взяты правилами, результаты нужно проверить вручную." : "AI verification failed: " + aiError + " Fields were extracted by rules and need manual review.")
+        : "";
+  if (hasAi && aiError) console.warn("[research] AI verification problem:", aiError);
+  const criteriaLine = hasNumericCriteria(criteria)
+    ? (ru ? `Критерий ${describeCriteria(criteria, "ru")}: не подошло ${belowCriteria}.` : `Criterion ${describeCriteria(criteria, "en")}: ${belowCriteria} did not match.`)
+    : "";
+  const notEntities = rejected.filter((r) => r.reason.startsWith("not_an_entity") || r.reason === "forum_video_or_social").length;
+  const filterLine = notEntities
+    ? (ru ? `Убрано статей, форумов и видео: ${notEntities}.` : `Articles, forums and videos removed: ${notEntities}.`)
+    : "";
+
   const summaryParts = [
-    parsed?.search_summary ? String(parsed.search_summary) : "",
-    aiError ? (!configuredAiProviders(edition).length && input.language === "ru"
-      ? "AI-извлечение не подключено: добавьте бесплатный OPENROUTER_API_KEY (или GEMINI_API_KEY / GROQ_API_KEY) в Vercel. Сейчас поля взяты со страниц правилами, результаты нужно проверить вручную."
-      : "AI: " + aiError) : "",
+    aiLine,
+    criteriaLine,
+    filterLine,
+    !keepListPages && listPages.length ? (ru ? `Страниц-подборок: ${listPages.length}, они оставлены в реестре источников.` : `${listPages.length} list pages kept in the source registry.`) : "",
     usedMemoryFallback ? "Search returned nothing; learned sources from memory were re-read." : "",
-    challenged.length ? (input.language === "ru" ? "Часть поисковых запросов остановлена капчей " + challenged.map((d) => d.provider).join(", ") + "; результаты неполные. Добавьте JINA_API_KEY или SEARXNG_URL." : "Some searches were stopped by a CAPTCHA from " + challenged.map((d) => d.provider).join(", ") + "; results are incomplete. Add JINA_API_KEY or SEARXNG_URL.") : "",
-    usedCandidateFallback ? "Results are live search candidates kept for Manual review." : "",
-    hallucinatedUrls > 0 ? hallucinatedUrls + " AI result(s) dropped because their URL was not among retrieved sources." : "",
-    outcome === "no_candidates" ? (input.language === "ru" ? "Поисковые провайдеры ответили, но не нашли ни одной страницы по запросу. Попробуйте переформулировать запрос или расширить географию." : "Search providers responded but found no pages for this query. Try rephrasing or widening the geography.") : "",
-    outcome === "all_candidates_rejected" ? (input.language === "ru" ? `Найдено ${candidateHits.length} кандидатов, но все отклонены фильтром релевантности (мероприятия, вакансии, новости и т.п.). Список отклонённых — в rejectedCandidates.` : `${candidateHits.length} candidates were found but all were rejected as noise (events, jobs, news…). See rejectedCandidates.`) : "",
+    challenged.length ? (ru ? "Часть поисковых запросов остановлена капчей " + challenged.map((d) => d.provider).join(", ") + "; результаты неполные. Добавьте JINA_API_KEY или SEARXNG_URL." : "Some searches were stopped by a CAPTCHA from " + challenged.map((d) => d.provider).join(", ") + "; results are incomplete. Add JINA_API_KEY or SEARXNG_URL.") : "",
+    usedCandidateFallback ? (ru ? "Все результаты требуют ручной проверки." : "All results need manual review.") : "",
+    outcome === "no_candidates" ? (ru ? "Поисковые провайдеры ответили, но не нашли ни одной страницы по запросу. Попробуйте переформулировать запрос или расширить географию." : "Search providers responded but found no pages for this query. Try rephrasing or widening the geography.") : "",
+    outcome === "all_candidates_rejected" ? (ru ? `Найдено ${candidateHits.length} кандидатов, но ни один не прошёл проверку (статьи, подборки, не тот критерий). Нажмите «Продолжить», чтобы проверить следующие источники.` : `${candidateHits.length} candidates were found but none passed verification (articles, list pages, criteria). Press Continue to check more sources.`) : "",
   ].filter(Boolean);
 
   const finalParsed = {
-    query_understanding: parsed?.query_understanding || { intent: "research", entity_type: "unknown", geography: [], languages: [input.language], criteria: [], exclusions: [], required_fields: [], source_classes: ["web"] },
-    search_plan: String(parsed?.search_plan || "Live web search (" + providerDiagnostics.filter((d) => d.status === "ok").map((d) => d.provider).join(", ") + ") + page reader + " + (ai?.provider ? ai.provider + " AI extraction." : "rule-based extraction.")),
+    query_understanding: {
+      intent: "research",
+      entity_type: kind,
+      geography: [sourceMap.place || sourceMap.country || ""].filter(Boolean),
+      languages: [input.language],
+      criteria: [describeCriteria(criteria, input.language)].filter(Boolean),
+      exclusions: kind === "general" ? [] : (ru ? ["статьи и подборки", "форумы и видео"] : ["articles and lists", "forums and videos"]),
+      required_fields: [],
+      source_classes: sourceMap.classes.map((c) => c.id),
+    },
+    search_plan: "Live web search (" + providerDiagnostics.filter((d) => d.status === "ok").map((d) => d.provider).join(", ") + ") + page reader + " + (verify?.provider ? verify.provider + " AI verification (" + verify.model + ")." : "rule-based extraction."),
     search_branches: queries,
     search_summary: summaryParts.join(" "),
     candidates_seen: discoveredTotal,
     duplicates_removed: 0,
-    access_events: [...accessEvents, ...(Array.isArray(parsed?.access_events) ? parsed.access_events.slice(0, 20) : [])],
+    access_events: accessEvents,
     source_registry: sourceRegistry,
     results,
   };
@@ -599,19 +664,29 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   for (const hit of candidateHits) sourceText.set(hit.url, [hit.snippet, hit.content].filter(Boolean).join("\n"));
 
   const normalized: any = normalizeCompletedResearch(
-    { id: "free_" + Date.now().toString(36), status: "completed", output_text: JSON.stringify(finalParsed), output: [], usage: raw?.usage || null },
+    { id: "free_" + Date.now().toString(36), status: "completed", output_text: JSON.stringify(finalParsed), output: [], usage: verify?.usage || null },
     input,
     { sourceText, rejected, preFiltered: true },
   );
-  const aiModel = ai?.model || configuredAiProviders(edition)[0]?.model || "rules";
-  normalized.billing = { provider: ai?.provider || "rules", model: aiModel, billable: edition === "pro" && Boolean(process.env.PRO_OPENROUTER_MODEL) && ai?.provider === "openrouter", webSearchCalls: queries.length, usage: raw?.usage || null, background: false };
+  const aiModel = verify?.model || "rules";
+  normalized.billing = { provider: verify?.provider || "rules", model: aiModel, billable: edition === "pro" && Boolean(process.env.PRO_OPENROUTER_MODEL) && verify?.provider === "openrouter", webSearchCalls: queries.length, usage: verify?.usage || null, background: false };
   normalized.task = { id: taskIdFrom(normalized.query), responseId: "free_" + Date.now().toString(36), providerStatus: "completed" };
   normalized.live = true;
   normalized.partial = false;
   normalized.degraded = Boolean(aiError) || usedCandidateFallback || usedMemoryFallback;
   normalized.outcome = outcome;
   normalized.providers = providerDiagnostics;
-  normalized.aiStatus = aiError ? { ok: false, message: aiError, attempts: ai?.attempts || [] } : { ok: Boolean(parsed), message: parsed ? "ok" : "skipped", provider: ai?.provider, attempts: ai?.attempts || [] };
+  normalized.aiStatus = {
+    ok: Boolean(verify?.checkedPages) && !verify?.error,
+    configured: hasAi,
+    provider: verify?.provider,
+    model: verify?.model,
+    pagesChecked: verify?.checkedPages || 0,
+    kept: aiKept,
+    dropped: aiDropped,
+    message: aiError || (verify?.checkedPages ? "ok" : "skipped"),
+    attempts: verify?.attempts || [],
+  };
   normalized.stats.candidatesFound = discoveredTotal;
   normalized.edition = edition;
   normalized.taskKind = kind;

@@ -153,7 +153,7 @@ For the global-search layer, also see `docs/GLOBAL_SEARCH_AND_PUBLIC_COMMUNITIES
 
 ### Required free-research configuration
 
-Free mode uses Jina Search/Reader plus OpenRouter free-model inference. Jina Search requires a suitable Jina API-key/rate-limit configuration for reliable production use; OpenRouter's `openrouter/free` routes to currently available free models.
+Free mode uses Jina Search/Reader plus OpenRouter free-model verification of every read page (models picked from the live free-model list; check with `GET /api/research/ai-check`). Jina Search requires a suitable Jina API-key/rate-limit configuration for reliable production use; OpenRouter's `openrouter/free` routes to currently available free models.
 
 
 ## v2.2 — Production exports and outbound delivery

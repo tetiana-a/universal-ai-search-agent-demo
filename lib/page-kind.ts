@@ -101,3 +101,17 @@ export function profileFromText(kind: ResearchKind, text: string) {
   }
   return [...seen.values()].join(", ");
 }
+
+// Forums, video hosts, social feeds and encyclopedias: useful context, never a result
+// when the task asks for concrete objects, companies, investors or people.
+const NOISE_DOMAINS = /(^|\.)(reddit\.com|youtube\.com|youtu\.be|quora\.com|pinterest\.[a-z.]+|tiktok\.com|medium\.com|wikipedia\.org|zhihu\.com|vk\.com|ok\.ru|dzen\.ru|pikabu\.ru|twitter\.com|x\.com|facebook\.com|instagram\.com|threads\.net|tumblr\.com|scribd\.com|slideshare\.net|issuu\.com)$/i;
+
+export function isNoiseSource(url: string, kind: ResearchKind) {
+  if (kind === "general") return false;
+  let host = "";
+  let path = "";
+  try { const u = new URL(String(url)); host = u.hostname.replace(/^www\./, ""); path = u.pathname; } catch { return false; }
+  if (NOISE_DOMAINS.test(host)) return true;
+  if (/(^|\.)linkedin\.com$/i.test(host) && /^\/(pulse|posts|feed)\//i.test(path)) return true;
+  return false;
+}
