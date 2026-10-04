@@ -307,7 +307,7 @@ export default function ScoutDashboard() {
         )}
 
         {state && tab === "report" && <ReportTab state={state} act={act} busy={busy} headers={headers} setToast={setToast} />}
-        {state && tab === "tasks" && <TasksTab state={state} />}
+        {state && tab === "tasks" && <TasksTab state={state} act={act} />}
         {state && tab === "health" && <HealthTab headers={headers} />}
         {state && tab === "objects" && <ObjectsTab state={state} act={act} focusId={focusId} place={place} query={query} setQuery={setQuery} />}
         {state && tab === "investors" && <InvestorsTab state={state} act={act} focusId={focusId} />}
@@ -788,7 +788,7 @@ function SettingsTab({ state, act }: { state: State; act: Act }) {
   );
 }
 
-function TasksTab({ state }: { state: State }) {
+function TasksTab({ state, act }: { state: State; act: Act }) {
   const tasks = state.researchTasks || [];
   const active = tasks.filter((t) => t.state === "running" || t.state === "clarifying");
   const failed = tasks.filter((t) => t.state === "failed");
@@ -828,6 +828,11 @@ function TasksTab({ state }: { state: State }) {
                   <div><span className="text-[var(--text-faint)]">Discovered</span><div className="text-lg tabular-nums">{task.counters.sourcesDiscovered}</div></div>
                 </div>
                 {task.error && <p className="mt-2 rounded-xl border border-[#ff375f]/30 bg-[#ff375f]/10 p-2 text-xs text-[#ff7a93]">{task.error}</p>}
+                {(task.state === "running" || task.state === "clarifying") && (
+                  <div className="mt-3">
+                    <Button variant="danger" onClick={() => void act("research.cancel", { chatId: task.chatId }, "research.cancel")}><X size={13} />Остановить задачу</Button>
+                  </div>
+                )}
               </article>
             ))}
           </div>
