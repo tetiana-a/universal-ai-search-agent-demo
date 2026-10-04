@@ -44,7 +44,7 @@ type HealthState = {
   ok: boolean;
   checkedAt: string;
   checks: HealthCheckRow[];
-  telegram: { configured: boolean; apiOk: boolean; username?: string; webhookConfigured: boolean; webhookUrl?: string; webhookError?: string; pendingUpdates?: number; reportChatId?: string };
+  telegram: { configured: boolean; apiOk: boolean; username?: string; webhookConfigured: boolean; webhookUrl?: string; webhookError?: string; pendingUpdates?: number; reportChatId?: string; openGroupAccess: boolean };
   persistence: { configured: boolean; roundTrip: boolean };
   ai: { zeroCost: boolean; providers: Array<{ provider: string; model: string }>; deterministicFallback: boolean };
   search: { providers: string[]; directRead: boolean };
@@ -52,7 +52,7 @@ type HealthState = {
 };
 
 type State = {
-  ok: boolean; persistent: boolean; protected: boolean; telegram: { token: boolean; chatId: string }; adapters: AdapterInfo[]; settings: ScoutSettings; lastScan: ScanStats | null;
+  ok: boolean; persistent: boolean; protected: boolean; telegram: { token: boolean; chatId: string; openGroupAccess: boolean }; adapters: AdapterInfo[]; settings: ScoutSettings; lastScan: ScanStats | null;
   report: { data: any; html: string }; objects: ObjectCard[]; investors: InvestorCard[]; agencies: AgencyCard[]; sources: ScoutSource[]; watch: WatchItem[];
   drafts: Draft[]; leads: Lead[]; matches: Match[]; meetings: Meeting[]; researchTasks: ResearchTaskRow[]; log: LogEntry[];
 };
@@ -371,7 +371,9 @@ export default function ScoutDashboard() {
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>Telegram</span>
-                  <Chip tone={state?.telegram.token ? "green" : "red"}>{state?.telegram.token ? "готов" : "не настроен"}</Chip>
+                  <Chip tone={state?.telegram.token ? "green" : "red"}>
+                    {state?.telegram.token ? (state.telegram.openGroupAccess ? "группа открыта" : "готов") : "не настроен"}
+                  </Chip>
                 </div>
               </div>
             </div>
@@ -477,7 +479,7 @@ export default function ScoutDashboard() {
               )}
               {state && !state.protected && (
                 <div className="rounded-2xl border border-[var(--line-soft)] bg-[var(--surface)]/50 p-3 text-xs text-[var(--text-muted)]">
-                  <ShieldCheck size={13} className="mr-1 inline text-[var(--gold-bright)]" /> Демо-режим: кабинет открыт по ссылке. Перед работой с реальными контактами включите защиту ключом.
+                  <ShieldCheck size={13} className="mr-1 inline text-[var(--gold-bright)]" /> Общий режим: кабинет открыт всем, у кого есть ссылка. Все пользователи работают по одинаковым правилам.
                 </div>
               )}
 
