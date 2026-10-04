@@ -11,7 +11,7 @@ import { buildSearchMatrix } from "@/lib/search-matrix";
 import { createCsvBuffer, createXlsxBuffer } from "@/lib/server-exporters";
 import { buildTelegramMessages } from "@/lib/telegram-report";
 import { applyClarifications, clarifyingQuestions, fieldSchemaFor, type ClarifyingQuestion } from "@/lib/task-profile";
-import { deleteValue, getValue, logAction, setValue } from "@/lib/scout/store";
+import { deleteValue, getValue, listAll, logAction, putOne, setValue } from "@/lib/scout/store";
 import { editMessage, sendDocument, sendMessage, tgCall, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, randomId } from "@/lib/scout/text";
 
@@ -22,6 +22,8 @@ import { escapeHtml, randomId } from "@/lib/scout/text";
 
 export type ResearchLang = "ru" | "en";
 export type TaskState = "clarifying" | "running" | "stopped" | "done" | "failed";
+export type ResearchStage = "clarifying" | "queued" | "searching" | "merging" | "delivering" | "completed" | "stopped" | "failed";
+export type ResearchTaskEvent = { at: string; stage: ResearchStage; note?: string };
 
 export type ResearchTask = {
   id: string;
@@ -35,6 +37,9 @@ export type ResearchTask = {
   answers: Record<string, string>;
   step: number;
   state: TaskState;
+  stage: ResearchStage;
+  attempt: number;
+  events: ResearchTaskEvent[];
   round: number;
   seenUrls: string[];
   canContinue: boolean;
@@ -126,6 +131,9 @@ export function newTask(chatId: string, ownerId: string, text: string): Research
     chatId, ownerId, lang, baseQuery, query: baseQuery, kind: analysis.kind,
     questions: analysis.questions, answers: {}, step: 0,
     state: analysis.questions.length ? "clarifying" : "running",
+    stage: analysis.questions.length ? "clarifying" : "queued",
+    attempt: 0,
+    events: [{ at: now, stage: analysis.questions.length ? "clarifying" : "queued", note: "task created" }],
     round: 0, seenUrls: [], canContinue: true, results: [], sources: [],
     counters: { ...EMPTY_COUNTERS }, startedAt: now, updatedAt: now,
   };
@@ -133,6 +141,26 @@ export function newTask(chatId: string, ownerId: string, text: string): Research
 
 function urlKey(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase().replace(/[#?].*$/, "").replace(/\/$/, "") : "";
+}
+
+function checkpoint(task: ResearchTask, stage: ResearchStage, note?: string) {
+  const at = new Date().toISOString();
+  task.stage = stage;
+  task.updatedAt = at;
+  task.events = [...(task.events || []), { at, stage, note }].slice(-40);
+  return task;
+}
+
+export type ResearchTaskSummary = Pick<ResearchTask, "id" | "chatId" | "ownerId" | "query" | "kind" | "state" | "stage" | "attempt" | "round" | "counters" | "error" | "startedAt" | "updatedAt">;
+
+export async function listRecentResearchTasks(limit = 30): Promise<ResearchTaskSummary[]> {
+  const tasks = await listAll<ResearchTask>("research_tasks");
+  return tasks
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, Math.max(1, Math.min(limit, 100)))
+    .map(({ id, chatId, ownerId, query, kind, state, stage, attempt, round, counters, error, startedAt, updatedAt }) => ({
+      id, chatId, ownerId, query, kind, state, stage, attempt: attempt || 0, round, counters, error, startedAt, updatedAt,
+    }));
 }
 
 // Folds one pipeline round into the task: results and sources are de-duplicated by URL,
@@ -214,6 +242,7 @@ export function statusText(task: ResearchTask) {
     .map((row) => "• " + escapeHtml(row.label) + ": <b>" + formatNumber(row.value, task.lang) + "</b>");
   const lines = [
     head + (task.round ? " · " + t.round(task.round + (task.state === "running" ? 1 : 0)) : ""),
+    "Этап: <b>" + escapeHtml(task.stage || task.state) + "</b> · попытка: <b>" + String(task.attempt || 0) + "</b>",
     "<blockquote>" + escapeHtml(task.query.slice(0, 500)) + "</blockquote>",
     ...rows,
   ];
@@ -281,7 +310,10 @@ export async function loadTask(chatId: string) {
 }
 
 export async function saveTask(task: ResearchTask) {
-  await setValue(TASK_KEY + task.chatId, task);
+  await Promise.all([
+    setValue(TASK_KEY + task.chatId, task),
+    putOne("research_tasks", task),
+  ]);
 }
 
 async function stopRequested(chatId: string) {
@@ -311,6 +343,7 @@ export async function startResearch(chatId: string, ownerId: string, text: strin
   await deleteValue(STOP_KEY + chatId);
   await logAction({ actor: "human", action: "research.start", detail: task.baseQuery.slice(0, 120) });
   if (task.state === "clarifying") {
+    checkpoint(task, "clarifying", "awaiting clarification");
     await saveTask(task);
     await askQuestion(task);
     return undefined;
@@ -339,7 +372,8 @@ async function beginRun(task: ResearchTask, runner: RoundRunner): Promise<Backgr
   task.query = applyClarifications(task.baseQuery, task.answers, task.lang);
   task.state = "running";
   task.runId = randomId("run");
-  task.updatedAt = new Date().toISOString();
+  task.attempt = Number(task.attempt || 0) + 1;
+  checkpoint(task, "queued", "run " + task.runId + " queued");
   const sent = await sendMessage(task.chatId, statusText(task), statusKeyboard(task));
   task.statusMessageId = sent.messageId;
   await saveTask(task);
@@ -353,18 +387,24 @@ export async function runRounds(chatId: string, runner: RoundRunner = defaultRun
   const maxRounds = Math.max(1, Number(process.env.TG_RESEARCH_ROUNDS || 3));
   let task = await loadTask(chatId);
   if (!task?.runId) return;
+  checkpoint(task, "searching", "background worker started");
+  await saveTask(task);
   const runId = task.runId;
   // A newer run (changed criteria, continue) owns the chat: this one exits without writing.
   const superseded = async () => (await loadTask(chatId))?.runId !== runId;
   for (let i = 0; i < maxRounds; i++) {
-    if (await stopRequested(chatId)) { task.state = "stopped"; break; }
+    if (await stopRequested(chatId)) { task.state = "stopped"; checkpoint(task, "stopped", "stop requested"); break; }
     if (Date.now() + 60_000 > until) break;
     try {
+      checkpoint(task, "searching", "round " + (task.round + 1) + " started");
+      await saveTask(task);
       const outcome = await runner({ query: task.query, lang: task.lang, round: task.round, seenUrls: task.seenUrls, deadlineAt: Math.min(until, Date.now() + 70_000) - 4000 });
+      checkpoint(task, "merging", "round results received");
       task = mergeRound(task, outcome);
     } catch (error) {
       task.error = error instanceof Error ? error.message.slice(0, 400) : TEXT[task.lang].unknown;
       if (!task.results.length) task.state = "failed";
+      checkpoint(task, task.results.length ? "merging" : "failed", task.error);
       break;
     }
     if (await superseded()) return;
@@ -374,11 +414,15 @@ export async function runRounds(chatId: string, runner: RoundRunner = defaultRun
   }
   if (await superseded()) return;
   if (task.state === "running") task.state = "done";
-  task.updatedAt = new Date().toISOString();
+  checkpoint(task, task.state === "done" ? "delivering" : task.state === "stopped" ? "stopped" : "failed", "research rounds finished");
   await deleteValue(STOP_KEY + chatId);
   await saveTask(task);
   await logAction({ actor: "bot", action: "research." + task.state, detail: task.results.length + " results · " + task.query.slice(0, 80) });
   await deliver(task);
+  if (task.state === "done") {
+    checkpoint(task, "completed", "delivery completed");
+    await saveTask(task);
+  }
 }
 
 async function deliver(task: ResearchTask) {
@@ -447,6 +491,8 @@ export async function applyCriteriaChange(chatId: string, text: string, runner: 
     baseQuery: applyClarifications(task.baseQuery, task.answers, task.lang) + "\n" + label + ": " + text.trim().slice(0, 400),
     answers: {}, questions: [], step: 0, round: 0, seenUrls: [], canContinue: true,
     results: [], sources: [], counters: { ...EMPTY_COUNTERS }, error: undefined,
+    stage: "queued",
+    events: [...(task.events || []), { at: new Date().toISOString(), stage: "queued", note: "criteria changed" }].slice(-40),
   };
   await deleteValue(STOP_KEY + chatId);
   await logAction({ actor: "human", action: "research.criteria", detail: text.slice(0, 120) });
