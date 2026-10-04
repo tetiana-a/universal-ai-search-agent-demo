@@ -5,23 +5,74 @@
 export type AiProviderId = "openrouter" | "gemini" | "groq";
 export type Edition = "free" | "pro";
 
-type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: string; model: string; strictSchema: boolean; headers?: Record<string, string> };
+type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: string; model: string; models?: string[]; headers?: Record<string, string> };
+
+// Free OpenRouter model IDs come and go. When OPENROUTER_MODEL is not set, the current
+// free models are read from OpenRouter's public model list and the best few are tried in
+// turn. These IDs are only the fallback when that list cannot be fetched.
+export const FALLBACK_FREE_MODELS = [
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "deepseek/deepseek-chat-v3-0324:free",
+  "qwen/qwen-2.5-72b-instruct:free",
+  "mistralai/mistral-small-3.2-24b-instruct:free",
+];
+const PREFERRED_FREE = [/llama-3\.3-70b/i, /deepseek-(chat|v3)/i, /gemini.*flash/i, /qwen.*(72b|235b|max)/i, /llama-4/i, /mistral-(small|medium)/i, /gpt-oss/i];
+let freeModelCache: { at: number; models: string[] } | null = null;
+
+export function rankFreeModels(list: any[]): string[] {
+  const free = (Array.isArray(list) ? list : []).filter((m) => {
+    const id = String(m?.id || "");
+    const prompt = Number(m?.pricing?.prompt ?? NaN);
+    const completion = Number(m?.pricing?.completion ?? NaN);
+    const isFree = id.endsWith(":free") || (prompt === 0 && completion === 0);
+    const textOut = !m?.architecture?.output_modalities || m.architecture.output_modalities.includes("text");
+    return id && isFree && textOut && Number(m?.context_length || 0) >= 16000 && id !== "openrouter/auto";
+  });
+  const score = (m: any) => {
+    const id = String(m.id);
+    const pref = PREFERRED_FREE.findIndex((re) => re.test(id));
+    const json = Array.isArray(m?.supported_parameters) && m.supported_parameters.includes("response_format") ? 0 : 1;
+    return [pref === -1 ? 99 : pref, json, -Number(m?.context_length || 0)];
+  };
+  return free
+    .map((m) => ({ id: String(m.id), s: score(m) }))
+    .sort((a, b) => a.s[0] - b.s[0] || a.s[1] - b.s[1] || a.s[2] - b.s[2])
+    .map((m) => m.id);
+}
+
+export function resetFreeModelCache() { freeModelCache = null; }
+
+async function freeOpenRouterModels(): Promise<string[]> {
+  if (freeModelCache && Date.now() - freeModelCache.at < 60 * 60 * 1000) return freeModelCache.models;
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(3500), cache: "no-store" });
+    const payload: any = await response.json().catch(() => null);
+    const ranked = rankFreeModels(payload?.data).slice(0, 4);
+    if (ranked.length) {
+      freeModelCache = { at: Date.now(), models: ranked };
+      return ranked;
+    }
+  } catch (error) {
+    console.warn("[ai] could not read OpenRouter model list:", error instanceof Error ? error.message : error);
+  }
+  return FALLBACK_FREE_MODELS;
+}
 
 export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   const out: AiProvider[] = [];
   const openRouterKey = String(process.env.OPENROUTER_API_KEY || "").trim();
   if (openRouterKey) {
-    const freeModel = process.env.OPENROUTER_MODEL || "openrouter/free";
+    const configured = String((edition === "pro" && process.env.PRO_OPENROUTER_MODEL) || process.env.OPENROUTER_MODEL || "").trim();
     out.push({
       id: "openrouter",
       label: "OpenRouter",
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
       key: openRouterKey,
-      model: edition === "pro" ? (process.env.PRO_OPENROUTER_MODEL || freeModel) : freeModel,
-      strictSchema: true,
+      // "auto-free" means: pick from the current free models at call time.
+      model: configured || "auto-free",
       headers: {
         "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://universal-ai-search-agent-demo.vercel.app",
-        "X-OpenRouter-Title": "Aurelius Universal AI Research Engine",
+        "X-Title": "Aurelius Universal AI Research Engine",
       },
     });
   }
@@ -33,7 +84,6 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       key: geminiKey,
       model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
-      strictSchema: false,
     });
   }
   const groqKey = String(process.env.GROQ_API_KEY || "").trim();
@@ -44,7 +94,6 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       endpoint: "https://api.groq.com/openai/v1/chat/completions",
       key: groqKey,
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-      strictSchema: false,
     });
   }
   return out;
@@ -84,52 +133,66 @@ export async function runStructuredExtraction(options: {
   if (!providers.length) {
     return { parsed: null, usage: null, attempts, error: "No AI key configured (OPENROUTER_API_KEY, GEMINI_API_KEY or GROQ_API_KEY); results were extracted by rules and need manual review." };
   }
+  // One call to one model. A model that rejects response_format is retried once without it.
+  async function call(provider: AiProvider, model: string, timeoutMs: number, withFormat: boolean) {
+    const user = options.user + "\n\nJSON SCHEMA (follow exactly, return only the JSON object):\n" + JSON.stringify(options.schema);
+    const response = await fetch(provider.endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + provider.key, "Content-Type": "application/json", ...(provider.headers || {}) },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "system", content: options.system }, { role: "user", content: user }],
+        temperature: 0.1,
+        max_tokens: options.maxTokens,
+        ...(withFormat ? { response_format: { type: "json_object" } } : {}),
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const raw: any = await response.json().catch(() => null);
+    return { response, raw };
+  }
+
   for (const provider of providers) {
-    const remaining = options.deadlineAt - Date.now() - 2500;
-    const timeoutMs = Math.min(options.perCallTimeoutMs, remaining);
-    if (timeoutMs < 5000) {
-      attempts.push({ provider: provider.id, model: provider.model, ok: false, message: "Not enough time left for AI extraction; candidates are shown for manual review." });
-      break;
-    }
-    const responseFormat = provider.strictSchema
-      ? { type: "json_schema", json_schema: { name: "aurelius_research", strict: true, schema: options.schema } }
-      : { type: "json_object" };
-    const user = provider.strictSchema ? options.user : options.user + "\n\nJSON SCHEMA (follow exactly):\n" + JSON.stringify(options.schema);
-    try {
-      const response = await fetch(provider.endpoint, {
-        method: "POST",
-        headers: { Authorization: "Bearer " + provider.key, "Content-Type": "application/json", ...(provider.headers || {}) },
-        body: JSON.stringify({
-          model: provider.model,
-          messages: [{ role: "system", content: options.system }, { role: "user", content: user }],
-          temperature: 0.1,
-          max_tokens: options.maxTokens,
-          response_format: responseFormat,
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      const raw: any = await response.json().catch(() => null);
-      if (!response.ok) {
-        attempts.push({ provider: provider.id, model: provider.model, ok: false, message: provider.label + " HTTP " + response.status + ": " + String(raw?.error?.message || "request failed") });
-        continue;
+    // OpenRouter: the configured model first, then current free models as a fallback.
+    const models = provider.id !== "openrouter"
+      ? [provider.model]
+      : [...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...(await freeOpenRouterModels())])];
+    for (const model of models.slice(0, 3)) {
+      const remaining = options.deadlineAt - Date.now() - 1500;
+      const timeoutMs = Math.min(options.perCallTimeoutMs, remaining);
+      if (timeoutMs < 4000) {
+        attempts.push({ provider: provider.id, model, ok: false, message: provider.label + ": not enough time left for AI verification." });
+        break;
       }
       try {
-        const parsed = parseJsonLoose(extractText(raw));
-        attempts.push({ provider: provider.id, model: provider.model, ok: true });
-        return { parsed, usage: raw?.usage || null, provider: provider.id, model: provider.model, attempts, error: "" };
-      } catch {
-        attempts.push({ provider: provider.id, model: provider.model, ok: false, message: provider.label + " returned invalid structured output." });
+        let { response, raw } = await call(provider, model, timeoutMs, true);
+        const errText = String(raw?.error?.message || raw?.error || "");
+        if (!response.ok && (response.status === 400 || response.status === 404 || response.status === 422) && /response_format|json|structured|parameter/i.test(errText)) {
+          ({ response, raw } = await call(provider, model, Math.min(timeoutMs, options.deadlineAt - Date.now() - 1500), false));
+        }
+        if (!response.ok || raw?.error) {
+          const message = provider.label + " " + model + " HTTP " + response.status + ": " + String(raw?.error?.message || raw?.error?.metadata?.raw || "request failed").slice(0, 240);
+          console.warn("[ai] " + message);
+          attempts.push({ provider: provider.id, model, ok: false, message });
+          continue;
+        }
+        try {
+          const parsed = parseJsonLoose(extractText(raw));
+          attempts.push({ provider: provider.id, model: String(raw?.model || model), ok: true });
+          return { parsed, usage: raw?.usage || null, provider: provider.id, model: String(raw?.model || model), attempts, error: "" };
+        } catch {
+          const message = provider.label + " " + model + " returned text that is not valid JSON.";
+          console.warn("[ai] " + message);
+          attempts.push({ provider: provider.id, model, ok: false, message });
+        }
+      } catch (error) {
+        const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+        const message = timeout
+          ? provider.label + " " + model + ": no answer within " + Math.round(timeoutMs / 1000) + "s."
+          : provider.label + " " + model + " request failed: " + (error instanceof Error ? error.message : "network error");
+        console.warn("[ai] " + message);
+        attempts.push({ provider: provider.id, model, ok: false, message });
       }
-    } catch (error) {
-      const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
-      attempts.push({
-        provider: provider.id,
-        model: provider.model,
-        ok: false,
-        message: timeout
-          ? provider.label + ": AI extraction timed out after " + Math.round(timeoutMs / 1000) + "s."
-          : provider.label + " request failed: " + (error instanceof Error ? error.message : "network error"),
-      });
     }
   }
   const error = attempts.filter((a) => a.message).map((a) => a.message).join(" ") + " Candidates are shown for manual review.";

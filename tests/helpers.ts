@@ -50,3 +50,17 @@ export function aiResult(over: Record<string, unknown>) {
     ...over,
   };
 }
+
+// Answers the AI verification call: finds each "PAGE id=N / URL: …" in the prompt and
+// returns the verdict given for that URL (pages without one are dropped as articles).
+export function verifyReply(byUrl: Record<string, Record<string, unknown>>) {
+  return (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body || "{}"));
+    const prompt = String(body?.messages?.[1]?.content || "");
+    const results = [...prompt.matchAll(/PAGE id=(\d+)\nURL: (\S+)/g)].map(([, id, url]) => ({
+      id: Number(id), keep: false, page_type: "article", name: "", match: 10, evidence_quote: "", why: "not an entity",
+      ...(byUrl[url] || {}),
+    }));
+    return openRouterReply({ results });
+  };
+}

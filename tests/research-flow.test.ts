@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/research/task/route";
 import { clearReaderCache } from "@/lib/free-research";
 import { resetLocalQuotaCounters } from "@/lib/plans";
-import { EVENT_PAGE, VC_PAGE, aiResult, json, mockFetch, openRouterReply, postJson, researchPayload } from "./helpers";
+import { EVENT_PAGE, VC_PAGE, json, mockFetch, postJson, verifyReply } from "./helpers";
 
 const QUERY = "Find venture capital investors in Amsterdam for a B2B software startup";
 const PAGES: Record<string, { title: string; text: string }> = {
@@ -97,7 +97,8 @@ describe("research flow: explicit errors instead of empty results", () => {
     expect(body.results.length).toBeGreaterThan(0);
     expect(body.results.every((r: any) => r.status === "Manual review")).toBe(true);
     expect(body.results.some((r: any) => r.url.includes("/events/"))).toBe(false);
-    expect(body.summary).toContain("OpenRouter HTTP 503");
+    expect(body.summary).toContain("HTTP 503");
+    expect(body.aiStatus).toMatchObject({ ok: false, configured: true });
   });
 
   it("reports a true zero (providers answered, nothing found) with an explanation", async () => {
@@ -119,12 +120,11 @@ describe("research flow: normal successful run", () => {
       jinaReaderOk(),
       {
         match: (u) => u.includes("openrouter.ai"),
-        respond: () => openRouterReply(researchPayload([
-          aiResult({ title: "Northwave Ventures", organization: "Northwave Ventures B.V.", specialization: "B2B software", geography: "Amsterdam", investment_type: "VC", url: "https://northwave.vc", source: "northwave.vc", evidence: "Amsterdam VC investing in B2B software", evidence_quote: quote }),
-          aiResult({ title: "Northwave Ventures team", organization: "Northwave Ventures", url: "https://northwave.vc/team", source: "northwave.vc", confidence: 70, evidence: "Team page", evidence_quote: "Meet the Northwave Ventures partners." }),
-          aiResult({ title: "Investor Networking Night Amsterdam", url: "https://amsterdam-networking.com/events/investor-night", source: "amsterdam-networking.com", evidence: "Networking event", evidence_quote: "an event for founders to meet angels" }),
-          aiResult({ title: "Invented Capital", organization: "Invented Capital", url: "https://invented-capital.example/fund", source: "invented", evidence: "made up", evidence_quote: "Invented Capital invests in B2B software in Amsterdam." }),
-        ])),
+        respond: verifyReply({
+          "https://northwave.vc": { keep: true, page_type: "entity", name: "Northwave Ventures", organization: "Northwave Ventures B.V.", specialization: "B2B software", location: "Amsterdam", investment_type: "VC", match: 85, evidence_quote: quote, why: "Amsterdam VC investing in B2B software" },
+          "https://northwave.vc/team": { keep: true, page_type: "entity", name: "Northwave Ventures team", organization: "Northwave Ventures", match: 70, evidence_quote: "Meet the Northwave Ventures partners.", why: "Team page" },
+          "https://amsterdam-networking.com/events/investor-night": { keep: false, page_type: "article", name: "Investor Networking Night Amsterdam", match: 20, why: "An event, not an investor" },
+        }),
       },
     ]);
     const response = await POST(request());
@@ -150,9 +150,9 @@ describe("research flow: normal successful run", () => {
       jinaReaderOk(),
       {
         match: (u) => u.includes("openrouter.ai"),
-        respond: () => openRouterReply(researchPayload([
-          aiResult({ title: "Northwave Ventures", organization: "Northwave Ventures", specialization: "B2B software", geography: "Amsterdam", url: "https://northwave.vc", source: "northwave.vc", evidence: "VC in Amsterdam", evidence_quote: "Northwave Ventures manages EUR 900m and invests in B2B software across Amsterdam." }),
-        ])),
+        respond: verifyReply({
+          "https://northwave.vc": { keep: true, page_type: "entity", name: "Northwave Ventures", organization: "Northwave Ventures", specialization: "B2B software", location: "Amsterdam", match: 85, evidence_quote: "Northwave Ventures manages EUR 900m and invests in B2B software across Amsterdam.", why: "VC in Amsterdam" },
+        }),
       },
     ]);
     const body = await (await POST(request())).json();
