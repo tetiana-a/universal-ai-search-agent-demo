@@ -348,7 +348,7 @@ export function normalizeCompletedResearch(response: any, input: BackgroundResea
 
 // Counters in the shape the product spec asks for: discovered, checked, unavailable,
 // found, after de-duplication, matching the main criteria.
-export function progressCounters(input: { discovered: number; knownSources: number; registry: any[]; recordsExtracted: number; afterDedupe: number; results: any[] }) {
+export function progressCounters(input: { discovered: number; knownSources: number; registry: any[]; recordsExtracted: number; afterDedupe: number; results: any[]; filteredOut?: number }) {
   const registry = Array.isArray(input.registry) ? input.registry : [];
   const results = Array.isArray(input.results) ? input.results : [];
   const unavailableStatuses = new Set(["unavailable", "blocked", "auth_required", "policy_restricted", "captcha_required", "rate_limited", "not_automatable"]);
@@ -360,6 +360,7 @@ export function progressCounters(input: { discovered: number; knownSources: numb
     sourcesNotReached: registry.filter((s) => s?.accessStatus === "partial").length,
     resultsFound: Math.max(input.recordsExtracted, results.length),
     afterDedupe: Math.max(results.length, input.afterDedupe),
+    ...(input.filteredOut !== undefined ? { filteredOut: input.filteredOut } : {}),
     matchingCriteria: results.filter((r) => (r?.status === "Verified" || r?.status === "Reviewed") && (r?.pageType || "entity") === "entity").length,
     needsReview: results.filter((r) => r?.status === "Manual review").length,
   };

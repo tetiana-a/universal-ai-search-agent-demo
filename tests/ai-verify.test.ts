@@ -131,3 +131,51 @@ describe("manufacturer searches", () => {
     expect(picked.some((q) => /reddit/.test(q))).toBe(false);
   });
 });
+
+describe("listicles", () => {
+  it("are articles, not companies", async () => {
+    const { classifyPage } = await import("@/lib/page-kind");
+    for (const title of ["10 крупнейших производителей светодиодных экранов в Китае", "Top 8 LED batten manufacturers in China", "Top-10 VC firms in Amsterdam", "15 leading venture capital firms in the Netherlands", "Best VC funds in Amsterdam"]) {
+      expect(classifyPage({ url: "https://example.com/x", title, text: "" }, "company")).toBe("article");
+    }
+    expect(classifyPage({ url: "https://www.leyard.com/en/about", title: "Leyard Optoelectronic Co., Ltd — LED display manufacturer", text: "" }, "company")).toBe("entity");
+  });
+});
+
+describe("free model choice after the live test", () => {
+  it("never picks music, image or audio models such as Lyria", () => {
+    const list = [
+      { id: "google/lyria-3-pro-preview", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { input_modalities: ["text"], output_modalities: ["audio", "text"] } },
+      { id: "google/lyria-3-clip-preview:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { input_modalities: ["text"], output_modalities: ["text"] } },
+      { id: "acme/imagegen:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { output_modalities: ["image"] } },
+      { id: "acme/chat-no-json:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, supported_parameters: ["temperature"] },
+      { id: "nvidia/nemotron-nano-reasoning:free", pricing: { prompt: "0", completion: "0" }, context_length: 64000, supported_parameters: ["response_format"] },
+      { id: "acme/chat:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["response_format"] },
+    ];
+    expect(rankFreeModels(list)).toEqual(["acme/chat:free", "nvidia/nemotron-nano-reasoning:free"]);
+  });
+
+  it("tries the model that last worked first and skips one that just failed", async () => {
+    const { markModel, orderByHealth } = await import("@/lib/free-ai");
+    markModel("b/ok:free", true);
+    markModel("a/broken:free", false);
+    expect(orderByHealth(["a/broken:free", "c/new:free", "b/ok:free"])).toEqual(["b/ok:free", "c/new:free"]);
+  });
+});
+
+describe("B2B platform pages", () => {
+  it("search and category pages are lists, a supplier's own shop is a company", async () => {
+    const { classifyPage, isB2bListing } = await import("@/lib/page-kind");
+    expect(isB2bListing("https://www.alibaba.com/showroom/led-panel-light.html")).toBe(true);
+    expect(isB2bListing("https://www.made-in-china.com/products-search/hot-china-products/LED_Light.html")).toBe(true);
+    expect(isB2bListing("https://www.alibaba.com/trade/search?SearchText=led")).toBe(true);
+    expect(classifyPage({ url: "https://shenzhenled.en.made-in-china.com/", title: "Shenzhen LED Lighting Co., Ltd." }, "company")).toBe("entity");
+    expect(classifyPage({ url: "https://ledfactory.en.alibaba.com/company_profile.html", title: "Ledfactory Co., Ltd." }, "company")).toBe("entity");
+  });
+
+  it("list pages lead to supplier subdomains", async () => {
+    const { itemLinks } = await import("@/lib/free-research");
+    const content = "[Shenzhen LED](https://shenzhenled.en.made-in-china.com/) [Login](https://login.made-in-china.com/sign-in/) [Other](https://other.com/x-y-z-w)";
+    expect(itemLinks("https://www.made-in-china.com/products-search/hot-china-products/LED_Light.html", content)).toEqual(["https://shenzhenled.en.made-in-china.com"]);
+  });
+});
