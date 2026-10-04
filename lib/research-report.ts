@@ -60,11 +60,20 @@ export type ResearchExportPayload = {
   progressCounters?: Partial<Record<string, number>>;
 };
 
+const CYRILLIC: Record<string, string> = {
+  а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o",
+  п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh", щ: "shch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu",
+  я: "ya", і: "i", ї: "yi", є: "ye", ґ: "g",
+};
+
+// File names keep the query readable: Cyrillic is transliterated, "²" becomes "2".
 export function safeFilenamePart(value: string) {
-  const normalized = String(value || "research")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "");
-  const result = normalized.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
+  const transliterated = Array.from(String(value || "research").split("\n")[0].toLowerCase())
+    .map((ch) => CYRILLIC[ch] ?? ch)
+    .join("")
+    .replace(/²/g, "2");
+  const normalized = transliterated.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const result = normalized.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70).replace(/-+$/, "");
   return result || "research";
 }
 
