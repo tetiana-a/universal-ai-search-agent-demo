@@ -2275,36 +2275,24 @@ export default function Home() {
 
                 <div className="mt-2 flex flex-col gap-3 border-t border-[var(--line-soft)] pt-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => setScenarioAndStay("realEstate")}
-                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
-                        scenario === "realEstate"
-                          ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                          : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                      }`}
-                    >
-                      {lang === "ru" ? "Земля" : "Land"}
-                    </button>
-                    <button
-                      onClick={() => setScenarioAndStay("investors")}
-                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
-                        scenario === "investors"
-                          ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                          : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                      }`}
-                    >
-                      {lang === "ru" ? "Инвесторы" : "Investors"}
-                    </button>
-                    <button
-                      onClick={() => setScenarioAndStay("companies")}
-                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
-                        scenario === "companies"
-                          ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                          : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                      }`}
-                    >
-                      {lang === "ru" ? "Компании" : "Companies"}
-                    </button>
+                    {([
+                      ["realEstate", "Земля", "Land"],
+                      ["investors", "Инвесторы", "Investors"],
+                      ["companies", "Компании", "Companies"],
+                    ] as const).map(([key, ruLabel, enLabel]) => (
+                      <button
+                        key={key}
+                        onClick={() => setScenarioAndStay(key)}
+                        aria-pressed={scenario === key}
+                        className={"rounded-full border px-3 py-1.5 text-[11.5px] transition " + (
+                          scenario === key
+                            ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
+                            : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
+                        )}
+                      >
+                        {lang === "ru" ? ruLabel : enLabel}
+                      </button>
+                    ))}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
