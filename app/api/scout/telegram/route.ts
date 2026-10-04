@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { handleUpdate } from "@/lib/scout/bot";
-import { logAction } from "@/lib/scout/store";
+import { claimOnce, logAction } from "@/lib/scout/store";
 import { sendMessage, webhookSecret } from "@/lib/scout/telegram";
 
 export const runtime = "nodejs";
@@ -14,6 +14,16 @@ export async function POST(request: Request) {
   if (!secret || request.headers.get("x-telegram-bot-api-secret-token") !== secret) return new Response("forbidden", { status: 403 });
   const update = await request.json().catch(() => null);
   if (!update) return Response.json({ ok: true });
+
+  const updateId = Number(update?.update_id);
+  if (Number.isFinite(updateId)) {
+    const claimed = await claimOnce("telegram-update:" + updateId, 24 * 60 * 60);
+    if (!claimed) {
+      await logAction({ actor: "bot", action: "telegram.duplicate_ignored", detail: "update=" + updateId });
+      return Response.json({ ok: true, duplicate: true });
+    }
+  }
+
   try {
     const result = await handleUpdate(update);
     await logAction({
