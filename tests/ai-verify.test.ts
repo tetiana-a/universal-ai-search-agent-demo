@@ -179,3 +179,42 @@ describe("B2B platform pages", () => {
     expect(itemLinks("https://www.made-in-china.com/products-search/hot-china-products/LED_Light.html", content)).toEqual(["https://shenzhenled.en.made-in-china.com"]);
   });
 });
+
+describe("after the third live test", () => {
+  const QUERY = "Find land plots in Madrid from 10 000 m²";
+  const LIST = "https://www.idealista.com/venta-terrenos/madrid-madrid/";
+  const ITEM = "https://www.idealista.com/inmueble/397829/";
+  const PAGES: Record<string, string> = {
+    [LIST]: "2.971 Terrenos en venta en Madrid. Ordenar por relevancia. [Terreno urbano en Valdebebas](" + ITEM + ") [Parcela pequeña](https://www.idealista.com/inmueble/111222/)",
+    [ITEM]: "Terreno urbano en Valdebebas, Madrid. Superficie 12.000 m². Precio 2.400.000 €. Ideal para promoción residencial.",
+    "https://www.idealista.com/inmueble/111222/": "Parcela en Madrid. Superficie 800 m². Precio 300.000 €.",
+    "https://www.fotocasa.es/es/comprar/terrenos/madrid-capital/todas-las-zonas/l": "2.992 Terrenos en venta en Madrid. Ordenar por precio.",
+  };
+
+  function routes(byUrl: Record<string, Record<string, unknown>>) {
+    return [
+      { match: (u: string) => u.startsWith("https://s.jina.ai/"), respond: () => json({ code: 200, data: [LIST, "https://www.fotocasa.es/es/comprar/terrenos/madrid-capital/todas-las-zonas/l"].map((url) => ({ url, title: "Terrenos en venta en Madrid", description: "Terrenos en venta" })) }) },
+      { match: (u: string) => u.startsWith("https://r.jina.ai/"), respond: (u: string) => { const key = u.slice("https://r.jina.ai/".length).replace(/\/$/, ""); const t = Object.entries(PAGES).find(([k]) => k.replace(/\/$/, "") === key)?.[1]; return t ? json({ data: { content: t } }) : new Response("", { status: 404 }); } },
+      { match: (u: string) => u.endsWith("/api/v1/models"), respond: () => json({ data: [{ id: "x/model:free", pricing: { prompt: "0", completion: "0" }, context_length: 64000 }] }) },
+      { match: (u: string) => u.endsWith("/chat/completions"), respond: verifyReply(byUrl) },
+    ];
+  }
+
+  it("follows item links from list pages while reading, and promotes what the AI confirms", async () => {
+    mockFetch(routes({
+      "https://www.idealista.com/inmueble/397829": { keep: true, page_type: "entity", name: "Terreno urbano en Valdebebas", location: "Madrid", area: "12.000 m²", price: "2.400.000 €", match: 88, evidence_quote: "Some paraphrase that is not on the page at all, really.", why: "Plot in Madrid over 10 000 m²" },
+    }));
+    const body = await (await POST(postJson("http://localhost/api/research/task", { query: QUERY, language: "en" }))).json();
+    expect(body.results.map((r: any) => r.url)).toEqual(["https://www.idealista.com/inmueble/397829"]);
+    expect(body.results[0].status).toBe("Reviewed");
+    expect(body.progressCounters.matchingCriteria).toBe(1);
+  });
+
+  it("shows nothing when the AI rejects every page, instead of the rejected list pages", async () => {
+    mockFetch(routes({}));
+    const body = await (await POST(postJson("http://localhost/api/research/task", { query: QUERY, language: "en" }))).json();
+    expect(body.aiStatus.ok).toBe(true);
+    expect(body.results).toEqual([]);
+    expect(body.outcome).toBe("all_candidates_rejected");
+  });
+});

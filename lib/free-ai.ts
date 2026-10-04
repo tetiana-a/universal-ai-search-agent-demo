@@ -16,13 +16,13 @@ export const FALLBACK_FREE_MODELS = [
   "qwen/qwen-2.5-72b-instruct:free",
   "mistralai/mistral-small-3.2-24b-instruct:free",
 ];
-const PREFERRED_FREE = [/llama-3\.3-70b/i, /deepseek-(chat|v3)/i, /gemini.*flash/i, /qwen.*(72b|235b|max)/i, /llama-4/i, /mistral-(small|medium)/i, /gpt-oss/i];
+const PREFERRED_FREE = [/nemotron.*super/i, /llama-3\.3-70b/i, /deepseek-(chat|v3)/i, /gemini.*flash/i, /qwen.*(72b|235b|max)/i, /llama-4/i, /mistral-(small|medium)/i, /gpt-oss/i];
 let freeModelCache: { at: number; models: string[] } | null = null;
 
 // Only text-in/text-out chat models that support JSON output are usable; music, image,
 // audio and embedding models (e.g. Lyria) are never picked even when listed as free.
 const NOT_CHAT = /lyria|image|imagen|audio|music|tts|whisper|speech|veo|video|embed|rerank|guard|moderation|vision-only|omni/i;
-const REASONING = /reason|thinking|r1\b|qwq/i;
+const REASONING = /reason|thinking|r1\b|qwq|dots-|apodex|note-preview/i;
 
 export function rankFreeModels(list: any[]): string[] {
   const free = (Array.isArray(list) ? list : []).filter((m) => {

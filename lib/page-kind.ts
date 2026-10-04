@@ -12,6 +12,10 @@ const ARTICLE_TITLE = /(что такое|как (?:найти|выбрать|п
 const LISTING_PATH = /\/(search|category|categories|catalog|catalogue|katalog|listing|listings|tag|tags|filter|results|kupit|prodazha|for-sale|sale)(\/|$|\?|-)|[?&](page|sort|q|query)=/iu;
 const LISTING_TEXT = /(найден[оa]?\s*(?:объект|объявлен|предложен)\p{L}*\s*:?\s*\d|\d[\d\s]*\s+(?:объявлен|предложен|объект)\p{L}*\s+(?:по запросу|найдено|в продаже)|\b\d[\d,.\s]*\s+(?:results|listings|properties|homes|plots)\s+(?:found|for sale|available)|сортир\p{L}+ по|sort by|показать ещ[её]|load more|все объявления|view all listings)/iu;
 const LISTING_TITLE = /^(?:купить|продажа|снять|аренда|buy|sale of|for sale|properties for sale)(?=\s).*(?:участк|квартир|дом[аов]?(?![\p{L}])|вилл|недвижимост|апартамент|plots|land|houses|apartments|villas|properties)/iu;
+// Portal result pages in the languages of the mapped countries ("2.971 Terrenos en venta",
+// "Ordenar por", /venta-terrenos/madrid/). An item page usually carries a long numeric id.
+const LOCAL_LISTING_TEXT = /(\d[\d.,\s]*\s+(?:terrenos|parcelas|solares|viviendas|pisos|casas|inmuebles|anuncios|propiedades|terreni|immobili|annunci|case|imóveis|imoveis|moradias|grundstücke|immobilien|anzeigen|terrains|annonces|biens|woningen|kavels|resultaten|results|listings|properties)\b|ordenar por|ordina per|ordenar resultados|sortieren nach|trier par|sorteer op)/iu;
+const LOCAL_LISTING_PATH = /\/(venta-[\p{L}-]+|alquiler-[\p{L}-]+|comprar|vendita-[\p{L}-]+|affitto-[\p{L}-]+|comprare|kaufen|mieten|achat|vente|koop|te-koop|for-sale|en-venta|in-vendita|a-venda|terrenos|terreni|grundstuecke)(\/|$|\?)/iu;
 const DIRECTORY_PATH = /\/(brands|brendy|manufacturers|proizvoditeli|companies|kompanii|directory|suppliers|postavshchiki|vendors)\/?(?:$|\?)/iu;
 const DIRECTORY_TITLE = /^(?:бренды|производители|список|каталог|рейтинг|directory|list of|brands|manufacturers|suppliers)(?=\s|$)/iu;
 const CATALOG = /(каталог|catalog(?:ue)?|интернет[- ]магазин|online store|shop now|в корзину|add to cart|купить в розницу)/iu;
@@ -41,6 +45,8 @@ export function classifyPage(input: { url?: string; title?: string; text?: strin
   if (ARTICLE_PATH.test(path) || ARTICLE_TITLE.test(title)) return "article";
   if (isB2bListing(url)) return "listing_index";
   if (LISTING_TEXT.test(text) || LISTING_TITLE.test(title)) return "listing_index";
+  const itemId = /\d{5,}/.test(path);
+  if (!itemId && (LOCAL_LISTING_TEXT.test(title + " " + text.slice(0, 600)) || LOCAL_LISTING_PATH.test(path))) return "listing_index";
   if (DIRECTORY_PATH.test(path) || DIRECTORY_TITLE.test(title)) return "listing_index";
   if (kind !== "company" && LISTING_PATH.test(path)) return "listing_index";
   if (kind !== "company" && CATALOG.test(title + " " + text.slice(0, 600))) return "catalog";
