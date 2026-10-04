@@ -281,7 +281,9 @@ export async function runStructuredExtraction(options: {
           if (response.status === 429) {
             // The limit is per account, not per model: stop this provider, go to the next one.
             const daily = isDailyQuotaMessage(JSON.stringify(raw || ""));
-            blockProvider(quotaKey, daily);
+            // Gemini/Groq per-minute limits clear quickly; only a daily limit or OpenRouter
+            // (which has other free routes) is skipped for later calls.
+            if (daily || provider.id === "openrouter") blockProvider(quotaKey, daily);
             attempts.push({ provider: provider.id, model, ok: false, quota: true, message });
             break;
           }

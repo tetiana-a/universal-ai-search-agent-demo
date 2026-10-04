@@ -136,3 +136,20 @@ describe("junk links and placeholder contacts", () => {
     expect(cleanContact("test@example.com")).toBe("");
   });
 });
+
+describe("ranked lists in other languages", () => {
+  it("treats machine-translated top lists as articles", async () => {
+    const { classifyPage } = await import("@/lib/page-kind");
+    expect(classifyPage({ url: "https://comledlamp.com/top-8-led-manufacturers", title: "Вершина 8 Производители светодиодных ламп в Китае", text: "" }, "company")).toBe("article");
+    expect(classifyPage({ url: "https://hqgled.com/news/smd-led", title: "Ведущие производители SMD светодиодов", text: "" }, "company")).toBe("article");
+    expect(classifyPage({ url: "https://shenzhenled.en.made-in-china.com/", title: "Shenzhen LED Lighting Co., Ltd", text: "We manufacture LED lamps." }, "company")).toBe("entity");
+  });
+});
+
+describe("place names", () => {
+  it("uses the dictionary form of a place", async () => {
+    const { placeFromQuery } = await import("@/lib/page-kind");
+    expect(placeFromQuery("Найди юристов в Испании", "Юристы в Испании для иностранцев")).toBe("Испания");
+    expect(placeFromQuery("Найди участки в Мадриде", "Участки в Мадриде. Мадрид, район Valdebebas")).toBe("Мадрид");
+  });
+});

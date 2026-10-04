@@ -125,7 +125,7 @@ export async function verifyPagesWithAi(options: {
   const size = Math.max(1, options.batchSize || 6);
   const batches: VerifyPage[][] = [];
   for (let i = 0; i < options.pages.length; i += size) batches.push(options.pages.slice(i, i + size));
-  const outcomes = await Promise.all(batches.map((batch) => {
+  const runBatch = (batch: VerifyPage[]) => {
     const { system, user } = buildVerifyPrompt(options.query, options.kind, options.criteria, options.language, batch);
     return runStructuredExtraction({
       system,
@@ -137,7 +137,17 @@ export async function verifyPagesWithAi(options: {
       maxTokens: 500 * batch.length + 600,
       perCallTimeoutMs: Number(process.env.FREE_AI_TIMEOUT_MS || 25000),
     }).then((out) => ({ out, batch }));
-  }));
+  };
+  const outcomes = await Promise.all(batches.map(runBatch));
+  // A batch lost to a per-minute limit is sent once more, one at a time, while there is
+  // time left; otherwise its pages would stay unchecked.
+  for (let i = 0; i < outcomes.length; i += 1) {
+    const failed = outcomes[i];
+    if (failed.out.parsed || options.deadlineAt - Date.now() < 15_000) continue;
+    if (!failed.out.attempts.some((a) => a.quota) || /daily/i.test(failed.out.error)) continue;
+    const again = await runBatch(failed.batch);
+    outcomes[i] = { out: { ...again.out, attempts: [...failed.out.attempts, ...again.out.attempts] }, batch: failed.batch };
+  }
 
   const items: VerifiedItem[] = [];
   const attempts: AiAttempt[] = [];
