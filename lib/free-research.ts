@@ -5,7 +5,7 @@ import { filterResearchResults } from "@/lib/relevance-gate";
 import { configuredFallbackProviders, searchFallbackProviders } from "@/lib/provider-search";
 import { ResearchError, type ProviderDiagnostic } from "@/lib/research-errors";
 import { isSafePublicUrl } from "@/lib/url-safety";
-import { normalizeResultUrl } from "@/lib/result-quality";
+import { normalizeResultUrl, registrableDomain } from "@/lib/result-quality";
 import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
 import { directRead } from "@/lib/direct-reader";
 import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
@@ -174,13 +174,19 @@ export function itemLinks(listUrl: string, content: string, limit = 6) {
   for (const m of String(content || "").matchAll(re)) {
     let url: URL;
     try { url = new URL(m[1] || m[2], base); } catch { continue; }
-    if (url.hostname.replace(/^www\./, "") !== base.hostname.replace(/^www\./, "")) continue;
+    // Same site, including a platform's supplier subdomains (acme.en.made-in-china.com).
+    if (registrableDomain(url.toString()) !== registrableDomain(base.toString())) continue;
+    const subdomain = url.hostname.replace(/^www\./, "") !== base.hostname.replace(/^www\./, "");
     const path = url.pathname;
-    if (path === base.pathname || path.split("/").filter(Boolean).length < 2) continue;
     if (/\.(jpg|jpeg|png|gif|webp|svg|pdf|css|js)$/i.test(path)) continue;
     if (/\/(login|signin|register|cart|basket|account|privacy|terms|contact|about|blog|news|faq|help|search|tag|category)(\/|$)/i.test(path)) continue;
-    // Detail pages usually carry an id or a long slug.
-    if (!/\d{3,}|[a-z]+(?:-[a-z0-9]+){3,}/i.test(path)) continue;
+    if (subdomain) {
+      if (/^(www|m|s|login|passport|my|help|service|sale|offer|insights|activity)\./i.test(url.hostname)) continue;
+    } else {
+      if (path === base.pathname || path.split("/").filter(Boolean).length < 2) continue;
+      // Detail pages usually carry an id or a long slug.
+      if (!/\d{3,}|[a-z]+(?:-[a-z0-9]+){3,}/i.test(path)) continue;
+    }
     url.hash = "";
     links.add(normalizeResultUrl(url.toString()));
     if (links.size >= limit) break;
@@ -415,7 +421,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   for (const hit of candidateHits.slice(readerLimit)) hit.readStatus = hit.readStatus || "skipped";
 
   // Open list pages and read the item pages they link to, within the time budget.
-  const followBudget = input.testMode ? 2 : edition === "pro" ? 8 : 4;
+  const followBudget = input.testMode ? 2 : edition === "pro" ? 10 : 6;
   const known = new Set(candidateHits.map((hit) => hit.url.toLowerCase()));
   const followUrls: string[] = [];
   for (const hit of candidateHits) {
@@ -631,6 +637,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     aiLine,
     criteriaLine,
     filterLine,
+    relevance.kept.length > results.length ? (ru ? `Показано ${results.length} из ${relevance.kept.length} подходящих (лимит результатов).` : `Showing ${results.length} of ${relevance.kept.length} matches (result limit).`) : "",
     !keepListPages && listPages.length ? (ru ? `Страниц-подборок: ${listPages.length}, они оставлены в реестре источников.` : `${listPages.length} list pages kept in the source registry.`) : "",
     usedMemoryFallback ? "Search returned nothing; learned sources from memory were re-read." : "",
     challenged.length ? (ru ? "Часть поисковых запросов остановлена капчей " + challenged.map((d) => d.provider).join(", ") + "; результаты неполные. Добавьте JINA_API_KEY или SEARXNG_URL." : "Some searches were stopped by a CAPTCHA from " + challenged.map((d) => d.provider).join(", ") + "; results are incomplete. Add JINA_API_KEY or SEARXNG_URL.") : "",
@@ -695,8 +702,11 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     discovered: discoveredTotal + followUrls.length + mappedOnly,
     knownSources: Number(input.knownSourceCount || 0),
     registry: normalized.sourceRegistry,
-    recordsExtracted: Number(normalized.stats.recordsExtracted || 0) + rejected.length,
-    afterDedupe: Number(normalized.stats.recordsExtracted || 0) - Number(normalized.stats.duplicatesRemoved || 0),
+    // Found = every candidate extracted; after dedupe = what passed the checks minus duplicates
+    // (before the display limit); filtered out = rejected by the AI, criteria or page type.
+    recordsExtracted: candidates.length + noiseHits.length,
+    afterDedupe: Math.max(0, relevance.kept.length - Number(normalized.stats.duplicatesRemoved || 0)),
+    filteredOut: rejected.length,
     results: normalized.results,
   });
   normalized.continuation = {

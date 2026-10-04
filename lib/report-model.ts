@@ -16,6 +16,7 @@ export type ReportCounters = {
   sourcesUnavailable: number;
   resultsFound: number;
   afterDedupe: number;
+  filteredOut: number;
   matchingCriteria: number;
   needsReview: number;
 };
@@ -33,7 +34,8 @@ const COUNTER_LABEL: Array<[keyof ReportCounters, string, string]> = [
   ["sourcesChecked", "Источников проверено", "Sources checked"],
   ["sourcesUnavailable", "Недоступно для автоанализа", "Not automatable"],
   ["resultsFound", "Результатов найдено", "Results found"],
-  ["afterDedupe", "После удаления дублей", "After de-duplication"],
+  ["filteredOut", "Отсеяно проверкой", "Filtered out by checks"],
+  ["afterDedupe", "Прошли проверку (без дублей)", "Passed checks (de-duplicated)"],
   ["matchingCriteria", "Соответствуют критериям", "Match the criteria"],
   ["needsReview", "Нужна ручная проверка", "Need manual review"],
   ["sourcesInBase", "В накопленной базе источников", "In the source base"],
@@ -115,6 +117,7 @@ export function reportCounters(payload: ResearchExportPayload): ReportCounters {
     sourcesUnavailable: num(c.sourcesUnavailable ?? (num(s.sourcesBlocked) + num(s.sourcesUnavailable))),
     resultsFound: num(c.resultsFound ?? s.recordsExtracted ?? results.length),
     afterDedupe: num(c.afterDedupe ?? results.length),
+    filteredOut: num(c.filteredOut),
     matchingCriteria: num(c.matchingCriteria ?? results.filter((r) => r.status === "Verified" || r.status === "Reviewed").length),
     needsReview: num(c.needsReview ?? results.filter((r) => r.status === "Manual review").length),
   };
@@ -122,7 +125,7 @@ export function reportCounters(payload: ResearchExportPayload): ReportCounters {
 
 export function counterRows(counters: ReportCounters, lang: ReportLanguage) {
   return COUNTER_LABEL
-    .filter(([key]) => key !== "sourcesInBase" || counters.sourcesInBase > 0)
+    .filter(([key]) => (key !== "sourcesInBase" || counters.sourcesInBase > 0) && (key !== "filteredOut" || counters.filteredOut > 0))
     .map(([key, ru, en]) => ({ key, label: lang === "ru" ? ru : en, value: counters[key] }));
 }
 
