@@ -323,7 +323,7 @@ export default function ScoutDashboard() {
         >
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
-              <a href="/" className="block min-w-0">
+              <a href="/" className="brand-logo block min-w-0">
                 <div className="brand-mark font-display text-[26px] font-normal leading-none tracking-[.19em]">AURELIUS</div>
                 <div className="mt-2.5 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />

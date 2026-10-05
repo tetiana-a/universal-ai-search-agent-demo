@@ -3156,7 +3156,7 @@ export default function Home() {
         >
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
-              <div>
+              <div className="brand-logo">
                 <div className="brand-mark font-display text-[27px] font-normal leading-none tracking-[.19em]">AURELIUS</div>
                 <div className="mt-3 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />

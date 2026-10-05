@@ -1,26 +1,24 @@
 import type { Metadata } from "next";
-import { Cormorant_Garamond, Manrope, Tenor_Sans } from "next/font/google";
+import { Alegreya_Sans, Cormorant_Garamond } from "next/font/google";
 import GoldCursor from "@/components/gold-cursor";
+import LineReveal from "@/components/line-reveal";
 import "./globals.css";
 
-const display = Cormorant_Garamond({
+// The serif is kept only for the AURELIUS wordmark (see .brand-logo).
+const logo = Cormorant_Garamond({
   subsets: ["latin", "cyrillic"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500"],
   style: ["normal", "italic"],
-  variable: "--font-display",
+  variable: "--font-logo-serif",
   display: "swap",
 });
 
-const sans = Manrope({
+// Free web stand-in for Candara Light, used where Candara is not installed.
+const humanist = Alegreya_Sans({
   subsets: ["latin", "cyrillic"],
-  variable: "--font-sans",
-  display: "swap",
-});
-
-const accent = Tenor_Sans({
-  subsets: ["latin", "cyrillic"],
-  weight: "400",
-  variable: "--font-accent",
+  weight: ["300", "400", "500", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-humanist",
   display: "swap",
 });
 
@@ -34,7 +32,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ru" className={`${display.variable} ${sans.variable} ${accent.variable}`}>
+    <html lang="ru" className={`${logo.variable} ${humanist.variable}`}>
       <body>
         {/* Shared gradient so line icons can be stroked in gold foil (see .icon-foil). */}
         <svg width="0" height="0" className="absolute" aria-hidden="true" focusable="false">
@@ -48,6 +46,7 @@ export default function RootLayout({
         </svg>
         {children}
         <GoldCursor />
+        <LineReveal />
       </body>
     </html>
   );
