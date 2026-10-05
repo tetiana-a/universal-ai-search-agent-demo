@@ -176,21 +176,21 @@ type ChipTone = "muted" | "gold" | "green" | "red" | "blue" | "violet";
 
 function Chip({ children, tone = "muted" }: Readonly<{ children: ReactNode; tone?: ChipTone }>) {
   const tones = { muted: "border-[var(--line-soft)] text-[var(--text-muted)]", gold: "border-[var(--gold)]/40 text-[var(--gold-bright)]", green: "border-[#34c759]/40 text-[#34c759]", red: "border-[#ff375f]/40 text-[#ff375f]", blue: "border-[#0a84ff]/40 text-[#0a84ff]", violet: "border-[#af52de]/40 text-[#af52de]" };
-  return <span className={"scout-chip inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium " + tones[tone]}>{children}</span>;
+  return <span className={"scout-chip inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[10.5px] font-normal " + tones[tone]}>{children}</span>;
 }
 
 function Button({ children, onClick, variant = "ghost", disabled, title }: { children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum" | "danger"; disabled?: boolean; title?: string }) {
-  const base = "scout-button inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-40";
+  const base = "scout-button inline-flex min-h-[30px] items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition disabled:opacity-40";
   const style = variant === "spectrum" ? "spectrum-button text-white shadow-lg" : variant === "danger" ? "border border-[#ff375f]/40 text-[#ff375f] hover:bg-[#ff375f]/10" : "border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-soft)] hover:border-[var(--line)] hover:text-[var(--text)]";
   return <button type="button" title={title} disabled={disabled} onClick={onClick} className={base + " " + style}>{children}</button>;
 }
 
 function Panel({ title, icon: Icon, color, children, actions }: { title: string; icon?: typeof Radar; color?: string; children: ReactNode; actions?: ReactNode }) {
   return (
-    <section className="glass scout-panel rounded-[20px] p-3.5 sm:p-4 lg:p-5">
-      <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="scout-panel-title flex items-center gap-2.5 text-[15px] font-medium sm:text-base">
-          {Icon && <span className="scout-panel-icon grid h-8 w-8 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={15} style={{ color }} /></span>}
+    <section className="glass scout-panel rounded-[18px] p-3 sm:p-3.5 lg:p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
+        <h2 className="scout-panel-title flex items-center gap-2 text-[14px] font-normal sm:text-[15px]">
+          {Icon && <span className="scout-panel-icon grid h-[30px] w-[30px] place-items-center rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={14} style={{ color }} /></span>}
           <span>{title}</span>
         </h2>
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -201,10 +201,10 @@ function Panel({ title, icon: Icon, color, children, actions }: { title: string;
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="scout-empty rounded-2xl border border-dashed border-[var(--line-soft)] p-5 text-center text-[13px] leading-5 text-[var(--text-muted)]">{children}</div>;
+  return <div className="scout-empty rounded-xl border border-dashed border-[var(--line-soft)] p-4 text-center text-[12.5px] leading-5 text-[var(--text-muted)]">{children}</div>;
 }
 
-const inputClass = "scout-input w-full min-h-10 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--line)]";
+const inputClass = "scout-input w-full min-h-9 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-1.5 text-[12.5px] text-[var(--text)] outline-none focus:border-[var(--line)]";
 
 function dashboardCounts(state: State | null): Partial<Record<Tab, number>> {
   if (!state) return {};
@@ -318,16 +318,16 @@ export default function ScoutDashboard() {
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
         <aside
-          className={"fixed inset-y-0 left-0 z-50 w-[256px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 " +
+          className={"fixed inset-y-0 left-0 z-50 w-[244px] border-r border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_86%,transparent)] p-5 backdrop-blur-2xl transition-transform duration-300 lg:static lg:translate-x-0 " +
             (mobileOpen ? "translate-x-0" : "-translate-x-full")}
         >
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
               <a href="/" className="block min-w-0">
-                <div className="brand-mark font-display text-[28px] font-medium leading-none tracking-[.2em]">AURELIUS</div>
-                <div className="mt-3 flex items-center gap-2">
+                <div className="brand-mark font-display text-[26px] font-normal leading-none tracking-[.19em]">AURELIUS</div>
+                <div className="mt-2.5 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
-                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">AI Scout · Разведчик</span>
+                  <span className="font-display text-[13.5px] font-normal italic leading-none text-[var(--gold-bright)]">AI Scout · Разведчик</span>
                 </div>
               </a>
               <button
@@ -340,7 +340,7 @@ export default function ScoutDashboard() {
               </button>
             </div>
 
-            <nav className="mt-10 space-y-1" aria-label="Разделы Разведчика">
+            <nav className="mt-8 space-y-0.5" aria-label="Разделы Разведчика">
               {visibleTabs.map(({ id, label, icon: Icon }) => {
                 const active = tab === id;
                 return (
@@ -349,15 +349,15 @@ export default function ScoutDashboard() {
                     type="button"
                     onClick={() => changeTab(id)}
                     aria-current={active ? "page" : undefined}
-                    className={"scout-nav-item group flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left text-[13px] transition " +
+                    className={"scout-nav-item group flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-[7px] text-left text-[12.5px] transition " +
                       (active
                         ? "is-active border-[var(--line)] bg-[var(--gold)]/7 text-[var(--text)]"
                         : "border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]")}
                   >
-                    <span className="scout-nav-icon grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-transparent">
-                      <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={15} />
+                    <span className="scout-nav-icon grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-transparent">
+                      <Icon className={"icon-lift icon-foil " + (active ? "" : "opacity-60 group-hover:opacity-100")} size={14} />
                     </span>
-                    <span className="font-medium tracking-[-.01em]">{label}</span>
+                    <span className="font-normal tracking-[-.005em]">{label}</span>
                     {counts[id] ? (
                       <span className="ml-auto rounded-full bg-[#ff375f] px-2 py-0.5 text-[10px] font-medium text-white">{counts[id]}</span>
                     ) : null}
@@ -369,15 +369,15 @@ export default function ScoutDashboard() {
             <button
               type="button"
               onClick={toggleAdvanced}
-              className="panel-hover mt-4 flex w-full items-center justify-between rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] px-3.5 py-3 text-left text-sm text-[var(--text-muted)]"
+              className="panel-hover mt-3 flex w-full items-center justify-between rounded-lg border border-[var(--line-soft)] bg-[var(--surface)] px-3 py-2 text-left text-[11.5px] text-[var(--text-muted)]"
             >
               <span>{advanced ? "Скрыть служебные разделы" : "Ещё разделы"}</span>
               <span className="text-[var(--gold-bright)]">{advanced ? "−" : "+"}</span>
             </button>
 
-            <div className="glass panel-hover mt-6 rounded-2xl p-4">
-              <div className="text-[10px] uppercase tracking-[.2em] text-[var(--gold)]">Состояние системы</div>
-              <div className="mt-3 space-y-2 text-xs text-[var(--text-muted)]">
+            <div className="glass panel-hover mt-4 rounded-xl p-3">
+              <div className="text-[9.5px] uppercase tracking-[.16em] text-[var(--gold)]">Состояние системы</div>
+              <div className="mt-2.5 space-y-1.5 text-[11.5px] text-[var(--text-muted)]">
                 <div className="flex items-center justify-between gap-3">
                   <span>Хранилище</span>
                   <Chip tone={state?.persistent ? "green" : "gold"}>{state?.persistent ? "подключено" : "временно"}</Chip>
@@ -392,12 +392,12 @@ export default function ScoutDashboard() {
             <div className="mt-auto border-t border-[var(--line-soft)] pt-4">
               <a
                 href="/"
-                className="group flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+                className="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
               >
-                <Sparkles size={17} className="icon-foil opacity-70 group-hover:opacity-100" />
+                <Sparkles size={15} className="icon-foil opacity-70 group-hover:opacity-100" />
                 <span className="min-w-0 flex-1">
                   <span className="block">AI Research Engine</span>
-                  <span className="block text-[10px] text-[var(--text-faint)]">Вернуться на основной сайт</span>
+                  <span className="block text-[9.5px] text-[var(--text-faint)]">Вернуться на основной сайт</span>
                 </span>
               </a>
             </div>
@@ -415,7 +415,7 @@ export default function ScoutDashboard() {
 
         <section className="min-w-0 flex-1">
           <div className="sticky top-0 z-30">
-            <header className="flex h-[64px] items-center justify-between border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_78%,transparent)] px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
+            <header className="flex h-[60px] items-center justify-between border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--bg)_78%,transparent)] px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
@@ -426,18 +426,18 @@ export default function ScoutDashboard() {
                   <PanelLeft size={18} />
                 </button>
                 <div className="min-w-0">
-                  <div className="hidden items-center gap-2 text-xs text-[var(--text-faint)] sm:flex">
+                  <div className="hidden items-center gap-2 text-[11px] text-[var(--text-faint)] sm:flex">
                     <span>Разведчик</span>
                     <span>/</span>
                     <span className="truncate text-[var(--text-soft)]">{activeTab?.label || "Главная"}</span>
                   </div>
-                  <div className="scout-mobile-title truncate text-base font-medium text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
+                  <div className="scout-mobile-title truncate text-[15px] font-normal text-[var(--text)] sm:hidden">{activeTab?.label || "Разведчик"}</div>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2">
                 {state?.persistent ? (
-                  <div className="hidden items-center gap-2 rounded-full border border-[var(--success)]/30 bg-[var(--success)]/7 px-3 py-1.5 text-[11px] text-[var(--success)] xl:flex">
+                  <div className="hidden items-center gap-2 rounded-full border border-[var(--success)]/30 bg-[var(--success)]/7 px-2.5 py-1 text-[10px] text-[var(--success)] xl:flex">
                     <span className="h-1.5 w-1.5 rounded-full bg-current" />
                     <span>Память подключена</span>
                   </div>
@@ -452,11 +452,11 @@ export default function ScoutDashboard() {
                 <button
                   type="button"
                   onClick={toggleTheme}
-                  className="panel-hover grid h-9 w-9 place-items-center rounded-xl border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
+                  className="panel-hover grid h-8 w-8 place-items-center rounded-lg border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-muted)]"
                   aria-label={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
                   title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
                 >
-                  {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+                  {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
                 </button>
 
                 <Button onClick={() => void load()} title="Обновить"><RefreshCw size={14} /></Button>
@@ -521,7 +521,7 @@ type Act = (action: string, payload?: Record<string, unknown>, label?: string) =
 function Kpi({ label, value, color, hint }: { label: string; value: ReactNode; color: string; hint?: string }) {
   return (
     <div className="glass-soft scout-kpi rounded-2xl p-3.5 sm:p-4">
-      <div className="scout-eyebrow text-[10px] uppercase tracking-[.16em] text-[var(--text-muted)]">{label}</div>
+      <div className="scout-eyebrow text-[9.5px] uppercase tracking-[.14em] text-[var(--text-muted)]">{label}</div>
       <div className="scout-kpi-value mt-2 text-[28px] font-medium leading-none tabular-nums tracking-[-.045em]" style={{ color }}>{value}</div>
       {hint && <div className="mt-2 text-[11px] leading-4 text-[var(--text-faint)]">{hint}</div>}
     </div>
