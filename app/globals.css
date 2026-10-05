@@ -1114,3 +1114,78 @@ html.light .music-atmosphere.is-live {
     min-height: 44px;
   }
 }
+
+
+/* ---------- Homepage editorial motion ----------
+   Quiet 2026-style reveal: typography stays readable and the AURELIUS palette is unchanged. */
+.home-motion {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  font-kerning: normal;
+}
+
+.home-motion h1,
+.home-motion h2,
+.home-motion h3 {
+  text-wrap: balance;
+}
+
+.home-motion h1,
+.home-motion h2 {
+  font-weight: 400;
+}
+
+.home-motion h3 {
+  font-weight: 500;
+}
+
+.home-motion svg.lucide {
+  stroke-width: 1.3;
+  vector-effect: non-scaling-stroke;
+}
+
+.home-motion.reveal-ready [data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0) scale(.995);
+  transition:
+    opacity 620ms cubic-bezier(.22,1,.36,1),
+    transform 700ms cubic-bezier(.22,1,.36,1),
+    border-color 240ms ease,
+    background 240ms ease,
+    box-shadow 280ms ease;
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+.home-motion.reveal-ready [data-reveal="hero"] {
+  transform: translate3d(0, 8px, 0) scale(.998);
+}
+
+.home-motion.reveal-ready [data-reveal="card"] {
+  transform: translate3d(0, 10px, 0) scale(.99);
+}
+
+.home-motion.reveal-ready [data-reveal="row"] {
+  transform: translate3d(0, 7px, 0);
+}
+
+.home-motion.reveal-ready [data-reveal].is-revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .home-motion [data-reveal="card"].is-revealed:hover {
+    transform: translate3d(0, -1px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-motion.reveal-ready [data-reveal],
+  .home-motion.reveal-ready [data-reveal="hero"],
+  .home-motion.reveal-ready [data-reveal="card"],
+  .home-motion.reveal-ready [data-reveal="row"] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
