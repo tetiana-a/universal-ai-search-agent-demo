@@ -109,11 +109,11 @@ type RadioCopyKey = keyof typeof radioCopy;
 
 const labels = {
   ru: {
-    product: "AI Research",
+    product: "Универсальный AI Research Engine",
     live: "Система активна",
     workspace: "Рабочее пространство",
-    tell: "Поиск. Проверка. Решение.",
-    sub: "Один запрос — проверенные источники и структурированный результат.",
+    tell: "Скажите агенту, что нужно найти.",
+    sub: "Один запрос → источники → исследование → доказательства → дедупликация → структурированный результат.",
     start: "Начать поиск",
     pause: "Пауза",
     resume: "Продолжить",
@@ -273,11 +273,11 @@ const labels = {
     economyDetails: "Quick • 3 результата • 8 источников • 20 страниц",
   },
   en: {
-    product: "AI Research",
+    product: "Universal AI Research Engine",
     live: "System live",
     workspace: "Workspace",
-    tell: "Research. Verify. Decide.",
-    sub: "One request — sourced, structured results.",
+    tell: "Tell the agent what you need to find.",
+    sub: "One request → sources → research → evidence → deduplication → structured results.",
     start: "Start research",
     pause: "Pause",
     resume: "Resume",
@@ -2286,11 +2286,13 @@ export default function Home() {
 
           <div className="relative max-w-5xl">
             <h1 className="font-display text-[27px] font-normal leading-[1.12] tracking-[-.012em] text-[var(--text)] sm:text-[32px] lg:text-[36px]">
-              {t.tell}
+              {lang === "ru" ? "Поиск. Проверка. Решение." : "Research. Verify. Decide."}
             </h1>
 
             <p className="mt-1.5 max-w-xl text-[12.5px] leading-5 text-[var(--text-muted)]">
-              {t.sub}
+              {lang === "ru"
+                ? "Один запрос — проверенные источники и структурированный результат."
+                : "One request — sourced, structured results."}
             </p>
 
             <div className="mt-4 rounded-[16px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-1.5 backdrop-blur-xl">
@@ -3158,7 +3160,7 @@ export default function Home() {
                 <div className="brand-mark font-display text-[27px] font-normal leading-none tracking-[.19em]">AURELIUS</div>
                 <div className="mt-3 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
-                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">{t.product}</span>
+                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">AI Research</span>
                 </div>
               </div>
               <button
