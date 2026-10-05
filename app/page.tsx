@@ -440,6 +440,16 @@ const labels = {
 
 const PLAN_KEY_STORAGE = "aurelius-plan-key-v1";
 
+function SectionIntro({ label, title, description }: Readonly<{ label: string; title: string; description: string }>) {
+  return (
+    <div>
+      <div className="text-[9.5px] font-normal uppercase tracking-[.16em] text-[var(--gold)]">{label}</div>
+      <h1 className="mt-1.5 text-[26px] font-normal leading-[1.16] tracking-[-.012em] text-[var(--text)] sm:text-[31px]">{title}</h1>
+      <p className="mt-1.5 max-w-3xl text-[12.5px] leading-5 text-[var(--text-muted)]">{description}</p>
+    </div>
+  );
+}
+
 function readPlanKey() {
   try { return window.localStorage.getItem(PLAN_KEY_STORAGE) || ""; } catch { return ""; }
 }
@@ -526,6 +536,37 @@ export default function Home() {
   const [taskHistory, setTaskHistory] = useState<TaskRecord[]>([]);
   const currentTaskIdRef = useRef<string>("");
   useEffect(() => { setTaskHistory(saveTasks(settleStaleTasks(loadTasks()))); }, []);
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>(".home-motion");
+    if (!root) return;
+    root.classList.add("reveal-ready");
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-reveal]"));
+    if (!nodes.length) return;
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) {
+      nodes.forEach((node) => node.classList.add("is-revealed"));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const node = entry.target as HTMLElement;
+          const delay = Math.min(360, Math.max(0, Number(node.dataset.revealDelay || 0)));
+          node.style.setProperty("--reveal-delay", delay + "ms");
+          node.classList.add("is-revealed");
+          observer.unobserve(node);
+        });
+      },
+      { threshold: 0.08, rootMargin: "0px 0px -8% 0px" },
+    );
+
+    nodes.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [activeNav, scenario, running, completedSearch, liveResults?.length, taskHistory.length]);
   function recordTask(patch: Partial<TaskRecord>) {
     const id = currentTaskIdRef.current;
     if (!id) return;
@@ -1685,7 +1726,7 @@ export default function Home() {
               <div className="text-[10px] font-semibold uppercase tracking-[.24em] text-[var(--gold)]">
                 AURELIUS • SYSTEM CONFIG
               </div>
-              <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-5xl">
+              <h1 className="mt-3 text-[28px] font-normal leading-[1.15] text-[var(--text)] sm:text-[34px]">
                 {t.settingsTitle}
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
@@ -2239,75 +2280,52 @@ export default function Home() {
   function renderResearch() {
     return (
       <>
-        <section className="glass glow relative overflow-hidden rounded-[32px] p-6 sm:p-9 lg:p-12 float-in">
+        <section data-reveal="hero" className="glass glow relative overflow-hidden rounded-[22px] p-4 sm:p-5 lg:p-6">
           <div className="absolute -right-28 -top-32 h-80 w-80 rounded-full bg-[color:color-mix(in_srgb,var(--gold)_10%,transparent)] blur-3xl" />
           <div className="absolute inset-x-0 top-0 h-px shimmer opacity-70" />
 
           <div className="relative max-w-5xl">
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-[var(--gold-bright)]">
-              <Sparkles size={14} />
-              {t.product}
-            </div>
-
-            <h1 className="font-display mt-5 max-w-4xl text-[40px] font-medium leading-[1.02] tracking-[-.012em] text-[var(--text)] sm:text-[52px] lg:text-[68px]">
-              {(() => {
-                const cut = t.tell.lastIndexOf(" ");
-                return (
-                  <>
-                    {t.tell.slice(0, cut + 1)}
-                    <em className="hero-accent">{t.tell.slice(cut + 1)}</em>
-                  </>
-                );
-              })()}
+            <h1 className="font-display text-[27px] font-normal leading-[1.12] tracking-[-.012em] text-[var(--text)] sm:text-[32px] lg:text-[36px]">
+              {lang === "ru" ? "Поиск. Проверка. Решение." : "Research. Verify. Decide."}
             </h1>
 
-            <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--text-muted)] sm:text-[15px]">
-              {t.sub}
+            <p className="mt-1.5 max-w-xl text-[12.5px] leading-5 text-[var(--text-muted)]">
+              {lang === "ru"
+                ? "Один запрос — проверенные источники и структурированный результат."
+                : "One request — sourced, structured results."}
             </p>
 
-            <div className="mt-9 rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-2 backdrop-blur-xl">
-              <div className="rounded-[17px] border border-[var(--line-soft)] bg-[var(--surface-strong)] p-3 shadow-2xl">
+            <div className="mt-4 rounded-[16px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-1.5 backdrop-blur-xl">
+              <div className="rounded-[12px] border border-[var(--line-soft)] bg-[var(--surface-strong)] p-2.5">
                 <textarea
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  rows={4}
-                  className="w-full resize-none bg-transparent px-2 py-1 text-[15px] leading-7 text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] sm:text-base"
+                  rows={3}
+                  className="w-full resize-none bg-transparent px-2 py-1 text-base leading-6 text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] sm:text-[14px]"
                   placeholder={lang === "ru" ? "Например: найди..." : "For example: find..."}
                   aria-label="Research query"
                 />
 
                 <div className="mt-2 flex flex-col gap-3 border-t border-[var(--line-soft)] pt-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => setScenarioAndStay("realEstate")}
-                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
-                        scenario === "realEstate"
-                          ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                          : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                      }`}
-                    >
-                      {scenario === "realEstate" ? "Land / Земля" : "Land"}
-                    </button>
-                    <button
-                      onClick={() => setScenarioAndStay("investors")}
-                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
-                        scenario === "investors"
-                          ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                          : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                      }`}
-                    >
-                      Investors / Инвесторы
-                    </button>
-                    <button
-                      onClick={() => setScenarioAndStay("companies")}
-                      className={`rounded-full border px-3 py-1.5 text-[11.5px] transition ${
-                        scenario === "companies"
-                          ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                          : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                      }`}
-                    >
-                      Companies / Компании
-                    </button>
+                    {([
+                      ["realEstate", "Земля", "Land"],
+                      ["investors", "Инвесторы", "Investors"],
+                      ["companies", "Компании", "Companies"],
+                    ] as const).map(([key, ruLabel, enLabel]) => (
+                      <button
+                        key={key}
+                        onClick={() => setScenarioAndStay(key)}
+                        aria-pressed={scenario === key}
+                        className={"rounded-full border px-3 py-1.5 text-[11.5px] transition " + (
+                          scenario === key
+                            ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
+                            : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
+                        )}
+                      >
+                        {lang === "ru" ? ruLabel : enLabel}
+                      </button>
+                    ))}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -2352,15 +2370,13 @@ export default function Home() {
                     >
                       <Gauge size={14} className={testMode ? "text-[var(--success)]" : ""} />
                       <span>{testMode ? t.economyOn : t.economyOff}</span>
-                      <span className="hidden max-w-[420px] text-[10px] text-[var(--text-faint)] xl:inline">
-                        {t.economyDetails}
-                      </span>
+
                     </button>
 
                     <button
                       onClick={startResearch}
                       disabled={running}
-                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-[13px] font-semibold text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="shine-button spectrum-button inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Search size={14} />
                       {running ? startButtonLabel : t.start}
@@ -2402,7 +2418,7 @@ export default function Home() {
 
         {running || progress > 0 || completedSearch ? renderResearchProcess() : renderControlPanel()}
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           {[
             [
               t.found,
@@ -2441,13 +2457,15 @@ export default function Home() {
           ].map(([label, value, note, Icon], index) => (
             <div
               key={String(label)}
-              className={`glass panel-hover rounded-2xl p-5 float-in ${index > 0 ? `float-in-delay-${Math.min(index, 3)}` : ""}`}
+              data-reveal="card"
+              data-reveal-delay={index * 70}
+              className="glass panel-hover rounded-2xl p-4"
             >
               <div className="flex items-center justify-between">
                 <div className="text-xs text-[var(--text-muted)]">{String(label)}</div>
                 <Icon size={16} strokeWidth={1.5} className="spectrum-icon-text" />
               </div>
-              <div className="font-display mt-5 text-[44px] font-medium leading-none lining-nums tabular-nums text-[var(--text)]">
+              <div className="font-display mt-3 text-[30px] font-normal leading-none lining-nums tabular-nums text-[var(--text)]">
                 {String(value)}
               </div>
               <div className="mt-1 text-[11px] text-[var(--text-faint)]">{String(note)}</div>
@@ -2455,20 +2473,8 @@ export default function Home() {
           ))}
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-3">
-          {[
-            ["AI Models", settings.planningModel, Bot],
-            ["Search", aiMode === "free" ? "Jina Search + Reader" : (settings.braveEnabled && settings.exaEnabled ? "Brave + Exa" : "Configured providers"), Search],
-            ["Acquisition", settings.playwrightEnabled ? "HTTP → Browser" : "HTTP only", Globe2],
-          ].map(([label, value, Icon]) => (
-            <div key={String(label)} className="glass-soft panel-hover rounded-2xl p-4">
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[.15em] text-[var(--text-faint)]"><Icon size={13} className="spectrum-icon-text" />{String(label)}</div>
-              <div className="mt-2 text-sm text-[var(--text-soft)]">{String(value)}</div>
-            </div>
-          ))}
-        </section>
 
-        <section className="glass overflow-hidden rounded-[26px]">
+        <section data-reveal="panel" className="glass overflow-hidden rounded-[24px]">
           <div className="flex flex-col gap-4 border-b border-[var(--line-soft)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-soft)]">
@@ -2567,8 +2573,13 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shownResults.map((item) => (
-                    <tr key={item.id} className="border-b border-[var(--line-soft)] last:border-0 hover:bg-white/[.015]">
+                  {shownResults.map((item, index) => (
+                    <tr
+                      key={item.id}
+                      data-reveal="row"
+                      data-reveal-delay={Math.min(index, 6) * 45}
+                      className="border-b border-[var(--line-soft)] last:border-0 hover:bg-white/[.015]"
+                    >
                       <td className="px-6 py-4">
                         <div className="font-medium text-[var(--text-soft)]">{item.title}</div>
                         <div className="mt-1 text-[10px] text-[var(--text-faint)]">{item.status}</div>
@@ -2616,7 +2627,7 @@ export default function Home() {
 
         
         {usingLiveData ? (
-          <section className="mt-6 grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
+          <section data-reveal="panel" className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
             <div className="glass rounded-[26px] p-6 sm:p-7">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -2718,7 +2729,7 @@ export default function Home() {
         ) : null}
 
         {usingLiveData && (liveSourceRegistry.length || accessEvents.length || accessCheckpoints.length) ? (
-          <section className="mt-6 grid gap-5 xl:grid-cols-[1.2fr_.8fr]">
+          <section data-reveal="panel" className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
             <div className="glass rounded-[26px] p-6 sm:p-7">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -2759,7 +2770,7 @@ export default function Home() {
         ) : null}
 
         {usingLiveData && accessCheckpoints.length ? (
-          <section className="mt-6 glass rounded-[26px] p-6 sm:p-7">
+          <section data-reveal="panel" className="mt-5 glass rounded-[24px] p-5 sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-[10px] uppercase tracking-[.18em] text-[var(--warning)]">ACCESS ESCALATION</div>
@@ -2808,42 +2819,6 @@ export default function Home() {
           </section>
         ) : null}
 
-<section className="glass rounded-[28px] p-6 sm:p-8">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[.28em] text-[var(--gold)]">
-                {lang === "ru" ? "Один агент" : "One agent"}
-              </div>
-              <h2 className="mt-2 text-[30px] leading-tight text-[var(--text)]">
-                {lang === "ru" ? "Много типов исследования" : "Many research tasks"}
-              </h2>
-            </div>
-            <div className="text-xs text-[var(--text-muted)]">{t.scenario}</div>
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            {(
-              [
-                ["realEstate", "Land / Земля", "Madrid · ≥10,000 m²"],
-                ["investors", "Investors / Инвесторы", "Amsterdam · Series A–B"],
-                ["companies", "Companies / Компании", "China → EU · B2B"],
-              ] as const
-            ).map(([key, label, note]) => (
-              <button
-                key={key}
-                onClick={() => setScenarioAndStay(key)}
-                className={`panel-hover rounded-2xl border p-4 text-left ${
-                  scenario === key
-                    ? "border-[var(--gold)]/28 bg-[var(--gold)]/7"
-                    : "border-[var(--line-soft)] bg-[var(--surface)]"
-                }`}
-              >
-                <div className="text-sm font-medium text-[var(--text-soft)]">{label}</div>
-                <div className="mt-1 text-[10px] text-[var(--gold-bright)]">{note}</div>
-              </button>
-            ))}
-          </div>
-        </section>
       </>
     );
   }
@@ -2851,18 +2826,12 @@ export default function Home() {
   function renderTasks() {
     return (
       <section className="space-y-5">
-        <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-            {t.allTasks}
-          </div>
-          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
-            {lang === "ru" ? "Все исследовательские задачи" : "All research tasks"}
-          </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">
-            {lang === "ru"
-              ? "История запусков, состояние, продолжительность и количество результатов."
-              : "Run history, status, duration and result counts."}
-          </p>
+        <div data-reveal="panel" className="glass glow rounded-[24px] p-5 sm:p-6">
+          <SectionIntro
+            label={t.allTasks}
+            title={lang === "ru" ? "История исследований" : "Research history"}
+            description={lang === "ru" ? "Запуски, статус и результаты." : "Runs, status and results."}
+          />
         </div>
 
         <div className="grid gap-4">
@@ -2975,17 +2944,11 @@ export default function Home() {
     return (
       <section className="space-y-5">
         <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-            {lang === "ru" ? "БАЗА ИСТОЧНИКОВ" : "SOURCE BASE"}
-          </div>
-          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
-            {lang === "ru" ? "Накопленные источники" : "Accumulated sources"}
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
-            {lang === "ru"
-              ? "Каждый поиск добавляет сюда найденные сайты, порталы, каталоги и сообщества. Следующий похожий поиск начинает с них. Источники со входом в аккаунт или запретом автоматизации помечены и не считаются проверенными."
-              : "Every search adds the sites, portals, directories and communities it found. The next similar search starts from them. Sources behind a login or with automation forbidden are marked and never counted as checked."}
-          </p>
+          <SectionIntro
+            label={lang === "ru" ? "База источников" : "Source base"}
+            title={lang === "ru" ? "Накопленные источники" : "Saved sources"}
+            description={lang === "ru" ? "Источники прошлых исследований. Недоступные для проверки отмечены отдельно." : "Sources from previous research. Those unavailable for verification are marked."}
+          />
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {summary.map(([label, value]) => (
               <div key={label} className="stat-tile rounded-xl border border-[var(--line-soft)] bg-white/[.02] px-4 py-3">
@@ -3050,17 +3013,11 @@ export default function Home() {
     return (
       <section className="space-y-5">
         <div className="glass glow rounded-[28px] p-6 sm:p-8">
-          <div className="text-[10px] font-semibold uppercase tracking-[.22em] text-[var(--gold)]">
-            Qualified Results
-          </div>
-          <h1 className="mt-3 text-4xl font-medium leading-[1.05] text-[var(--text)] sm:text-[44px]">
-            {lang === "ru" ? "Результаты исследования" : "Research results"}
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
-            {lang === "ru"
-              ? "Открывайте результат, источник и evidence в одном месте."
-              : "Open a result, its source and evidence in one place."}
-          </p>
+          <SectionIntro
+            label={lang === "ru" ? "Результаты" : "Results"}
+            title={lang === "ru" ? "Результаты исследования" : "Research results"}
+            description={lang === "ru" ? "Результаты, источники и подтверждения." : "Results, sources and evidence."}
+          />
         </div>
 
         <div className="glass overflow-hidden rounded-[26px]">
@@ -3147,9 +3104,11 @@ export default function Home() {
   function renderResultCards() {
     return (
       <div className="divide-y divide-[var(--line-soft)] md:hidden">
-        {shownResults.map((item) => (
+        {shownResults.map((item, index) => (
           <button
             key={item.id}
+            data-reveal="row"
+            data-reveal-delay={Math.min(index, 6) * 45}
             type="button"
             onClick={() => setSelectedResult(item)}
             className="flex w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-white/[.015]"
@@ -3185,7 +3144,7 @@ export default function Home() {
   }
 
   return (
-    <main className={"relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell " + (radioPlaying ? "radio-live" : "")}>
+    <main className={"home-motion relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell " + (radioPlaying ? "radio-live" : "")}>
       <div className={"music-atmosphere pointer-events-none fixed inset-0 z-0 " + (radioPlaying ? "is-live" : "")} aria-hidden="true" />
       <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
 
@@ -3198,10 +3157,10 @@ export default function Home() {
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
               <div>
-                <div className="brand-mark font-display text-[32px] font-semibold leading-none tracking-[.2em]">AURELIUS</div>
+                <div className="brand-mark font-display text-[27px] font-normal leading-none tracking-[.19em]">AURELIUS</div>
                 <div className="mt-3 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
-                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">{t.product}</span>
+                  <span className="font-display text-[15px] italic leading-none text-[var(--gold-bright)]">AI Research</span>
                 </div>
               </div>
               <button
@@ -3450,8 +3409,8 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-14 lg:pt-9">
-            <div className="space-y-6 soft-focus">{renderActiveView()}</div>
+          <div className="mx-auto max-w-[1540px] px-4 pb-24 pt-5 sm:px-6 lg:px-8 lg:pb-14 lg:pt-7">
+            <div className="space-y-5">{renderActiveView()}</div>
           </div>
         </section>
       </div>
