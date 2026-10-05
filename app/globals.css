@@ -7,9 +7,11 @@
  */
 
 @theme {
-  --font-sans: var(--font-sans), "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: var(--font-display), "Cormorant Garamond", "Times New Roman", serif;
-  --font-accent: var(--font-accent), "Tenor Sans", var(--font-sans);
+  /* Candara Light where it is installed (Windows, Office), Alegreya Sans Light everywhere else. */
+  --font-sans: "Candara Light", Candara, var(--font-humanist), "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-accent: var(--font-sans);
+  --font-logo: var(--font-logo-serif), "Cormorant Garamond", "Times New Roman", serif;
 }
 
 :root {
@@ -1188,4 +1190,117 @@ html.light .music-atmosphere.is-live {
     transform: none !important;
     transition: none !important;
   }
+}
+
+
+/* ---------- Candara Light, line reveal and clear glass (T, 2026-10-05) ---------- */
+body,
+.scout-ui {
+  font-weight: 300;
+}
+
+h1,
+h2,
+.font-display,
+.scout-panel-title,
+.scout-kpi-value {
+  font-weight: 300;
+}
+
+/* Tight tracking was tuned for Manrope; the humanist face reads better at its natural spacing. */
+[class*="tracking-[-"],
+.scout-panel-title,
+.scout-nav-item,
+.scout-button,
+.scout-chip {
+  letter-spacing: .005em;
+}
+
+/* The AURELIUS wordmark keeps its serif. */
+.brand-logo,
+.brand-logo .font-display,
+.scout-ui .brand-logo .brand-mark {
+  font-family: var(--font-logo);
+}
+
+/* Lines fade in one after another with a slight blur; they hide again off screen. */
+html.line-reveal [data-line] {
+  transition:
+    opacity 560ms cubic-bezier(.22,1,.36,1),
+    filter 620ms cubic-bezier(.22,1,.36,1),
+    transform 620ms cubic-bezier(.22,1,.36,1);
+  transition-delay: var(--line-delay, 0ms);
+}
+
+html.line-reveal [data-line="out"] {
+  opacity: 0;
+  filter: blur(6px);
+  transform: translate3d(0, 6px, 0);
+}
+
+html.line-reveal [data-line="in"] {
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.line-reveal [data-line] {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Text panels as clear frosted glass: no outline, only blur and a soft shadow. */
+.glass,
+.glass-soft,
+.glass.glow,
+.scout-ui .glass,
+.scout-ui .glass-soft {
+  background: color-mix(in srgb, var(--surface) 8%, transparent);
+  border-color: transparent;
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+  box-shadow: 0 18px 50px -30px rgba(0, 0, 0, .55);
+}
+
+.glass-soft,
+.scout-ui .glass-soft {
+  background: color-mix(in srgb, var(--surface) 5%, transparent);
+  box-shadow: 0 12px 34px -26px rgba(0, 0, 0, .45);
+}
+
+html.light .glass,
+html.light .glass-soft {
+  box-shadow: 0 18px 50px -32px rgba(70, 54, 24, .22);
+}
+
+.panel-hover:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--surface) 14%, transparent);
+}
+
+.scout-panel::before {
+  display: none;
+}
+
+/* Text boxes inside the dashboard drop their outlines too; coloured alerts keep their tint. */
+.scout-ui div[class~="border"]:is([class*="rounded-xl"], [class*="rounded-2xl"]),
+.scout-ui .scout-empty {
+  border-color: transparent;
+}
+
+.scout-ui div[class~="border"][class*="bg-[var(--surface"]:is([class*="rounded-xl"], [class*="rounded-2xl"]) {
+  background: color-mix(in srgb, var(--surface) 10%, transparent);
+}
+
+.scout-ui .scout-empty {
+  background: color-mix(in srgb, var(--surface) 6%, transparent);
+}
+
+/* Floating messages stay readable over the page. */
+.glass.fixed {
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
 }
