@@ -540,6 +540,7 @@ export default function Home() {
   useEffect(() => {
     const root = document.querySelector<HTMLElement>(".home-motion");
     if (!root) return;
+    root.classList.add("reveal-ready");
     const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-reveal]"));
     if (!nodes.length) return;
 
