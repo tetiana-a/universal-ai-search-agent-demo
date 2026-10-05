@@ -791,6 +791,7 @@ html.light .music-atmosphere.is-live {
    Keeps the AURELIUS palette intact; only hierarchy, typography, spacing and motion change. */
 .scout-ui {
   font-family: var(--font-sans);
+  font-weight: 400;
   text-rendering: optimizeLegibility;
   font-kerning: normal;
   font-synthesis: none;
@@ -1088,10 +1089,6 @@ html.light .music-atmosphere.is-live {
 }
 
 /* Final micro-refinement: less visual weight without sacrificing touch usability. */
-.scout-ui {
-  font-weight: 400;
-}
-
 .scout-ui .scout-chip {
   font-variation-settings: "wght" 420;
 }
