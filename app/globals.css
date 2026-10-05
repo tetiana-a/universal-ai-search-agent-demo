@@ -830,9 +830,9 @@ html.light .music-atmosphere.is-live {
 
 .scout-panel-title {
   font-family: var(--font-sans);
-  font-variation-settings: "wght" 480;
-  letter-spacing: -.025em;
-  line-height: 1.2;
+  font-variation-settings: "wght" 440;
+  letter-spacing: -.018em;
+  line-height: 1.25;
   text-wrap: balance;
 }
 
@@ -848,8 +848,8 @@ html.light .music-atmosphere.is-live {
 
 .scout-nav-item {
   position: relative;
-  min-height: 44px;
-  letter-spacing: -.012em;
+  min-height: 38px;
+  letter-spacing: -.006em;
 }
 
 .scout-nav-item::before {
@@ -885,7 +885,7 @@ html.light .music-atmosphere.is-live {
 }
 
 .scout-button {
-  letter-spacing: -.012em;
+  letter-spacing: -.006em;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
   transition:
     transform 180ms cubic-bezier(.22,1,.36,1),
@@ -909,7 +909,7 @@ html.light .music-atmosphere.is-live {
 .scout-kpi {
   position: relative;
   overflow: hidden;
-  min-height: 98px;
+  min-height: 88px;
   transition:
     border-color 260ms ease,
     background 260ms ease,
@@ -929,6 +929,7 @@ html.light .music-atmosphere.is-live {
 
 .scout-kpi-value {
   font-family: var(--font-sans);
+  font-variation-settings: "wght" 470;
   font-variant-numeric: tabular-nums lining-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;
 }
@@ -972,7 +973,7 @@ html.light .music-atmosphere.is-live {
   font-family: var(--font-accent);
   font-weight: 400;
   font-synthesis: none;
-  letter-spacing: .08em;
+  letter-spacing: .055em;
 }
 
 .scout-ui table td {
@@ -980,7 +981,7 @@ html.light .music-atmosphere.is-live {
 }
 
 .scout-ui svg.lucide {
-  stroke-width: 1.25;
+  stroke-width: 1.15;
   vector-effect: non-scaling-stroke;
 }
 
@@ -994,9 +995,9 @@ html.light .music-atmosphere.is-live {
 
 @media (hover: hover) and (pointer: fine) {
   .scout-panel:hover {
-    border-color: color-mix(in srgb, var(--gold) 15%, var(--line-soft));
+    border-color: color-mix(in srgb, var(--gold) 13%, var(--line-soft));
     box-shadow:
-      0 24px 70px -42px color-mix(in srgb, var(--gold) 16%, transparent),
+      0 18px 52px -40px color-mix(in srgb, var(--gold) 12%, transparent),
       var(--shadow);
   }
 
@@ -1022,7 +1023,7 @@ html.light .music-atmosphere.is-live {
 
 @container scout-content (min-width: 1100px) {
   .scout-panel {
-    border-radius: 22px;
+    border-radius: 18px;
   }
 }
 
@@ -1032,7 +1033,7 @@ html.light .music-atmosphere.is-live {
   }
 
   .scout-kpi {
-    min-height: 92px;
+    min-height: 86px;
   }
 }
 
@@ -1083,5 +1084,36 @@ html.light .music-atmosphere.is-live {
 @media (prefers-reduced-motion: reduce) {
   .scout-ui .spectrum-button {
     animation: none;
+  }
+}
+
+/* Final micro-refinement: less visual weight without sacrificing touch usability. */
+.scout-ui {
+  font-weight: 400;
+}
+
+.scout-ui .scout-chip {
+  font-variation-settings: "wght" 420;
+}
+
+.scout-ui .scout-button {
+  font-variation-settings: "wght" 470;
+}
+
+.scout-ui .scout-nav-item[aria-current="page"] {
+  font-variation-settings: "wght" 470;
+}
+
+.scout-ui .scout-row-card {
+  border-radius: 14px;
+}
+
+@media (pointer: coarse) {
+  .scout-nav-item {
+    min-height: 44px;
+  }
+
+  .scout-button {
+    min-height: 44px;
   }
 }
