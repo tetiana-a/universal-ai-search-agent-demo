@@ -45,10 +45,10 @@ html.light {
   --surface-hover: rgba(40, 32, 20, 0.035);
   --line: rgba(143, 111, 53, 0.22);
   --line-soft: rgba(40, 32, 20, 0.09);
-  --text: #1c1915;
-  --text-soft: rgba(28, 25, 21, 0.78);
-  --text-muted: rgba(28, 25, 21, 0.54);
-  --text-faint: rgba(28, 25, 21, 0.34);
+  --text: #000;
+  --text-soft: #000;
+  --text-muted: #000;
+  --text-faint: rgba(0, 0, 0, 0.62);
   --gold: #8f6f35;
   --gold-bright: #a9844a;
   --gold-deep: #6e5428;
@@ -1303,4 +1303,30 @@ html.light .glass-soft {
 /* Floating messages stay readable over the page. */
 .glass.fixed {
   background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+}
+
+
+/* ---------- Light theme: black text everywhere except the logo (T, 2026-10-05) ---------- */
+html.light :is([class*="text-[var(--gold"], [class*="text-[var(--cyan"]):not(svg):not(.brand-logo *),
+html.light .gold-text:not(.brand-logo *),
+html.light .hero-accent {
+  color: #000;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+/* Icons keep their gold and blue accents. */
+html.light [class*="text-[var(--gold"] svg {
+  color: var(--gold);
+}
+
+html.light [class*="text-[var(--cyan"] svg {
+  color: var(--cyan);
+}
+
+/* On a light background the hairline weight reads grey, so text steps up one weight. */
+html.light body,
+html.light .scout-ui,
+html.light :is(h1, h2, .font-display, .scout-panel-title, .scout-kpi-value):not(.brand-logo *) {
+  font-weight: 400;
 }
