@@ -8,6 +8,7 @@ import { isSafePublicUrl } from "@/lib/url-safety";
 import { isQuoteGrounded, normalizeResultUrl, registrableDomain } from "@/lib/result-quality";
 import { keylessProviders, runKeylessSearch } from "@/lib/keyless-search";
 import { directRead } from "@/lib/direct-reader";
+import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
 import { configuredAiProviders, runStructuredExtraction } from "@/lib/free-ai";
 import { fieldSchemaFor, heuristicFields } from "@/lib/task-profile";
 import { verifyPagesWithAi, type VerifyOutcome } from "@/lib/ai-verify";
@@ -102,7 +103,12 @@ async function jinaRead(url: string): Promise<{ content: string; status: ReadSta
 
   let result: { content: string; status: ReadStatus; httpStatus?: number };
   try {
-    const response = await fetch("https://r.jina.ai/" + url, { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
+    let response = await fetch("https://r.jina.ai/" + url, { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
+    // A key with no balance left (402) or a revoked key is worse than none: retry keyless.
+    if (key && (response.status === 402 || response.status === 401)) {
+      delete headers.Authorization;
+      response = await fetch("https://r.jina.ai/" + url, { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
+    }
     if (!response.ok) {
       const status: ReadStatus = response.status === 429 ? "rate_limited" : response.status === 401 || response.status === 403 || response.status === 451 ? "blocked" : "unavailable";
       result = { content: "", status, httpStatus: response.status };
@@ -305,9 +311,27 @@ async function discoverCandidates(queries: string[], language: "ru" | "en", dead
     diagnostics.push({ provider: "jina", status: "not_configured", message: "JINA_API_KEY is not set." });
   }
 
+  // Google Search through the free Gemini key: the main backup when Jina has no
+  // balance left and DuckDuckGo answers Vercel with a captcha.
+  if (geminiSearchKey() && hits.length < 5) {
+    const max = Math.min(Math.max(Number(process.env.GEMINI_SEARCH_MAX_QUERIES || 3), 1), 8);
+    const outcomes = await Promise.all(queries.slice(0, max).map((q) => geminiSearch(q, language)));
+    const geminiHits = outcomes.flatMap((o) => o.hits);
+    const failed = outcomes.find((o) => !o.ok);
+    const anyOk = outcomes.some((o) => o.ok);
+    diagnostics.push({
+      provider: "gemini_search",
+      status: !anyOk ? (failed?.status === "rate_limited" ? "rate_limited" : "error") : geminiHits.length ? "ok" : "empty",
+      httpStatus: !anyOk ? failed?.httpStatus : undefined,
+      hits: geminiHits.length,
+      message: failed?.message,
+    });
+    for (const hit of geminiHits) hits.push({ ...hit, retrievedAt: new Date().toISOString() });
+  }
+
   // Keyless search keeps the Free edition working without any paid or registered key.
   const keyless = keylessProviders();
-  if (keyless.length && (!key || hits.length < 5 || process.env.KEYLESS_SEARCH === "always")) {
+  if (keyless.length && (hits.length < 5 || process.env.KEYLESS_SEARCH === "always")) {
     const outcomes = await runKeylessSearch(queries, language, Math.min(deadlineAt - 34_000, Date.now() + 18_000));
     for (const provider of keyless) {
       const mine = outcomes.filter((o) => o.provider === provider);
@@ -353,7 +377,7 @@ async function discoverCandidates(queries: string[], language: "ru" | "en", dead
 }
 
 function assertSearchConfigured(language: "ru" | "en") {
-  if (jinaKey() || configuredFallbackProviders().length || keylessProviders().length) return;
+  if (jinaKey() || geminiSearchKey() || configuredFallbackProviders().length || keylessProviders().length) return;
   throw new ResearchError(
     "JINA_API_KEY_MISSING",
     language === "ru"
@@ -397,8 +421,8 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
     throw new ResearchError(
       "SEARCH_RATE_LIMITED",
       (ru
-        ? "Поисковик " + challenged.map((d) => d.provider).join(", ") + " попросил подтвердить, что запрос делает человек (капча), и не выдал результатов. Обходить проверку мы не будем. Для стабильного бесплатного поиска добавьте в Vercel JINA_API_KEY (бесплатный ключ на jina.ai) или SEARXNG_URL, затем повторите поиск."
-        : "Search engine " + challenged.map((d) => d.provider).join(", ") + " asked for a human check (CAPTCHA) and returned no results. It is not bypassed. For stable free search add JINA_API_KEY (free key at jina.ai) or SEARXNG_URL in Vercel and retry."),
+        ? "Поисковик " + challenged.map((d) => d.provider).join(", ") + " попросил подтвердить, что запрос делает человек (капча), и не выдал результатов. Обходить проверку мы не будем. Для стабильного бесплатного поиска добавьте в Vercel GEMINI_API_KEY (бесплатно на aistudio.google.com), рабочий JINA_API_KEY или SEARXNG_URL, затем повторите поиск."
+        : "Search engine " + challenged.map((d) => d.provider).join(", ") + " asked for a human check (CAPTCHA) and returned no results. It is not bypassed. For stable free search add GEMINI_API_KEY (free at aistudio.google.com), a working JINA_API_KEY or SEARXNG_URL in Vercel and retry."),
       503,
       { providers: providerDiagnostics },
     );

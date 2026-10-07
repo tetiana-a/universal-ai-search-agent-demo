@@ -171,6 +171,35 @@ describe("Free edition without any keys", () => {
     expect(body.results.length).toBeGreaterThan(0);
   });
 
+  it("searches through Gemini Google grounding when Jina has no balance and DuckDuckGo shows a CAPTCHA", async () => {
+    vi.stubEnv("JINA_API_KEY", "jina_empty");
+    vi.stubEnv("GEMINI_API_KEY", "gm_key");
+    const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
+    mockFetch([
+      { match: (u) => u.startsWith("https://s.jina.ai/"), respond: () => json({ code: 402 }, 402) },
+      { match: (u) => u.includes("duckduckgo.com"), respond: () => new Response('<div class="anomaly-modal">', { status: 202 }) },
+      {
+        match: (u) => u.includes(":generateContent"),
+        respond: () => json({ candidates: [{ content: { parts: [{ text: "Found" }] }, groundingMetadata: {
+          groundingChunks: [{ web: { uri: redirect, title: "fincas-madrid.es" } }],
+          groundingSupports: [{ segment: { text: "Terreno de 12.500 m² en Valdebebas." }, groundingChunkIndices: [0] }],
+        } }] }),
+      },
+      { match: (u) => u === redirect, respond: () => new Response(null, { status: 302, headers: { location: "https://fincas-madrid.es/terreno-valdebebas" } }) },
+      // The exhausted key is dropped and the page is read keyless.
+      {
+        match: (u) => u.startsWith("https://r.jina.ai/"),
+        respond: (_u, init) => (init?.headers as Record<string, string>)?.Authorization ? json({}, 402) : json({ data: { content: LAND_PAGE } }),
+      },
+      { match: (u) => u.includes("generativelanguage.googleapis.com/v1beta/openai"), respond: () => json({ error: { message: "busy" } }, 429) },
+    ]);
+    const response = await POST(request({ testMode: true }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.providers.find((p: any) => p.provider === "gemini_search")).toMatchObject({ status: "ok" });
+    expect(body.results.map((r: any) => r.url)).toContain("https://fincas-madrid.es/terreno-valdebebas");
+  });
+
   it("falls back from OpenRouter to Gemini when the first free model fails", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "or_key");
     vi.stubEnv("GEMINI_API_KEY", "gm_key");
