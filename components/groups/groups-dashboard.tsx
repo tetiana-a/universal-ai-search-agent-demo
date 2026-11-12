@@ -19,14 +19,14 @@ const inputClass = "scout-input w-full min-h-9 rounded-lg border border-[var(--l
 const ADS: Record<string, string> = { allowed: "разрешены", paid: "платно", forbidden: "запрещены", unknown: "—" };
 const STATUS: Record<GroupStatus, string> = { new: "новая", contacted: "написали админу", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
 
-function Button({ children, onClick, variant = "ghost", disabled, href }: { children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum"; disabled?: boolean; href?: string }) {
+function Button({ children, onClick, variant = "ghost", disabled, href }: Readonly<{ children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum"; disabled?: boolean; href?: string }>) {
   const cls = "scout-button inline-flex min-h-[30px] items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition disabled:opacity-40 " +
     (variant === "spectrum" ? "spectrum-button text-white shadow-lg" : "border border-[var(--line-soft)] bg-[var(--surface)] text-[var(--text-soft)] hover:border-[var(--line)] hover:text-[var(--text)]");
   if (href) return <a className={cls} href={href} target="_blank" rel="noreferrer">{children}</a>;
   return <button type="button" disabled={disabled} onClick={onClick} className={cls}>{children}</button>;
 }
 
-function Panel({ title, icon: Icon, color, children, actions }: { title: string; icon: typeof Radar; color: string; children: ReactNode; actions?: ReactNode }) {
+function Panel({ title, icon: Icon, color, children, actions }: Readonly<{ title: string; icon: typeof Radar; color: string; children: ReactNode; actions?: ReactNode }>) {
   return (
     <section className="glass scout-panel rounded-[18px] p-3 sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
@@ -211,15 +211,22 @@ export default function GroupsDashboard() {
       </div>
 
       {outreach && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={() => setOutreach(null)}>
-          <div className="glass max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-[var(--surface-strong)] p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 grid place-items-center p-4">
+          <button type="button" aria-label="Закрыть" className="absolute inset-0 bg-black/50" onClick={() => setOutreach(null)} />
+          <div role="dialog" aria-modal="true" aria-label={"Письмо админу · " + outreach.group.name} className="glass relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-[var(--surface-strong)] p-4">
             <div className="mb-3 flex items-center justify-between"><h3 className="text-[15px]">Письмо админу · {outreach.group.name}</h3><Button onClick={() => setOutreach(null)}><X size={13} /></Button></div>
             {([["free", "Бесплатно"], ["exchange", "Обмен"], ["paid", "Платное размещение"]] as const).map(([k, label]) => (
               <div key={k} className="mb-3 rounded-lg border border-[var(--line-soft)] p-3">
                 <div className="mb-1.5 text-[12px] text-[var(--text-muted)]">{label}</div>
                 <p className="whitespace-pre-wrap text-[12.5px]">{outreach.drafts[k]}</p>
                 <div className="mt-2 flex gap-2">
-                  <Button onClick={async () => { const ok = await copy(outreach.drafts[k]); if (ok && outreach.group.status === "new") await act("update", { id: outreach.group.id, patch: { status: "contacted" } }); setToast(ok ? "Скопировано. Вставьте в чат с админом." : "Не удалось скопировать"); }}><Copy size={12} />Копировать</Button>
+                  <Button onClick={async () => {
+                    const ok = await copy(outreach.drafts[k]);
+                    if (ok && outreach.group.status === "new") {
+                      await act("update", { id: outreach.group.id, patch: { status: "contacted" } });
+                    }
+                    setToast(ok ? "Скопировано. Вставьте в чат с админом." : "Не удалось скопировать");
+                  }}><Copy size={12} />Копировать</Button>
                   <Button href={outreach.drafts.contactUrl}><ExternalLink size={12} />Написать админу</Button>
                 </div>
               </div>
@@ -229,7 +236,7 @@ export default function GroupsDashboard() {
         </div>
       )}
 
-      {toast && <div role="status" className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] px-4 py-2 text-[12.5px] shadow-xl">{toast}</div>}
+      {toast && <output className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] px-4 py-2 text-[12.5px] shadow-xl">{toast}</output>}
     </main>
   );
 }

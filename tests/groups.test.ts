@@ -62,7 +62,7 @@ describe("findGroups", () => {
     const tg = result.found.find((g) => g.platform === "telegram")!;
     expect(tg).toMatchObject({ members: 8000, ads: "paid", adminContact: "@owner_bcn" });
     expect(result.found.find((g) => g.platform === "facebook")!.members).toBe(25000);
-    expect((await listGroups()).length).toBe(2);
+    expect(await listGroups()).toHaveLength(2);
   });
 });
 
@@ -77,7 +77,7 @@ describe("bot posting and manual queue", () => {
     const [card] = await listGroups();
     expect(card).toMatchObject({ botConnected: true, postingEnabled: true, chatId: "-100777" });
     for (let i = 0; i < 4; i += 1) await postViaBot("Квартира 2 комнаты", undefined, "test", Date.now() + 10_000, 0);
-    expect(sent.filter((b) => b.chat_id === "-100777").length).toBe(3); // default cap 3/day
+    expect(sent.filter((b) => b.chat_id === "-100777")).toHaveLength(3); // default cap 3/day
     const posts = await listPosts();
     expect(posts.filter((p) => p.status === "sent")[0].link).toMatch(/^https:\/\/t\.me\/bcn_pisos\/\d+$/);
   });
