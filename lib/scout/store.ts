@@ -16,7 +16,10 @@ export type Collection =
   | "matches"
   | "meetings"
   | "stoplist"
-  | "research_tasks";
+  | "research_tasks"
+  | "groups"
+  | "group_posts"
+  | "group_queue";
 
 const PREFIX = "aurelius:scout:v1:";
 const LOG_KEY = PREFIX + "log";

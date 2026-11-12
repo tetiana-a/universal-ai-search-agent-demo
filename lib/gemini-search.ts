@@ -8,7 +8,7 @@ import { normalizeResultUrl } from "@/lib/result-quality";
 // itself are ignored, so nothing here is invented.
 
 export type GeminiSearchHit = { title: string; url: string; snippet: string; domain: string; provider: "gemini_search" };
-export type GeminiSearchOutcome = { ok: boolean; hits: GeminiSearchHit[]; httpStatus?: number; status?: "rate_limited" | "error"; message?: string };
+export type GeminiSearchOutcome = { ok: boolean; hits: GeminiSearchHit[]; text?: string; httpStatus?: number; status?: "rate_limited" | "error"; message?: string };
 
 const REDIRECT_HOST = "vertexaisearch.cloud.google.com";
 
@@ -47,11 +47,11 @@ export function snippetsByChunk(supports: Support[] | undefined) {
   return out;
 }
 
-export async function geminiSearch(query: string, language = "en"): Promise<GeminiSearchOutcome> {
+export async function geminiSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
   const key = geminiSearchKey();
   if (!key) return { ok: false, hits: [], status: "error", message: "GEMINI_API_KEY is not set." };
   const model = process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash";
-  const prompt = (language === "ru"
+  const prompt = customPrompt || (language === "ru"
     ? "Найди в интернете конкретные первоисточники (официальные сайты компаний, каталоги, объявления, реестры) по запросу: "
     : "Search the web for specific primary sources (official company sites, catalogues, listings, registries) for: ")
     + query
@@ -93,7 +93,9 @@ export async function geminiSearch(query: string, language = "en"): Promise<Gemi
       const title = String(chunks[index]?.web?.title || domain);
       hits.push({ title, url, snippet: (snippets.get(index) || "").slice(0, 1400), domain, provider: "gemini_search" });
     });
-    return { ok: true, hits };
+    // The model's own text is returned for callers that verify every link it names (group finder).
+    const text = (payload?.candidates?.[0]?.content?.parts || []).map((part: any) => String(part?.text || "")).join("\n").slice(0, 20000);
+    return { ok: true, hits, text };
   } catch (error) {
     const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     return { ok: false, hits: [], status: "error", message: timeout ? "Gemini search timed out." : "Gemini search request failed." };

@@ -11,6 +11,8 @@ import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingC
 import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
+import { handleMyChatMember } from "@/lib/scout/groups";
+import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -121,6 +123,10 @@ function moreMenuKeyboard(): Keyboard {
     [
       { text: "👥 Диалоги", callback_data: "menu:leads" },
       { text: "⚙️ Настройки", callback_data: "menu:settings" },
+    ],
+    [
+      { text: "👥 Группы и постинг", callback_data: "menu:groups" },
+      { text: "📣 Отчёт постинга", callback_data: "menu:posts" },
     ],
     [
       { text: "🩺 Проверка", callback_data: "menu:health" },
@@ -372,6 +378,12 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       return {};
     }
 
+    case "groups":
+    case "post":
+    case "queue":
+    case "posts":
+      return handleGroupCommand(chatId, cmd, args, userName);
+
     default:
       await sendMessage(chatId, "Не знаю такую команду. /help — список.");
       return {};
@@ -436,11 +448,16 @@ async function handleCallback(query: any): Promise<BotResult> {
       await showPanel(chatId);
       return {};
     }
-    if (["status", "tasks", "results", "report", "scan", "sources", "drafts", "leads", "settings", "health"].includes(action)) {
+    if (action === "groups") {
+      await sendMessage(chatId, "<b>Группы и постинг</b>\n\n<code>/groups Испания, Барселона, недвижимость</code> — найти группы (таблица + Excel)\n<code>/post текст</code> — опубликовать ботом там, где его добавили админы, или поставить в очередь\n/queue — следующий пост для ручной публикации со своего аккаунта\n/posts — отчёт за сегодня");
+      return {};
+    }
+    if (["status", "tasks", "results", "report", "scan", "sources", "drafts", "leads", "settings", "health", "posts", "queue"].includes(action)) {
       return handleCommand(chatId, userId, by, action, "");
     }
     return {};
   }
+  if (kind === "gp") return handleGroupCallback(query, action, id, by);
   if (kind === "rs") return { background: await handleResearchCallback(chatId, action, query.id) };
 
   if (kind === "src") {
@@ -595,7 +612,18 @@ async function handleResearchText(message: any, chatId: string, userId: string):
 
 export async function handleUpdate(update: any): Promise<BotResult> {
   if (update?.callback_query) return handleCallback(update.callback_query);
+  // The bot was added to (or removed from) a group or channel.
+  if (update?.my_chat_member) { await handleMyChatMember(update.my_chat_member); return {}; }
   const message = update?.message || update?.edited_message;
+  // A photo whose caption starts with /post: the post goes out with that photo.
+  if (message?.photo && /^\/post(@\w+)?\b/i.test(String(message.caption || "")) && !message.from?.is_bot) {
+    const chatId = String(message.chat?.id || "");
+    const userId = String(message.from?.id || "");
+    if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
+    const photos = Array.isArray(message.photo) ? message.photo : [];
+    const by = message.from?.username ? "@" + message.from.username : message.from?.first_name || userId;
+    return handleGroupCommand(chatId, "post", String(message.caption).replace(/^\/post(@\w+)?\s*/i, ""), by, photos[photos.length - 1]?.file_id);
+  }
   if (!message?.text || message.from?.is_bot) return {};
   const chatId = String(message.chat?.id || "");
   const userId = String(message.from?.id || "");
@@ -609,7 +637,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   }
 
   const control = await isControl(chatId, userId, String(message.chat?.type || ""));
-  if (!control && message.chat?.type === "private" && command && ["panel", "find", "search", "status", "tasks", "results", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health"].includes(command.cmd)) {
+  if (!control && message.chat?.type === "private" && command && ["panel", "find", "search", "status", "tasks", "results", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health", ...GROUP_COMMANDS].includes(command.cmd)) {
     await sendMessage(chatId, "⛔ Нет доступа к панели управления. Отправьте /id и добавьте ваш <b>User ID</b> в TELEGRAM_ALLOWED_CHAT_IDS или SCOUT_ADMIN_TELEGRAM_IDS в Vercel.");
     return {};
   }

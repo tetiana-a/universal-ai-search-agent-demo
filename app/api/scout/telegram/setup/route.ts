@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   if (!isAuthorized(request)) return unauthorized();
   if (!botToken()) return Response.json({ ok: false, error: "TELEGRAM_BOT_TOKEN не задан в Vercel" }, { status: 400 });
   const url = webhookUrl(request);
-  const hook = await tgCall("setWebhook", { url, secret_token: webhookSecret(), allowed_updates: ["message", "edited_message", "callback_query"], drop_pending_updates: false });
+  const hook = await tgCall("setWebhook", { url, secret_token: webhookSecret(), allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member"], drop_pending_updates: false });
   const commands = await tgCall("setMyCommands", { commands: BOT_COMMANDS });
   return Response.json({ ok: Boolean(hook?.ok), url, webhook: hook?.description || "ok", commands: commands?.ok ? "ok" : commands?.description });
 }
