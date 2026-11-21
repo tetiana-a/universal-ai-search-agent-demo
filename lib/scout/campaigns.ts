@@ -142,15 +142,16 @@ const SCHEMA = {
   required: ["title", "ad_text", "topic", "region", "languages", "keywords", "platforms"],
 };
 
-export async function parseCampaign(text: string, deadlineAt = Date.now() + 40_000) {
+export async function parseCampaign(text: string, deadlineAt = Date.now() + 70_000) {
   const base = ruleCampaign(text);
   const ai = await runStructuredExtraction({
     system: "You turn an owner's free-form task (often a voice transcript) into an advertising campaign for publishing in social media communities. Never invent prices, addresses or contacts. If the task contains a ready ad text, keep it. Return JSON only.",
     user: "TASK:\n" + text.slice(0, 6000),
     schema: SCHEMA,
     deadlineAt,
-    maxTokens: 1800,
-    perCallTimeoutMs: 25_000,
+    maxTokens: 6000,
+    perCallTimeoutMs: 30_000,
+    prefer: "gemini",
   }).catch(() => null);
   const p = ai?.parsed;
   if (!p) return { ...base, ai: false };
