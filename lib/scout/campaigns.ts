@@ -4,6 +4,7 @@ import { DEFAULT_DAILY_LIMIT, findGroups, listGroups, refreshActivity, telegramF
 import { getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
 import { botToken, controlIds, reportChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { escapeHtml, nowIso, randomId, stableId } from "@/lib/scout/text";
+import { isPolishWineCampaign, POLISH_WINE_B2B_QUERIES } from "@/lib/scout/wine-compliance";
 
 // Advertising campaigns (client TZ "AI Social Agent", Nov 2026):
 // owner sends a text or voice task to the bot → AI turns it into a campaign (ad text, topic, region,
@@ -80,6 +81,7 @@ function daysBetween(a: string, b: string) {
 // ---- Task → campaign (AI with a rule-based fallback) ------------------------------------
 
 const STOP = new Set("и в во на по для из с со от до за к о об а но или что это как the and for with from in on of to a an de la el en y para con los las del".split(" "));
+const PROMPT_WORDS = new Set("разместить размещение разместить опубликовать опубликовать публикация опубликуй объявление объявления объявлений оголошення розмістити реклама рекламу продаже продажа нарушая законов соблюдать законы нелегально легально польша польше польшу польши".split(" "));
 
 export function cleanKeywords(list: unknown[], limit = 40) {
   const out: string[] = [];
@@ -104,16 +106,17 @@ export function detectPlatforms(text: string): Platform[] {
 export function ruleCampaign(text: string): Omit<Campaign, "id" | "status" | "createdAt" | "updatedAt" | "source"> {
   const clean = text.replace(/^\/\w+(@\w+)?\s*/, "").trim();
   const firstLine = clean.split(/\n|[.!?](\s|$)/)[0]?.trim() || clean;
-  const words = clean.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w));
+  const words = clean.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !PROMPT_WORDS.has(w));
   const region = /(?:в|во|in|en)\s+([A-ZА-ЯЁ][\p{L}-]+(?:\s+[A-ZА-ЯЁ][\p{L}-]+)?)/u.exec(clean)?.[1] || "";
+  const polishWine = isPolishWineCampaign({ region, adText: clean });
   const target = /(\d{2,4})\s*(?:постов|публикац|размещени|posts|placements)/i.exec(clean);
   return {
     title: firstLine.slice(0, 80),
     adText: clean.slice(0, 3500),
-    topic: words.slice(0, 3).join(" "),
+    topic: polishWine ? "importerzy wina Polska" : words.slice(0, 3).join(" "),
     region,
     languages: /[а-яё]/i.test(clean) ? ["ru"] : ["en"],
-    keywords: cleanKeywords(words, 40),
+    keywords: cleanKeywords(polishWine ? POLISH_WINE_B2B_QUERIES : words, 40),
     adjacent: [],
     queries: [],
     exclusions: [],
@@ -224,6 +227,10 @@ export function textFor(c: Campaign, language?: string) {
 export async function setCampaignStatus(id: string, status: "approved" | "stopped", by = "owner") {
   const c = await getOne<Campaign>("campaigns", id);
   if (!c) return null;
+  if (status === "approved" && isPolishWineCampaign(c)) {
+    await logAction({ actor: "agent", action: "campaign.compliance_block", detail: c.title + ": Poland wine public advertising" });
+    return null;
+  }
   const next: Campaign = { ...c, status, updatedAt: nowIso(), ...(status === "approved" ? { approvedAt: nowIso() } : {}) };
   await putOne("campaigns", next);
   if (status === "stopped") {
@@ -241,12 +248,20 @@ export async function setCampaignStatus(id: string, status: "approved" | "stoppe
 
 export function splitRegion(region: string) {
   const parts = region.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 1 && /^(польша|польше|польши|poland|polska|polsce|polski)$/i.test(parts[0] || "")) {
+    return { city: "", country: "Poland" };
+  }
   return parts.length >= 2 ? { city: parts[0], country: parts.slice(1).join(", ") } : { city: parts[0] || "", country: "" };
 }
 
 export function searchPlan(c: Campaign, maxRuns = Number(process.env.CAMPAIGN_SEARCH_RUNS || 10) || 10) {
-  const core = cleanKeywords([c.topic, ...c.queries, ...c.keywords], 40);
-  const adjacent = c.adjacent;
+  const restricted = isPolishWineCampaign(c);
+  // Wine trade in Poland: prioritize actual professional buyers and Polish
+  // industry language; never search consumer/expat groups as advertising targets.
+  const core = cleanKeywords(restricted
+    ? [...c.queries, ...POLISH_WINE_B2B_QUERIES]
+    : [c.topic, ...c.queries, ...c.keywords.filter((k) => !PROMPT_WORDS.has(k.toLowerCase()))], 40);
+  const adjacent = restricted ? [] : c.adjacent;
   // Interleave: most of the budget on the topic, at least a third on adjacent audiences.
   const adjacentRuns = adjacent.length ? Math.max(1, Math.round(maxRuns / 3)) : 0;
   const coreList = core.slice(0, maxRuns - Math.min(adjacentRuns, adjacent.length)).map((topic) => ({ topic, relevance: "core" as const }));
@@ -268,8 +283,10 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const plan = searchPlan(c);
   const seen = new Map<string, GroupCard>();
   const notes = new Set<string>();
-  // One query at a time: the free Gemini tier allows only a few requests a minute.
+  let attempted = 0;
+  // One query at a time, preserving the budget and provider rate limits.
   for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 1) {
+    attempted += 1;
     const batch = plan.slice(i, i + 1);
     const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0] }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
     for (const r of results) {
@@ -284,7 +301,7 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, updatedAt: nowIso() };
   await putOne("campaigns", next);
   await logAction({ actor: "agent", action: "campaign.search", detail: c.title + ": " + found.total + " сообществ (профильных " + found.core + ", смежных " + found.adjacent + ", неактивных " + found.inactive + ")" });
-  return { campaign: next, groups: all, notes: [...notes], queries: plan.length };
+  return { campaign: next, groups: all, notes: [...notes], queries: attempted };
 }
 
 // ---- Daily planner -----------------------------------------------------------------------
@@ -320,7 +337,7 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
   }
   const ids = new Set(existing.map((t) => t.id));
   const out: CampaignTask[] = [];
-  for (const c of campaigns.filter((x) => x.status === "approved")) {
+  for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x))) {
     let count = live.filter((t) => t.campaignId === c.id && t.day === day).length;
     for (const g of groups) {
       if (count >= c.dailyTarget) break;
@@ -358,7 +375,7 @@ export async function planDay(day = today()): Promise<PlanResult> {
 
 async function activeCampaign(id: string) {
   const c = await getOne<Campaign>("campaigns", id);
-  return c?.status === "approved" ? c : null;
+  return c?.status === "approved" && !isPolishWineCampaign(c) ? c : null;
 }
 
 // Bot tasks: only chats where an admin added the bot, ~3 s apart, daily limit shared with /post.
@@ -453,7 +470,7 @@ export function capacityOf(groups: GroupCard[], tasks: CampaignTask[], campaigns
     byMode[mode].sustained += limit / Math.max(1, g.minDaysBetween || 1);
   }
   const todays = tasks.filter((t) => t.day === day);
-  const target = campaigns.filter((c) => c.status === "approved").reduce((s, c) => s + c.dailyTarget, 0);
+  const target = campaigns.filter((c) => c.status === "approved" && !isPolishWineCampaign(c)).reduce((s, c) => s + c.dailyTarget, 0);
   const sum = (k: "places" | "peak" | "sustained") => Math.round(byMode.bot[k] + byMode.partner[k] + byMode.manual[k]);
   return {
     day,

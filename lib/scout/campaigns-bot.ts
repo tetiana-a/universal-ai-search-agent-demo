@@ -6,6 +6,7 @@ import { controlIds, reportChatId } from "@/lib/scout/telegram";
 import { deleteValue, getOne, getValue, removeMany, setValue } from "@/lib/scout/store";
 import { answerCallback, editMessage, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, stableId } from "@/lib/scout/text";
+import { isPolishWineCampaign, POLISH_WINE_NOTICE } from "@/lib/scout/wine-compliance";
 
 // Telegram control for campaigns (TZ 1.2):
 //   voice or /campaign <task> → AI task + clarifying questions + 40 keywords for approval
@@ -36,20 +37,24 @@ export function campaignCard(c: Campaign) {
     (c.adjacent.length ? "\n\n<b>Смежные сообщества</b>: " + escapeHtml(c.adjacent.join(", ")) : "") +
     (c.queries.length ? "\n<b>Свои запросы</b>: " + escapeHtml(c.queries.join(", ")) : "") +
     (c.exclusions.length ? "\n<b>Исключения</b>: " + escapeHtml(c.exclusions.join(", ")) : "") +
+    (isPolishWineCampaign(c) ? "\n\n" + escapeHtml(POLISH_WINE_NOTICE) : "") +
     "\n\nПравка: <code>/keywords " + c.id + " +слово -слово</code> · свой запрос <code>/cq " + c.id + " текст</code> · исключить <code>/cx " + c.id + " слово</code>";
 }
 
 function draftKeyboard(c: Campaign): Keyboard {
   return [
-    [{ text: "✅ Слова верны — искать сообщества", callback_data: "cp:search:" + c.id }],
+    [{ text: isPolishWineCampaign(c) ? "🔎 Поиск B2B-сообществ (без публикации)" : "✅ Слова верны — искать сообщества", callback_data: "cp:search:" + c.id }],
     [{ text: "✖️ Удалить черновик", callback_data: "cp:del:" + c.id }],
   ];
 }
 
 function runningKeyboard(c: Campaign): Keyboard {
+  const search = [{ text: "📡 Мониторинг", callback_data: "cp:mon:" + c.id }, { text: "🔎 Искать ещё", callback_data: "cp:search:" + c.id }];
+  if (isPolishWineCampaign(c)) return [search];
+  if (c.status !== "approved" && (!c.found || c.found.total === 0)) return [search];
   return [
     c.status === "approved" ? [{ text: "⏹ Остановить", callback_data: "cp:stop:" + c.id }] : [{ text: "▶️ Запустить размещение", callback_data: "cp:start:" + c.id }],
-    [{ text: "📡 Мониторинг", callback_data: "cp:mon:" + c.id }, { text: "🔎 Искать ещё", callback_data: "cp:search:" + c.id }],
+    search,
   ];
 }
 
@@ -110,13 +115,25 @@ async function runSearch(chatId: string, id: string) {
   const top = result.groups.sort((a, b) => Number(a.relevance === "adjacent") - Number(b.relevance === "adjacent") || (b.members || 0) - (a.members || 0)).slice(0, 15)
     .map((g, i) => (i + 1) + ". " + (g.relevance === "adjacent" ? "🟡 " : "🟢 ") + "<a href=\"" + escapeHtml(g.url) + "\">" + escapeHtml(g.name.slice(0, 50)) + "</a>" + (g.members ? " · " + g.members.toLocaleString("ru-RU") : "") + (g.activity === "inactive" ? " · 💤 неактивна" : "") + "\n   <i>запрос: " + escapeHtml(g.foundBy || "") + "</i>");
   await sendLong(chatId, "<b>Сообщества для «" + escapeHtml(result.campaign.title) + "»</b>\nЗапросов: " + result.queries + " · найдено " + f.total + " (🟢 профильных " + f.core + ", 🟡 смежных " + f.adjacent + ", 💤 неактивных " + f.inactive + " — исключены из размещения)" +
+    (isPolishWineCampaign(result.campaign) ? "\n\n" + escapeHtml(POLISH_WINE_NOTICE) : "") +
+    (!f.total ? "\n⚠️ Публикацию запускать нельзя: подходящие площадки не подтверждены." : "") +
     (result.notes.length ? "\n⚠️ " + escapeHtml(result.notes.slice(0, 2).join(" ")) : "") + (top.length ? "\n\n" + top.join("\n") : ""), runningKeyboard(result.campaign));
   if (result.groups.length) await sendDocument(chatId, "communities-" + id + ".xlsx", await groupsXlsx(result.groups), "База сообществ (Excel)");
 }
 
 async function startPlacement(chatId: string, id: string) {
+  const existing = await getOne<Campaign>("campaigns", id);
+  if (!existing) { await sendMessage(chatId, "Кампания не найдена."); return; }
+  if (isPolishWineCampaign(existing)) {
+    await sendMessage(chatId, escapeHtml(POLISH_WINE_NOTICE) + "\n\nДля B2B-поиска напишите в чат: «Найди импортеров итальянского вина и оптовых дистрибьюторов в Польше».");
+    return;
+  }
+  if (!existing.found?.total) {
+    await sendMessage(chatId, "⛔ Размещение не запущено: найдено 0 подтверждённых сообществ. Исправьте ключевые слова или проверьте поисковые API.");
+    return;
+  }
   const c = await setCampaignStatus(id, "approved");
-  if (!c) return;
+  if (!c) { await sendMessage(chatId, "Размещение заблокировано проверкой кампании."); return; }
   const plan = await planDay();
   const partners = await notifyPartners();
   await sendMessage(chatId, "▶️ <b>Размещение запущено</b>: " + escapeHtml(c.title) + "\nНа сегодня: " + plan.created + " (бот " + plan.byMode.bot + ", партнёры " + plan.byMode.partner + ", вручную " + plan.byMode.manual + "). Партнёрам отправлено заданий: " + partners.notified +
