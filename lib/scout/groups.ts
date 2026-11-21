@@ -1,4 +1,5 @@
 import { geminiSearch } from "@/lib/gemini-search";
+import { dataForSeoEnabled, dataForSeoSearch } from "@/lib/scout/dataforseo-groups";
 import { runKeylessSearch } from "@/lib/keyless-search";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
@@ -261,11 +262,20 @@ function placeOf(input: FindInput) {
 
 export function groupQueries(input: FindInput) {
   const place = placeOf(input);
+  const polish = /поль|poland|polska|polsce|polski/i.test(place);
+  // Relevant *professional* search terms in Poland; research is separate from
+  // permission to advertise (in particular for alcoholic beverages).
+  if (polish) return [
+    "grupy Telegram " + input.topic + " Polska t.me",
+    "polskie grupy branżowe " + input.topic + " Telegram",
+    "grupy Facebook " + input.topic + " Polska",
+    "facebook.com/groups " + input.topic + " Polska",
+  ];
   return [
     "Telegram группы и каналы " + input.topic + " " + place + " t.me",
     "Telegram chats channels " + input.topic + " " + place + " t.me",
     "Facebook groups " + input.topic + " " + place,
-    "site:facebook.com/groups " + input.topic + " " + (input.city || input.country || ""),
+    "facebook.com/groups " + input.topic + " " + (input.city || input.country || ""),
   ];
 }
 
@@ -279,16 +289,28 @@ export type FindOutcome = { found: GroupCard[]; added: number; checked: number; 
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
   const queries = groupQueries(input);
-  const [gemini, keyless] = await Promise.all([
-    Promise.all([geminiSearch(queries[0], "ru", listPrompt(input)), geminiSearch(queries[2], "en", listPrompt(input))]),
-    runKeylessSearch(queries, "en", Math.min(deadlineAt, Date.now() + 15_000)).catch(() => []),
+  const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
+  const [paid, keyless] = await Promise.all([
+    dataForSeoEnabled()
+      ? Promise.all([dataForSeoSearch(queries[0], input.country || "", polish ? "pl" : "en"), dataForSeoSearch(queries[2], input.country || "", polish ? "pl" : "en")])
+      : Promise.resolve([]),
+    runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 15_000)).catch(() => []),
   ]);
+  for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
+  const visibleHits = [...paid.flatMap((p) => p.hits), ...keyless.flatMap((k) => k.hits)];
+  const directSocialHits = visibleHits.some((h) => normalizeTelegramUrl(h.url) || normalizeFacebookGroupUrl(h.url));
+  const gemini = directSocialHits || Date.now() > deadlineAt - 22_000
+    ? []
+    : await Promise.all([geminiSearch(queries[0], polish ? "pl" : "ru", listPrompt(input)), geminiSearch(queries[2], "en", listPrompt(input))]);
   for (const g of gemini) if (!g.ok && g.message) notes.push(g.message);
+  if (!directSocialHits && !gemini.some((g) => g.ok && (g.hits.length || g.text)) && keyless.some((k) => !k.ok)) {
+    notes.push("Search providers were unavailable or throttled. A zero-result report is not proof there are no relevant groups.");
+  }
 
   const telegram = new Map<string, { snippet: string; trusted: boolean }>();
   const facebook = new Map<string, { title: string; snippet: string }>();
   const otherPages: string[] = [];
-  const hits = [...gemini.flatMap((g) => g.hits), ...keyless.flatMap((k) => k.hits)] as Array<{ title: string; url: string; snippet: string }>;
+  const hits = [...visibleHits, ...gemini.flatMap((g) => g.hits)] as Array<{ title: string; url: string; snippet: string }>;
   for (const hit of hits) {
     const tg = normalizeTelegramUrl(hit.url);
     const fb = normalizeFacebookGroupUrl(hit.url);
