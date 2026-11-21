@@ -14,6 +14,7 @@ import { collectOperationalHealth } from "@/lib/scout/health";
 import { handleMyChatMember } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
+import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -32,6 +33,7 @@ const HELP = [
   "«Найди инвесторов в Амстердаме для B2B SaaS»",
   "",
   "Я сам уточню детали, выполню поиск и покажу результаты.",
+  "Для размещения объявления напишите «нужно разместить объявление» или нажмите кнопку 📣.",
   "",
   "<b>Реклама в сообществах</b>: отправьте <b>голосовое</b> с задачей (что, где, на каких площадках, текст) или /campaign текст.",
   "Я задам уточнения, предложу 40 ключевых слов, найду профильные и смежные сообщества и буду размещать каждый день только там, где разрешено.",
@@ -103,6 +105,7 @@ function sourceText(s: ScoutSource) {
 function mainPanelKeyboard(): Keyboard {
   return [
     [{ text: "🔎 Найти", callback_data: "menu:find" }],
+    [{ text: "📣 Разместить объявление", callback_data: "menu:advert" }],
     [
       { text: "📋 Мои поиски", callback_data: "menu:tasks" },
       { text: "✅ Результаты", callback_data: "menu:results" },
@@ -459,6 +462,13 @@ async function handleCallback(query: any): Promise<BotResult> {
       await tgForceReply(chatId, "🔎 Что найти? Напишите запрос обычным сообщением.");
       return {};
     }
+    if (action === "advert") {
+      if (query.message?.chat?.type !== "private") {
+        await sendMessage(chatId, "Откройте личный чат с ботом, чтобы подготовить рекламное объявление.");
+        return {};
+      }
+      return startAdWizard(chatId, userId);
+    }
     if (action === "more") {
       await showMoreMenu(chatId);
       return {};
@@ -476,6 +486,7 @@ async function handleCallback(query: any): Promise<BotResult> {
     }
     return {};
   }
+  if (kind === "aw") return adWizardButton(chatId, userId, query.id, action, id);
   if (kind === "gp") return handleGroupCallback(query, action, id, by);
   if (kind === "cp") return handleCampaignCallback(query, action, id, by);
   if (kind === "rs") return { background: await handleResearchCallback(chatId, action, query.id) };
@@ -673,6 +684,16 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     const by = message.from?.username ? "@" + message.from.username : message.from?.first_name || userId;
     return handleGroupCommand(chatId, "post", String(message.caption).replace(/^\/post(@\w+)?\s*/i, ""), by, photos[photos.length - 1]?.file_id);
   }
+  // Owners may attach an image with its ad text while the ad wizard is active.
+  if (message?.photo && !message.from?.is_bot && message.chat?.type === "private") {
+    const ownerChat = String(message.chat?.id || "");
+    const ownerId = String(message.from?.id || "");
+    if (await isControl(ownerChat, ownerId, "private")) {
+      const photos = Array.isArray(message.photo) ? message.photo : [];
+      const result = await advanceAdWizard(ownerChat, ownerId, String(message.caption || ""), photos[photos.length - 1]?.file_id);
+      if (result) return result;
+    }
+  }
   if (!message?.text || message.from?.is_bot) return {};
   const chatId = String(message.chat?.id || "");
   const userId = String(message.from?.id || "");
@@ -700,7 +721,20 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       if (result.draft) await sendMessage(chatId, draftText(result.draft) + "\n\n" + escapeHtml(result.message), result.ok ? draftKeyboard(result.draft) : undefined);
       return {};
     }
+    if (command?.cmd === "ad" || command?.cmd === "advert") {
+      if (message.chat?.type !== "private") {
+        await sendMessage(chatId, "Для рекламы откройте личный чат с ботом и отправьте /ad.");
+        return {};
+      }
+      return startAdWizard(chatId, userId);
+    }
+    if (command?.cmd === "cancel" && await cancelAdWizard(chatId, userId)) return {};
     if (command) return handleCommand(chatId, userId, userName, command.cmd, command.args);
+    if (message.chat?.type === "private") {
+      const wizard = await advanceAdWizard(chatId, userId, String(message.text));
+      if (wizard) return wizard;
+      if (isAdPostingIntent(String(message.text))) return startAdWizard(chatId, userId);
+    }
     const answer = await maybeAnswer(chatId, String(message.text));
     if (answer) return answer;
     return handleResearchText(message, chatId, userId);
