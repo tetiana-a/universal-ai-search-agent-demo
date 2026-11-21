@@ -4,7 +4,7 @@ import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
 import { getOne, increment, listAll, logAction, putMany, putOne, readCounter } from "@/lib/scout/store";
 import { botToken, resolveChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
-import { nowIso, randomId, stableId } from "@/lib/scout/text";
+import { detectLang, nowIso, randomId, stableId } from "@/lib/scout/text";
 
 // Group finder and compliant posting.
 // - Finds public Telegram and Facebook groups/channels for a place and topic, using
@@ -15,7 +15,7 @@ import { nowIso, randomId, stableId } from "@/lib/scout/text";
 // There is deliberately no account farm, no human imitation and no automated posting
 // from personal accounts: those break Telegram/Facebook rules and get accounts banned.
 
-export type Platform = "telegram" | "facebook";
+export type Platform = "telegram" | "facebook" | "instagram" | "tiktok";
 export type AdsPolicy = "allowed" | "paid" | "forbidden" | "unknown";
 export type GroupStatus = "new" | "contacted" | "free" | "exchange" | "paid" | "declined";
 
@@ -40,6 +40,19 @@ export type GroupCard = {
   botConnected?: boolean;
   postingEnabled?: boolean;
   dailyLimit?: number;
+  // Partner network: the admin who agreed to publish by hand gets tasks from the bot and replies /proof.
+  partnerTelegramId?: string;
+  // Minimum days between two posts in this group, as the admin allowed (default 1).
+  minDaysBetween?: number;
+  permissionNote?: string;
+  // TZ 1.2: language, relevance (core topic or adjacent audience), which query found it, liveness.
+  language?: string;
+  relevance?: "core" | "adjacent";
+  foundBy?: string;
+  activity?: "active" | "inactive" | "unknown";
+  lastPostAt?: string;
+  postsPerWeek?: number;
+  activityCheckedAt?: string;
   foundAt: string;
   updatedAt: string;
 };
@@ -173,6 +186,56 @@ export function parseFacebookPreview(html: string) {
   return { title, description, members: parseMembers(description) };
 }
 
+// t.me/s/<channel> lists the latest public posts with dates and views.
+export type PublicPost = { url: string; text: string; at?: string; views?: number };
+function parseViews(raw: string) {
+  const m = /([\d.,]+)\s*([KM])?/i.exec(raw.trim());
+  if (!m) return undefined;
+  const n = Number(m[1].replace(",", "."));
+  return Math.round(n * (m[2]?.toUpperCase() === "M" ? 1e6 : m[2] ? 1e3 : 1));
+}
+export function parseTelegramPosts(html: string): PublicPost[] {
+  const out: PublicPost[] = [];
+  for (const block of html.split(/<div class="tgme_widget_message_wrap/).slice(1)) {
+    const post = /data-post="([\w]+\/\d+)"/.exec(block)?.[1];
+    if (!post) continue;
+    out.push({
+      url: "https://t.me/" + post,
+      text: decode(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/.exec(block)?.[1] || "").slice(0, 1500),
+      at: /<time[^>]+datetime="([^"]+)"/.exec(block)?.[1],
+      views: parseViews(decode(/<span class="tgme_widget_message_views">([^<]*)</.exec(block)?.[1] || "")),
+    });
+  }
+  return out;
+}
+
+export const INACTIVE_DAYS = () => Math.max(1, Number(process.env.INACTIVE_DAYS || 30) || 30);
+
+// Liveness from the dates of recent posts: last post and posts per week. Unknown when the page has no feed.
+export function activityFromPosts(posts: PublicPost[], now = Date.now()) {
+  const dates = posts.map((p) => Date.parse(p.at || "")).filter(Number.isFinite).sort((a, b) => b - a);
+  if (!dates.length) return { activity: "unknown" as const };
+  const last = dates[0];
+  const spanDays = Math.max(1, (last - dates[dates.length - 1]) / 86_400_000);
+  const postsPerWeek = Math.round((dates.length / spanDays) * 7 * 10) / 10;
+  const activity: "active" | "inactive" = (now - last) / 86_400_000 > INACTIVE_DAYS() ? "inactive" : "active";
+  return { activity, lastPostAt: new Date(last).toISOString(), postsPerWeek };
+}
+
+export async function telegramFeed(url: string) {
+  const name = /t\.me\/([a-z][\w]{3,31})$/i.exec(url)?.[1];
+  if (!name) return [];
+  return parseTelegramPosts(await fetchHtml("https://t.me/s/" + name, 6000));
+}
+
+// Re-checks liveness of Telegram groups not checked for a day (cron); Facebook needs a login, so stays unknown.
+export async function refreshActivity(limit = 40) {
+  const stale = (await listGroups()).filter((g) => g.platform === "telegram" && g.url && !g.url.includes("/+") && (!g.activityCheckedAt || Date.now() - Date.parse(g.activityCheckedAt) > 20 * 3600_000)).slice(0, limit);
+  const updated = await inBatches(stale, 10, async (g) => ({ ...g, ...activityFromPosts(await telegramFeed(g.url)), activityCheckedAt: nowIso() }));
+  await putMany("groups", updated);
+  return updated.length;
+}
+
 // ---- Fetching -------------------------------------------------------------------
 
 async function fetchHtml(url: string, timeoutMs = 7000) {
@@ -190,7 +253,7 @@ async function inBatches<T, R>(items: T[], size: number, fn: (item: T) => Promis
   return out;
 }
 
-export type FindInput = { country?: string; city?: string; topic: string };
+export type FindInput = { country?: string; city?: string; topic: string; relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string };
 
 function placeOf(input: FindInput) {
   return [input.city, input.country].filter(Boolean).join(", ");
@@ -249,7 +312,8 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const now = nowIso();
   const topicWords = (input.topic + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
   const relevant = (text: string) => { const t = text.toLowerCase(); return topicWords.some((w) => t.includes(w)); };
-  const base = { country: input.country || undefined, city: input.city || undefined, topic: input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now };
+  const base = { country: input.country || undefined, city: input.city || undefined, topic: input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
+  const excluded = (text: string) => { const t = text.toLowerCase(); return (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase())); };
 
   const tgList = [...telegram.entries()].slice(0, 60);
   const tgCards = await inBatches(tgList, 10, async ([url, meta]): Promise<GroupCard | null> => {
@@ -259,7 +323,11 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     // Links lifted from catalogue pages are kept only when they match the topic or place.
     if (!meta.trusted && !relevant(preview.title + " " + preview.description)) return null;
     const text = preview.description + "\n" + meta.snippet;
-    return { ...base, id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url) };
+    if (excluded(preview.title + " " + text)) return null;
+    // Channels (and some groups) have a public feed: last post date and frequency.
+    const feed = Date.now() < deadlineAt ? await telegramFeed(url) : [];
+    const live = feed.length ? { ...activityFromPosts(feed), activityCheckedAt: now } : { activity: "unknown" as const };
+    return { ...base, ...live, id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLang(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), (input.language as any) || "en") };
   });
 
   const fbList = [...facebook.entries()].slice(0, 30);
@@ -268,7 +336,8 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     const name = preview?.title || meta.title.replace(/\s*[|·-]\s*Facebook.*$/i, "").trim();
     if (!name) return null;
     const text = (preview?.description || "") + "\n" + meta.snippet;
-    return { ...base, id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
+    if (excluded(name + " " + text)) return null;
+    return { ...base, activity: "unknown", language: detectLang(name + " " + text, (input.language as any) || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
   });
 
   const found = [...tgCards, ...fbCards].filter(Boolean) as GroupCard[];
@@ -285,7 +354,7 @@ export async function upsertGroups(cards: GroupCard[]) {
   for (const card of cards) {
     const prev = await getOne<GroupCard>("groups", card.id);
     if (!prev) added += 1;
-    out.push(prev ? { ...card, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
+    out.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
   }
   await putMany("groups", out);
   return { cards: out, added };
@@ -297,7 +366,7 @@ export async function listGroups() {
 
 const STATUSES = new Set<GroupStatus>(["new", "contacted", "free", "exchange", "paid", "declined"]);
 
-export async function updateGroup(id: string, patch: Partial<Pick<GroupCard, "status" | "price" | "currency" | "notes" | "adminContact" | "postingEnabled" | "dailyLimit">>) {
+export async function updateGroup(id: string, patch: Partial<Pick<GroupCard, "status" | "price" | "currency" | "notes" | "adminContact" | "postingEnabled" | "dailyLimit" | "partnerTelegramId" | "minDaysBetween" | "permissionNote">>) {
   const card = await getOne<GroupCard>("groups", id);
   if (!card) return null;
   const next: GroupCard = { ...card, updatedAt: nowIso() };
@@ -307,9 +376,38 @@ export async function updateGroup(id: string, patch: Partial<Pick<GroupCard, "st
   if (patch.notes !== undefined) next.notes = String(patch.notes).slice(0, 500);
   if (patch.adminContact !== undefined) next.adminContact = String(patch.adminContact).slice(0, 120) || undefined;
   if (patch.dailyLimit !== undefined) next.dailyLimit = Math.max(0, Math.min(10, Math.round(Number(patch.dailyLimit) || 0)));
+  if (patch.partnerTelegramId !== undefined) next.partnerTelegramId = /^-?\d{4,20}$/.test(String(patch.partnerTelegramId).trim()) ? String(patch.partnerTelegramId).trim() : undefined;
+  if (patch.minDaysBetween !== undefined) next.minDaysBetween = Math.max(1, Math.min(60, Math.round(Number(patch.minDaysBetween) || 1)));
+  if (patch.permissionNote !== undefined) next.permissionNote = String(patch.permissionNote).slice(0, 300) || undefined;
   if (patch.postingEnabled !== undefined) next.postingEnabled = Boolean(patch.postingEnabled) && Boolean(card.botConnected);
   await putOne("groups", next);
   return next;
+}
+
+export function platformOfUrl(raw: string): { platform: Platform; url: string } | null {
+  const tg = normalizeTelegramUrl(raw);
+  if (tg) return { platform: "telegram", url: tg };
+  const fb = /(?:https?:\/\/)?(?:www\.|m\.|web\.)?facebook\.com\/([\w./-]{3,120})/i.exec(raw);
+  if (fb) return { platform: "facebook", url: "https://www.facebook.com/" + fb[1].replace(/\/+$/, "") };
+  const ig = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([\w.]{2,40})/i.exec(raw);
+  if (ig && !/^(p|reel|tv|explore|accounts)$/i.test(ig[1])) return { platform: "instagram", url: "https://www.instagram.com/" + ig[1] };
+  const tt = /(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/(@[\w.]{2,40})/i.exec(raw);
+  if (tt) return { platform: "tiktok", url: "https://www.tiktok.com/" + tt[1] };
+  return null;
+}
+
+// A placement added by hand: an Instagram/TikTok/Facebook partner or a Telegram chat the admin agreed on.
+export async function addGroupManually(input: { url: string; name?: string; partnerTelegramId?: string; dailyLimit?: number; minDaysBetween?: number; permissionNote?: string; topic?: string; city?: string; country?: string }) {
+  const found = platformOfUrl(input.url);
+  if (!found) return null;
+  const now = nowIso();
+  const id = stableId("grp", found.url.toLowerCase());
+  const prev = await getOne<GroupCard>("groups", id);
+  const card: GroupCard = { ...(prev || { id, platform: found.platform, url: found.url, name: input.name || found.url.split("/").pop() || found.url, ads: "allowed", status: "free", foundAt: now }), updatedAt: now } as GroupCard;
+  if (input.name) card.name = input.name.slice(0, 120);
+  for (const k of ["topic", "city", "country"] as const) if (input[k]) card[k] = String(input[k]).slice(0, 80);
+  await putOne("groups", card);
+  return updateGroup(id, { partnerTelegramId: input.partnerTelegramId, dailyLimit: input.dailyLimit, minDaysBetween: input.minDaysBetween, permissionNote: input.permissionNote });
 }
 
 // ---- Admin outreach drafts -------------------------------------------------------
@@ -396,11 +494,11 @@ export async function postingTargets() {
   return (await listGroups()).filter((g) => g.platform === "telegram" && g.botConnected && g.postingEnabled && g.chatId);
 }
 
-async function sendPhoto(chatId: string, photo: string, caption: string) {
+export async function sendPhoto(chatId: string, photo: string, caption: string) {
   return tgCall("sendPhoto", { chat_id: await resolveChatId(chatId), photo, caption: caption.slice(0, 1024) });
 }
 
-function messageLink(card: GroupCard, messageId?: number) {
+export function messageLink(card: GroupCard, messageId?: number) {
   if (!messageId) return undefined;
   if (card.url && !card.url.includes("/+")) return card.url + "/" + messageId;
   const id = String(card.chatId || "").replace(/^-100/, "");
@@ -458,6 +556,9 @@ export async function markQueued(id: string, status: "published" | "skipped", by
   if (!item || item.status !== "pending") return null;
   const done: QueueItem = { ...item, status, doneAt: nowIso(), doneBy: by };
   await putOne("group_queue", done);
+  // Campaign tasks reuse the queue item id, so the campaign report sees the same result.
+  const task = await getOne<{ id: string; status: string }>("campaign_tasks", id);
+  if (task) await putOne("campaign_tasks", { ...task, status: status === "published" ? "verified" : "skipped", updatedAt: nowIso() });
   await putOne("group_posts", { id: randomId("post"), at: done.doneAt!, groupId: item.groupId, groupName: item.groupName, platform: item.platform, mode: "manual", status, text: item.text.slice(0, 300), by } satisfies PostLog);
   return done;
 }
@@ -484,6 +585,7 @@ export async function postingSummary() {
 
 // ---- Excel ---------------------------------------------------------------------------
 
+export const PLATFORM_LABEL: Record<Platform, string> = { telegram: "Telegram", facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok" };
 const ADS_LABEL: Record<AdsPolicy, string> = { allowed: "разрешены", paid: "платно / через админа", forbidden: "запрещены", unknown: "не указано" };
 const STATUS_LABEL: Record<GroupStatus, string> = { new: "новая", contacted: "написали админу", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
 export { ADS_LABEL, STATUS_LABEL };
@@ -502,7 +604,7 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = []) {
     { header: "Статус", key: "status", width: 16 }, { header: "Цена поста", key: "price", width: 11 }, { header: "Валюта", key: "currency", width: 8 },
     { header: "Бот в группе", key: "bot", width: 12 }, { header: "Заметки", key: "notes", width: 30 },
   ];
-  for (const g of groups) ws.addRow({ platform: g.platform === "telegram" ? "Telegram" : "Facebook", kind: g.kind === "channel" ? "канал" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
+  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.autoFilter = { from: "A1", to: "O1" };

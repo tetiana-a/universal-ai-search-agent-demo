@@ -1,5 +1,5 @@
 import { dashboardUrl } from "@/lib/scout/config";
-import { ADS_LABEL, findGroups, groupsXlsx, listQueue, markQueued, postViaBot, postingSummary, postingTargets, queueManual } from "@/lib/scout/groups";
+import { ADS_LABEL, PLATFORM_LABEL, findGroups, groupsXlsx, listQueue, markQueued, postViaBot, postingSummary, postingTargets, queueManual } from "@/lib/scout/groups";
 import { deleteValue, getValue, setValue } from "@/lib/scout/store";
 import { answerCallback, editMessage, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, randomId } from "@/lib/scout/text";
@@ -83,7 +83,7 @@ export async function handleGroupCommand(chatId: string, cmd: string, args: stri
 }
 
 function queueText(item: QueueItem, left: number) {
-  return "<b>Опубликуйте в:</b> " + escapeHtml(item.groupName) + " (" + (item.platform === "telegram" ? "Telegram" : "Facebook") + ")" +
+  return "<b>Опубликуйте в:</b> " + escapeHtml(item.groupName) + " (" + PLATFORM_LABEL[item.platform] + ")" +
     "\nОсталось в очереди: " + left + "\n\nСкопируйте текст ниже, откройте группу и опубликуйте со своего аккаунта:\n\n<code>" + escapeHtml(item.text.slice(0, 3000)) + "</code>" +
     (item.photoUrl ? "\n\nФото: " + escapeHtml(item.photoUrl) : "");
 }

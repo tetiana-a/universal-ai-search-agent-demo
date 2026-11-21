@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Copy, Download, ExternalLink, ListChecks, Megaphone, MessageSquare, Radar, ScrollText, Send, Users, X } from "lucide-react";
+import CampaignsPanel from "@/components/groups/campaigns-panel";
 import type { GroupCard, GroupStatus, PostLog, QueueItem } from "@/lib/scout/groups";
 
 // Group finder + compliant posting. Same access key as /scout (stored in this browser).
@@ -104,8 +105,8 @@ export default function GroupsDashboard() {
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <a href="/" className="brand-mark font-display text-[24px] tracking-[.19em]">AURELIUS</a>
-            <h1 className="mt-1 text-[18px] font-light">Группы и публикации</h1>
-            <p className="text-[12px] text-[var(--text-muted)]">Поиск групп · письма админам · постинг ботом там, где его добавили админы · ручная очередь для своих аккаунтов</p>
+            <h1 className="mt-1 text-[18px] font-light">Кампании, сообщества и публикации</h1>
+            <p className="text-[12px] text-[var(--text-muted)]">Задача голосом или текстом · 40 ключевых слов · профильные и смежные сообщества · размещение только там, где разрешено · мониторинг и отчёты</p>
           </div>
           <div className="flex gap-2"><Button href="/scout">← Разведчик</Button></div>
         </header>
@@ -123,6 +124,8 @@ export default function GroupsDashboard() {
             ))}
           </div>
         )}
+
+        {!needKey && state && <CampaignsPanel headers={headers} onToast={setToast} />}
 
         <Panel title="1. Найти группы" icon={Radar} color="#30d158">
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_auto]">
@@ -142,8 +145,8 @@ export default function GroupsDashboard() {
                 <tbody>
                   {groups.map((g) => (
                     <tr key={g.id} className="border-t border-[var(--line-soft)] align-middle">
-                      <td className="px-2 py-1.5">{g.platform === "telegram" ? "✈️" : "📘"}</td>
-                      <td className="max-w-[260px] px-2 py-1.5">{g.url ? <a className="hover:underline" href={g.url} target="_blank" rel="noreferrer">{g.name}</a> : g.name}<div className="text-[10.5px] text-[var(--text-muted)]">{[g.city, g.country, g.kind === "channel" ? "канал" : ""].filter(Boolean).join(" · ")}</div></td>
+                      <td className="px-2 py-1.5" title={g.foundBy ? "запрос: " + g.foundBy : undefined}>{({ telegram: "✈️", facebook: "📘", instagram: "📸", tiktok: "🎵" } as Record<string, string>)[g.platform]}{g.relevance === "adjacent" ? <span title="смежное сообщество"> 🟡</span> : null}{g.activity === "inactive" ? <span title="неактивна — исключена из размещения"> 💤</span> : null}</td>
+                      <td className="max-w-[260px] px-2 py-1.5">{g.url ? <a className="hover:underline" href={g.url} target="_blank" rel="noreferrer">{g.name}</a> : g.name}<div className="text-[10.5px] text-[var(--text-muted)]">{[g.city, g.country, g.kind === "channel" ? "канал" : "", g.language, g.postsPerWeek !== undefined ? g.postsPerWeek + " пост/нед" : "", g.partnerTelegramId ? "партнёр" : ""].filter(Boolean).join(" · ")}</div></td>
                       <td className="px-2 py-1.5 tabular-nums">{g.members ? g.members.toLocaleString("ru-RU") : "—"}</td>
                       <td className="px-2 py-1.5">{ADS[g.ads]}</td>
                       <td className="px-2 py-1.5"><input className={inputClass + " min-h-7 w-36"} defaultValue={g.adminContact || ""} placeholder="@admin" onBlur={(e) => e.target.value !== (g.adminContact || "") && void act("update", { id: g.id, patch: { adminContact: e.target.value } })} /></td>
