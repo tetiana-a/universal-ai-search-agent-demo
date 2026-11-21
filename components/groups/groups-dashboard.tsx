@@ -211,7 +211,7 @@ export default function GroupsDashboard() {
           )}
         </Panel>
 
-        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button href={exportHref}><Download size={13} />Excel</Button>}>
+        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button>}>
           {!state?.posts.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Публикаций пока нет.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-[12px]">
