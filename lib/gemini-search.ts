@@ -52,7 +52,7 @@ export function snippetsByChunk(supports: Support[] | undefined) {
 export async function geminiSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
   const first = await geminiSearchWith(process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash", query, language, customPrompt);
   if (first.status !== "rate_limited") return first;
-  const fallback = process.env.GEMINI_SEARCH_FALLBACK_MODEL || "gemini-2.5-flash-lite";
+  const fallback = process.env.GEMINI_SEARCH_FALLBACK_MODEL || "gemini-flash-lite-latest";
   return fallback === "off" ? first : geminiSearchWith(fallback, query, language, customPrompt);
 }
 
