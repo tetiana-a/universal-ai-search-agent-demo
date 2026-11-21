@@ -47,10 +47,18 @@ export function snippetsByChunk(supports: Support[] | undefined) {
   return out;
 }
 
+// The free tier allows only a few requests a minute per model: on HTTP 429 the lighter model
+// (separate, larger quota) answers instead.
 export async function geminiSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
+  const first = await geminiSearchWith(process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash", query, language, customPrompt);
+  if (first.status !== "rate_limited") return first;
+  const fallback = process.env.GEMINI_SEARCH_FALLBACK_MODEL || "gemini-2.5-flash-lite";
+  return fallback === "off" ? first : geminiSearchWith(fallback, query, language, customPrompt);
+}
+
+async function geminiSearchWith(model: string, query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
   const key = geminiSearchKey();
   if (!key) return { ok: false, hits: [], status: "error", message: "GEMINI_API_KEY is not set." };
-  const model = process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash";
   const prompt = customPrompt || (language === "ru"
     ? "Найди в интернете конкретные первоисточники (официальные сайты компаний, каталоги, объявления, реестры) по запросу: "
     : "Search the web for specific primary sources (official company sites, catalogues, listings, registries) for: ")

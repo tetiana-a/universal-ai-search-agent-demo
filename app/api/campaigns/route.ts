@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
 import { capacity, createCampaign, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, today, updateCampaign, verifyProof, type CampaignTask, type Mention } from "@/lib/scout/campaigns";
+import { partnerInviteLink } from "@/lib/scout/campaigns-bot";
 import { addGroupManually } from "@/lib/scout/groups";
 import { listAll, removeMany } from "@/lib/scout/store";
 import { asText } from "@/lib/scout/text";
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
   const day = today();
   const [campaigns, tasks, mentions, cap] = await Promise.all([listCampaigns(), listAll<CampaignTask>("campaign_tasks"), listAll<Mention>("mentions"), capacity(day)]);
   return Response.json({
-    ok: true, campaigns, capacity: cap,
+    ok: true, campaigns, capacity: cap, partnerLink: partnerInviteLink(),
     tasks: tasks.filter((t) => t.day === day).sort((a, b) => a.groupName.localeCompare(b.groupName)),
     mentions: mentions.sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 60),
   });

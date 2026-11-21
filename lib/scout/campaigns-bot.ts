@@ -1,9 +1,11 @@
 import { answerCampaign, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign } from "@/lib/scout/campaigns";
 import { dashboardUrl } from "@/lib/scout/config";
-import { groupsXlsx, PLATFORM_LABEL } from "@/lib/scout/groups";
+import { addGroupManually, groupsXlsx, PLATFORM_LABEL, platformOfUrl, updateGroup, type GroupCard } from "@/lib/scout/groups";
+import { botHandle } from "@/lib/scout/config";
+import { controlIds, reportChatId } from "@/lib/scout/telegram";
 import { deleteValue, getOne, getValue, removeMany, setValue } from "@/lib/scout/store";
 import { answerCallback, editMessage, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
-import { escapeHtml } from "@/lib/scout/text";
+import { escapeHtml, stableId } from "@/lib/scout/text";
 
 // Telegram control for campaigns (TZ 1.2):
 //   voice or /campaign <task> → AI task + clarifying questions + 40 keywords for approval
@@ -175,6 +177,45 @@ export async function handleCampaignCommand(chatId: string, userId: string, cmd:
   return {};
 }
 
+// ---- Publisher Network: admins connect their own community once ---------------------------
+
+export function partnerInviteLink() {
+  return "https://t.me/" + botHandle().replace(/^@/, "") + "?start=partner";
+}
+
+export function parseJoinArgs(args: string) {
+  const url = /https?:\/\/\S+|(?:t\.me|facebook\.com|instagram\.com|tiktok\.com)\/\S+/i.exec(args)?.[0] || "";
+  const nums = (args.replace(url, " ").match(/\d+/g) || []).map(Number);
+  return { url, dailyLimit: nums[0], minDaysBetween: nums[1] };
+}
+
+const JOIN_HELP = "🤝 <b>Подключение к сети партнёров</b>\n\nВы админ группы, канала или владелец страницы и готовы публиковать подходящие объявления? Подключитесь один раз:\n\n" +
+  "<b>Telegram</b>: добавьте бота {bot} администратором в группу или канал — публикации пойдут автоматически, в пределах лимита.\n\n" +
+  "<b>Facebook, Instagram, TikTok</b> (или Telegram с согласованием каждого поста): отправьте\n<code>/join ссылка постов_в_день раз_в_N_дней</code>\nНапример: <code>/join https://www.facebook.com/groups/valencia 1 3</code>\n\n" +
+  "Бот будет присылать вам готовые задания, вы публикуете сами и отвечаете /proof со ссылкой. Отключиться: /leave ссылка.";
+
+export async function handleJoin(chatId: string, userId: string, who: string, args: string) {
+  const { url, dailyLimit, minDaysBetween } = parseJoinArgs(args);
+  if (!url) { await sendMessage(chatId, JOIN_HELP.replace("{bot}", escapeHtml(botHandle()))); return; }
+  const found = platformOfUrl(url);
+  const existing = found ? await getOne<GroupCard>("groups", stableId("grp", found.url.toLowerCase())) : null;
+  if (existing?.partnerTelegramId && existing.partnerTelegramId !== userId && existing.status !== "declined") { await sendMessage(chatId, "Эта площадка уже подключена другим админом. Если это ошибка, напишите владельцу сети."); return; }
+  const card = await addGroupManually({ url, pending: true, partnerTelegramId: userId, dailyLimit: dailyLimit ?? 1, minDaysBetween: minDaysBetween ?? 1, permissionNote: "самоподключение через бота: " + who + ", " + new Date().toISOString().slice(0, 10) });
+  if (!card) { await sendMessage(chatId, "Нужна ссылка на группу или страницу в Telegram, Facebook, Instagram или TikTok."); return; }
+  await sendMessage(chatId, "✅ Заявка принята: " + escapeHtml(card.name) + " (" + PLATFORM_LABEL[card.platform] + "), до " + (card.dailyLimit ?? 1) + " постов в день, не чаще раза в " + (card.minDaysBetween || 1) + " дн. После проверки владельцем вы начнёте получать задания.");
+  const owner = [...controlIds()].find((id) => /^\d+$/.test(id)) || (await reportChatId());
+  if (owner) await sendMessage(owner, "🤝 Новый партнёр: " + escapeHtml(who) + " (ID " + userId + ")\n" + escapeHtml(card.url) + " · " + PLATFORM_LABEL[card.platform] + " · " + (card.dailyLimit ?? 1) + "/день", [[{ text: "✅ Подключить", callback_data: "cp:pok:" + card.id }, { text: "✖️ Отклонить", callback_data: "cp:pno:" + card.id }]]);
+}
+
+export async function handleLeave(chatId: string, userId: string, args: string) {
+  const { url } = parseJoinArgs(args);
+  const found = url ? platformOfUrl(url) : null;
+  const card = found ? await getOne<GroupCard>("groups", stableId("grp", found.url.toLowerCase())) : null;
+  if (!card || card.partnerTelegramId !== userId) { await sendMessage(chatId, "Формат: <code>/leave ссылка</code> — для площадки, которую вы подключали."); return; }
+  await updateGroup(card.id, { status: "declined", partnerTelegramId: "" });
+  await sendMessage(chatId, "Площадка отключена, задания больше не придут.");
+}
+
 // /proof works for partners too (they are not owners of the bot).
 export async function handleProof(chatId: string, userId: string, args: string) {
   const [taskId, url] = args.split(/\s+/);
@@ -212,6 +253,15 @@ export async function handleCampaignCallback(query: any, action: string, id: str
       await answerCallback(query.id, "✓");
       await sendMessage(chatId, capacityText(await capacity()));
       return {};
+    case "pok": case "pno": {
+      const g = await getOne<GroupCard>("groups", id);
+      if (!g) { await answerCallback(query.id, "Не найдено"); return {}; }
+      await updateGroup(id, { status: action === "pok" ? "free" : "declined", ...(action === "pno" ? { partnerTelegramId: "" } : {}) });
+      await answerCallback(query.id, action === "pok" ? "Подключено" : "Отклонено");
+      if (messageId) await editMessage(chatId, messageId, (action === "pok" ? "✅ Партнёр подключён: " : "✖️ Отклонено: ") + escapeHtml(g.name));
+      if (g.partnerTelegramId) await sendMessage(g.partnerTelegramId, action === "pok" ? "✅ Ваша площадка подключена к сети: " + escapeHtml(g.name) + ". Задания будут приходить сюда." : "Заявка на подключение " + escapeHtml(g.name) + " отклонена.");
+      return {};
+    }
     case "ok": case "no": {
       const t = await verifyProof(id, action === "ok", by);
       await answerCallback(query.id, t ? (action === "ok" ? "Засчитано" : "Не засчитано") : "Уже обработано");

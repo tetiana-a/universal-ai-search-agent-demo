@@ -130,4 +130,20 @@ describe("campaign flow", () => {
     await handleUpdate({ update_id: 2, message: { message_id: 2, chat: { id: 1234, type: "private" }, from: { id: 1234 }, voice: { file_id: "v1" } } });
     expect(sent.length).toBe(before);
   });
+  it("lets an admin join the partner network by /join, waits for owner approval and refuses a second admin", async () => {
+    const sent: any[] = [];
+    mockFetch([{ match: (u) => u.includes("api.telegram.org"), respond: (_u, init) => { sent.push(JSON.parse(String(init?.body || "{}"))); return json({ ok: true, result: { message_id: 1 } }); } }]);
+    await handleUpdate({ update_id: 1, message: { message_id: 1, chat: { id: 555123, type: "private" }, from: { id: 555123, first_name: "Admin" }, text: "/join https://www.facebook.com/groups/valencia 2 3" } });
+    let card = (await listAll<GroupCard>("groups"))[0];
+    expect(card).toMatchObject({ platform: "facebook", partnerTelegramId: "555123", status: "contacted", dailyLimit: 2, minDaysBetween: 3 });
+    expect(planTasks([campaign()], [card], [], "2026-11-22")).toHaveLength(0);
+    const owner = sent.find((b) => b.chat_id === "8213865630" && JSON.stringify(b.reply_markup || {}).includes("cp:pok:"));
+    expect(owner).toBeTruthy();
+    await handleUpdate({ update_id: 2, message: { message_id: 2, chat: { id: 666123, type: "private" }, from: { id: 666123 }, text: "/join https://www.facebook.com/groups/valencia" } });
+    expect((await getOne<GroupCard>("groups", card.id))?.partnerTelegramId).toBe("555123");
+    await handleUpdate({ update_id: 3, callback_query: { id: "q1", from: { id: 8213865630 }, data: "cp:pok:" + card.id, message: { message_id: 9, chat: { id: 8213865630, type: "private" } } } } as any);
+    card = (await getOne<GroupCard>("groups", card.id))!;
+    expect(card.status).toBe("free");
+    expect(planTasks([campaign()], [card], [], "2026-11-22")[0]?.mode).toBe("partner");
+  });
 });
