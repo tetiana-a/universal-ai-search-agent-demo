@@ -4,13 +4,10 @@ import { groupsXlsx, listGroups, listPosts } from "@/lib/scout/groups";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Excel with two sheets: groups (with admin contacts and prices) and the posting log.
-// The key travels as ?key= because a plain download link cannot set headers.
+// Sensitive exports must use an authenticated request header, never a
+// credential in the URL (which can leak through history, logs and referrers).
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const key = url.searchParams.get("key");
-  const authed = isAuthorized(key ? new Request(request.url, { headers: { "x-scout-key": key } }) : request);
-  if (!authed) return unauthorized();
+  if (!isAuthorized(request)) return unauthorized();
   const buffer = await groupsXlsx(await listGroups(), await listPosts(2000));
   return new Response(new Uint8Array(buffer), {
     headers: {
