@@ -149,5 +149,13 @@ export const BOT_COMMANDS = [
   { command: "status", description: "Что сейчас происходит" },
   { command: "tasks", description: "Мои последние поиски" },
   { command: "results", description: "Последние результаты" },
+  { command: "campaign", description: "Новая рекламная кампания (или голосовое)" },
+  { command: "campaigns", description: "Кампании: запуск, стоп, мониторинг" },
+  { command: "capacity", description: "Ёмкость сети: сколько размещений в день" },
+  { command: "creport", description: "Отчёт по кампаниям" },
+  { command: "groups", description: "Найти группы: страна, город, тема" },
+  { command: "post", description: "Опубликовать объявление" },
+  { command: "queue", description: "Очередь ручной публикации" },
+  { command: "posts", description: "Отчёт о публикациях" },
   { command: "help", description: "Как пользоваться" },
 ];

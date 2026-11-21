@@ -364,6 +364,10 @@ export default function ScoutDashboard() {
                   </button>
                 );
               })}
+              <a href="/groups" className="scout-nav-item group flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-[7px] text-left text-[12.5px] text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]">
+                <span className="scout-nav-icon grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-transparent"><Users className="icon-lift icon-foil opacity-60 group-hover:opacity-100" size={14} /></span>
+                <span className="font-normal tracking-[-.005em]">Группы и постинг</span>
+              </a>
             </nav>
 
             <button
