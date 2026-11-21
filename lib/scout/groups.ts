@@ -397,7 +397,7 @@ export function platformOfUrl(raw: string): { platform: Platform; url: string } 
 }
 
 // A placement added by hand: an Instagram/TikTok/Facebook partner or a Telegram chat the admin agreed on.
-export async function addGroupManually(input: { url: string; name?: string; partnerTelegramId?: string; dailyLimit?: number; minDaysBetween?: number; permissionNote?: string; topic?: string; city?: string; country?: string }) {
+export async function addGroupManually(input: { url: string; pending?: boolean; name?: string; partnerTelegramId?: string; dailyLimit?: number; minDaysBetween?: number; permissionNote?: string; topic?: string; city?: string; country?: string }) {
   const found = platformOfUrl(input.url);
   if (!found) return null;
   const now = nowIso();
@@ -405,6 +405,8 @@ export async function addGroupManually(input: { url: string; name?: string; part
   const prev = await getOne<GroupCard>("groups", id);
   const card: GroupCard = { ...(prev || { id, platform: found.platform, url: found.url, name: input.name || found.url.split("/").pop() || found.url, ads: "allowed", status: "free", foundAt: now }), updatedAt: now } as GroupCard;
   if (input.name) card.name = input.name.slice(0, 120);
+  // Self-registered partner: nothing goes there until the owner confirms (status → free).
+  if (input.pending && (!prev || ["new", "contacted", "declined"].includes(prev.status))) { card.status = "contacted"; card.ads = "unknown"; }
   for (const k of ["topic", "city", "country"] as const) if (input[k]) card[k] = String(input[k]).slice(0, 80);
   await putOne("groups", card);
   return updateGroup(id, { partnerTelegramId: input.partnerTelegramId, dailyLimit: input.dailyLimit, minDaysBetween: input.minDaysBetween, permissionNote: input.permissionNote });

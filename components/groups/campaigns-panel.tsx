@@ -8,7 +8,7 @@ import type { Campaign, CampaignTask, Mention } from "@/lib/scout/campaigns";
 // The same flow runs from Telegram by voice; this screen shows and controls it.
 
 type Cap = { day: string; target: number; places: number; peak: number; sustained: number; planned: number; verified: number; awaiting: number; failed: number; withoutPermission: number; byMode: Record<string, { places: number; sustained: number }> };
-type Data = { campaigns: Campaign[]; tasks: CampaignTask[]; mentions: Mention[]; capacity: Cap };
+type Data = { campaigns: Campaign[]; tasks: CampaignTask[]; mentions: Mention[]; capacity: Cap; partnerLink?: string };
 
 const inputClass = "scout-input w-full min-h-9 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-1.5 text-[12.5px] text-[var(--text)] outline-none focus:border-[var(--line)]";
 const STATUS: Record<Campaign["status"], string> = { draft: "черновик · проверьте слова", searching: "ищу сообщества…", ready: "сообщества найдены", approved: "размещение идёт", stopped: "остановлена" };
@@ -144,6 +144,7 @@ export default function CampaignsPanel({ headers, onToast }: Readonly<{ headers:
       </Section>
 
       <Section title="Площадка партнёра или по договорённости" icon={Plus} color="#30d158">
+        {data.partnerLink && <p className="mb-2 text-sm opacity-80">Ссылка для админов, чтобы подключиться самим: <a className="underline" href={data.partnerLink} target="_blank" rel="noreferrer">{data.partnerLink}</a>. Заявка придёт вам в бот на подтверждение.</p>}
         <div className="grid gap-2 sm:grid-cols-[2fr_1.2fr_90px_90px_2fr_auto]">
           <input className={inputClass} placeholder="Ссылка: t.me / facebook / instagram / tiktok" value={place.url} onChange={(e) => setPlace({ ...place, url: e.target.value })} />
           <input className={inputClass} placeholder="Telegram ID админа-партнёра" value={place.partnerTelegramId} onChange={(e) => setPlace({ ...place, partnerTelegramId: e.target.value })} />

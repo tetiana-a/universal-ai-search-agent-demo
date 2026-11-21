@@ -13,7 +13,7 @@ import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/sco
 import { collectOperationalHealth } from "@/lib/scout/health";
 import { handleMyChatMember } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
-import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
+import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -638,6 +638,14 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   // Partners confirm a publication with /proof; they are not owners, so this comes before the access check.
   if (message?.text && /^\/proof(@\w+)?\s/i.test(message.text) && !message.from?.is_bot) {
     await handleProof(String(message.chat?.id || ""), String(message.from?.id || ""), String(message.text).replace(/^\/proof(@\w+)?\s*/i, ""));
+    return {};
+  }
+  // Publisher Network: any admin can connect their community in a private chat (owner approves).
+  const join = message?.text && message.chat?.type === "private" && !message.from?.is_bot ? /^\/(join|leave)(@\w+)?(?:\s+([\s\S]*))?$|^\/start(?:@\w+)?\s+partner\b/i.exec(String(message.text).trim()) : null;
+  if (join) {
+    const who = message.from?.username ? "@" + message.from.username : message.from?.first_name || String(message.from?.id);
+    if (join[1]?.toLowerCase() === "leave") await handleLeave(String(message.chat.id), String(message.from.id), join[3] || "");
+    else await handleJoin(String(message.chat.id), String(message.from.id), who, join[3] || "");
     return {};
   }
   // Owner's voice message → campaign task (TZ 1.2: voice control).
