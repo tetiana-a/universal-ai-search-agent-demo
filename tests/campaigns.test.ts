@@ -75,6 +75,7 @@ describe("daily planner", () => {
       group("bot", { botConnected: true, postingEnabled: true, chatId: "-1" }),
       group("partner", { platform: "instagram", partnerTelegramId: "555" }),
       group("manual", { platform: "facebook", status: "paid" }),
+      group("ads-only", { platform: "facebook", status: "new", ads: "allowed" }),
       group("asked", { status: "contacted" }),
       group("declined", { status: "declined" }),
       group("sleepy", { activity: "inactive", botConnected: true, postingEnabled: true, chatId: "-2" }),
