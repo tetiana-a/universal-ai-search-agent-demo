@@ -1,5 +1,5 @@
 import { campaignCard } from "@/lib/scout/campaigns-bot";
-import { createCampaign, type Campaign } from "@/lib/scout/campaigns";
+import { createCampaign, ruleCampaign, type Campaign } from "@/lib/scout/campaigns";
 import { deleteValue, getValue, putOne, setValue } from "@/lib/scout/store";
 import { answerCallback, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, nowIso } from "@/lib/scout/text";
@@ -26,8 +26,10 @@ const PLATFORM_BUTTONS: Keyboard = [
     { text: "📘 Facebook", callback_data: "aw:platforms:fb" },
   ],
   [
-    { text: "✈️ Telegram + 📘 Facebook", callback_data: "aw:platforms:tgfb" },
+    { text: "📷 Instagram", callback_data: "aw:platforms:ig" },
+    { text: "🎵 TikTok", callback_data: "aw:platforms:tt" },
   ],
+  [{ text: "✈️ Telegram + 📘 Facebook", callback_data: "aw:platforms:tgfb" }],
   [{ text: "🌐 Все 4 платформы", callback_data: "aw:platforms:all" }],
   ...CANCEL,
 ];
@@ -83,8 +85,12 @@ async function finish(chatId: string, ownerId: string, draft: Draft, platforms: 
         const { campaign } = await createCampaign(prompt, "text", ownerId, draft.photo);
         // Never let an AI paraphrase or alter the owner's ad, price, contacts,
         // target geography, selected platforms or omit the preview gate.
+        const localTopic = ruleCampaign(draft.adText || "").topic;
         const reviewed: Campaign = {
           ...campaign,
+          // When AI is unavailable, the search topic must come from the ad,
+          // not from generic words such as "разместить рекламное объявление".
+          topic: /размест|реклам|объявлен/i.test(campaign.topic) ? localTopic : campaign.topic,
           region: draft.region || "",
           adText: draft.adText || "",
           platforms,
@@ -162,7 +168,7 @@ export async function adWizardButton(chatId: string, ownerId: string, callbackId
     await answerCallback(callbackId, "Сначала заполните объявление");
     return {};
   }
-  const selected = ({ tg: ["telegram"], fb: ["facebook"], tgfb: ["telegram", "facebook"], all: ["telegram", "facebook", "instagram", "tiktok"] } as Record<string, Platform[]>)[choice];
+  const selected = ({ tg: ["telegram"], fb: ["facebook"], ig: ["instagram"], tt: ["tiktok"], tgfb: ["telegram", "facebook"], all: ["telegram", "facebook", "instagram", "tiktok"] } as Record<string, Platform[]>)[choice];
   if (!selected) {
     await answerCallback(callbackId, "Неизвестная платформа");
     return {};
