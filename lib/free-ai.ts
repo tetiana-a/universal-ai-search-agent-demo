@@ -114,9 +114,10 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
 
   // Strict zero-cost mode must never fall through to a provider whose selected
   // model could become billable. Deterministic extraction remains the fallback.
-  if (zeroCost) return out;
-
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
+  // A Google AI Studio key without billing only has the free tier, and the same key already powers
+  // Gemini search, so zero-cost mode keeps it unless ZERO_COST_GEMINI=off.
+  if (zeroCost && (!geminiKey || process.env.ZERO_COST_GEMINI === "off")) return out;
   if (geminiKey) {
     out.push({
       id: "gemini",
@@ -126,6 +127,7 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
     });
   }
+  if (zeroCost) return out;
 
   const groqKey = String(process.env.GROQ_API_KEY || "").trim();
   if (groqKey) {
@@ -169,8 +171,10 @@ export async function runStructuredExtraction(options: {
   deadlineAt: number;
   maxTokens: number;
   perCallTimeoutMs: number;
+  // Provider to try first (e.g. Gemini for short structured tasks the free OpenRouter models often truncate).
+  prefer?: AiProviderId;
 }): Promise<AiExtraction> {
-  const providers = configuredAiProviders(options.edition || "free");
+  const providers = configuredAiProviders(options.edition || "free").sort((a, b) => Number(b.id === options.prefer) - Number(a.id === options.prefer));
   const attempts: AiAttempt[] = [];
   if (!providers.length) {
     return { parsed: null, usage: null, attempts, error: "No eligible AI provider is configured; results were extracted by rules and need manual review." };
