@@ -8,7 +8,7 @@ export function publicDashboardEnabled() {
 }
 
 export function adminKeyConfigured() {
-  return !publicDashboardEnabled() && Boolean(String(process.env.SCOUT_ADMIN_KEY || "").trim());
+  return Boolean(String(process.env.SCOUT_ADMIN_KEY || "").trim());
 }
 
 function same(a: string, b: string) {
@@ -17,20 +17,22 @@ function same(a: string, b: string) {
   return A.length === B.length && timingSafeEqual(A, B);
 }
 
+// Fail closed for CRM/API data and all mutations, including on demo deployments.
+// Public pages may remain visible; a public flag never grants access to private API state.
 export function isAuthorized(request: Request) {
-  if (publicDashboardEnabled()) return true;
   const key = String(process.env.SCOUT_ADMIN_KEY || "").trim();
-  if (!key) return true;
+  if (!key) return false;
   const given = request.headers.get("x-scout-key") || "";
   return Boolean(given) && same(given, key);
 }
 
 // Vercel Cron sends "Authorization: Bearer $CRON_SECRET" when CRON_SECRET is set.
+// A forged User-Agent must never start campaigns. Vercel supplies a Bearer
+// CRON_SECRET header when the secret is configured in the project environment.
 export function isCronRequest(request: Request) {
   const secret = String(process.env.CRON_SECRET || "").trim();
-  const auth = request.headers.get("authorization") || "";
-  if (secret) return same(auth, "Bearer " + secret) || (adminKeyConfigured() && isAuthorized(request));
-  return /vercel-cron/i.test(request.headers.get("user-agent") || "") || (adminKeyConfigured() && isAuthorized(request));
+  if (!secret) return false;
+  return same(request.headers.get("authorization") || "", "Bearer " + secret);
 }
 
 export function unauthorized() {

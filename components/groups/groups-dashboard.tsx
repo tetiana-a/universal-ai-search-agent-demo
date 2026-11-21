@@ -96,7 +96,27 @@ export default function GroupsDashboard() {
 
   const saveKey = () => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); };
   const s = state?.summary;
-  const exportHref = "/api/groups/export" + (key ? "?key=" + encodeURIComponent(key) : "");
+
+  // Download through an authenticated fetch. Never put access keys in URLs.
+  const downloadGroups = async () => {
+    try {
+      const response = await fetch("/api/groups/export", { headers: headers(), cache: "no-store" });
+      if (!response.ok) { setToast("Экспорт недоступен: проверьте ключ доступа."); return; }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      try {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = "aurelius-groups-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      setToast("Ошибка загрузки Excel.");
+    }
+  };
 
   return (
     <main className="scout-ui relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] spectrum-shell">
@@ -137,7 +157,7 @@ export default function GroupsDashboard() {
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Ищем публичные Telegram-группы и каналы и публичные Facebook-группы. Участники и правила берутся с открытых страниц групп.</p>
         </Panel>
 
-        <Panel title={"2. База групп · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button href={exportHref}><Download size={13} />Excel</Button></>}>
+        <Panel title={"2. База групп · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button></>}>
           {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Пока пусто. Запустите поиск выше.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
@@ -191,7 +211,7 @@ export default function GroupsDashboard() {
           )}
         </Panel>
 
-        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button href={exportHref}><Download size={13} />Excel</Button>}>
+        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button>}>
           {!state?.posts.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Публикаций пока нет.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-[12px]">

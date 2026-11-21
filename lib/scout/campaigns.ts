@@ -294,7 +294,9 @@ export function modeFor(g: GroupCard): TaskMode | null {
   if (g.platform === "telegram" && g.botConnected && g.postingEnabled && g.chatId) return "bot";
   const agreed = ["free", "exchange", "paid"].includes(g.status);
   if (g.partnerTelegramId && agreed) return "partner";
-  if (agreed || g.ads === "allowed") return "manual";
+  // A page advertising "ads allowed" is NOT proof that this client was authorized.
+  // Human-approved status is needed before a placement can be counted or planned.
+  if (agreed) return "manual";
   return null; // no permission yet: outreach first
 }
 
