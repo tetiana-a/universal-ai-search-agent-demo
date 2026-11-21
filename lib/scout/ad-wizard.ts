@@ -39,7 +39,7 @@ const LABELS: Record<Platform, string> = {
 
 export function isAdPostingIntent(text: string) {
   const t = text.toLowerCase();
-  const action = /размест|размещ|опублику|публику|розміст|опубліку|пошир|(?:^|\s)(?:publish|post|publicar)\b/iu.test(t);
+  const action = /размест|размещ|опубликов|опублику|публиков|публику|розміст|опубліку|пошир|(?:^|\s)(?:publish|post|publicar)\b/iu.test(t);
   const advert = /объявлен|оголошен|реклам|анонс|(?:^|\s)пост(?:\s|[.,!?:]|$)|\badvert(?:isement)?\b|\bad\b|\banuncio\b/iu.test(t);
   return action && advert;
 }
