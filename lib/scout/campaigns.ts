@@ -40,7 +40,7 @@ export type Campaign = {
   createdAt: string;
   updatedAt: string;
   approvedAt?: string;
-  found?: { total: number; core: number; adjacent: number; inactive: number; at: string };
+  found?: { total: number; core: number; adjacent: number; inactive: number; at: string; notes?: string[] };
 };
 
 export type TaskMode = "bot" | "partner" | "manual";
@@ -249,10 +249,15 @@ export function searchPlan(c: Campaign, maxRuns = Number(process.env.CAMPAIGN_SE
   const adjacent = c.adjacent;
   // Interleave: most of the budget on the topic, at least a third on adjacent audiences.
   const adjacentRuns = adjacent.length ? Math.max(1, Math.round(maxRuns / 3)) : 0;
-  return [
-    ...core.slice(0, maxRuns - Math.min(adjacentRuns, adjacent.length)).map((topic) => ({ topic, relevance: "core" as const })),
-    ...adjacent.slice(0, adjacentRuns).map((topic) => ({ topic, relevance: "adjacent" as const })),
-  ];
+  const coreList = core.slice(0, maxRuns - Math.min(adjacentRuns, adjacent.length)).map((topic) => ({ topic, relevance: "core" as const }));
+  const adjList = adjacent.slice(0, adjacentRuns).map((topic) => ({ topic, relevance: "adjacent" as const }));
+  // Interleaved (core, core, adjacent, …) so a run cut short by the time limit still covers both kinds.
+  const out: Array<{ topic: string; relevance: "core" | "adjacent" }> = [];
+  while (coreList.length || adjList.length) {
+    out.push(...coreList.splice(0, 2));
+    out.push(...adjList.splice(0, 1));
+  }
+  return out;
 }
 
 export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_000) {
@@ -263,8 +268,9 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const plan = searchPlan(c);
   const seen = new Map<string, GroupCard>();
   const notes = new Set<string>();
-  for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 2) {
-    const batch = plan.slice(i, i + 2);
+  // One query at a time: the free Gemini tier allows only a few requests a minute.
+  for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 1) {
+    const batch = plan.slice(i, i + 1);
     const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0] }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
     for (const r of results) {
       if (!r) continue;
@@ -273,7 +279,7 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
     }
   }
   const all = [...seen.values()];
-  const found = { total: all.length, core: all.filter((g) => g.relevance !== "adjacent").length, adjacent: all.filter((g) => g.relevance === "adjacent").length, inactive: all.filter((g) => g.activity === "inactive").length, at: nowIso() };
+  const found = { notes: [...notes].slice(0, 3), total: all.length, core: all.filter((g) => g.relevance !== "adjacent").length, adjacent: all.filter((g) => g.relevance === "adjacent").length, inactive: all.filter((g) => g.activity === "inactive").length, at: nowIso() };
   const fresh = (await getOne<Campaign>("campaigns", id)) || c;
   const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, updatedAt: nowIso() };
   await putOne("campaigns", next);
