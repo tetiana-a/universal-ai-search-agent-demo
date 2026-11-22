@@ -176,6 +176,8 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
 
       <Section title="Площадка партнёра или по договорённости" icon={Plus} color="#30d158">
         {data.partnerLink && <p className="mb-2 text-sm opacity-80">Ссылка для админов, чтобы подключиться самим: <a className="underline" href={data.partnerLink} target="_blank" rel="noreferrer">{data.partnerLink}</a>. Заявка придёт вам в бот на подтверждение.</p>}
+        {/* Telega.in and Collabstr have no open API: deals are made on their sites, then the agreed place is added below. */}
+        <p className="mb-2 text-sm opacity-80">Платные размещения вручную: <a className="underline" href="https://telega.in/" target="_blank" rel="noreferrer">Telega.in</a> (Telegram-каналы) и <a className="underline" href="https://collabstr.com/" target="_blank" rel="noreferrer">Collabstr</a> (Instagram и TikTok-авторы). Договоритесь там, затем добавьте площадку ниже, а в поле согласия укажите номер заказа.</p>
         <div className="grid gap-2 sm:grid-cols-[2fr_1.2fr_90px_90px_2fr_auto]">
           <input className={inputClass} placeholder="Ссылка: t.me / facebook / instagram / tiktok" value={place.url} onChange={(e) => setPlace({ ...place, url: e.target.value })} />
           <input className={inputClass} placeholder="Telegram ID админа-партнёра" value={place.partnerTelegramId} onChange={(e) => setPlace({ ...place, partnerTelegramId: e.target.value })} />

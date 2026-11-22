@@ -1334,3 +1334,19 @@ html.light :is(h1, h2, .font-display, .scout-panel-title, .scout-kpi-value):not(
 /* Room for the site dock (components/site-chrome.tsx) so it never covers the end of a page. */
 body { padding-bottom: 72px; }
 .site-dock { max-width: calc(100vw - 16px); }
+
+/* "Write to the developer": small floating Telegram button on every page. */
+.dev-chat { transition: transform .25s ease, padding .3s ease; animation: float-in .6s ease; }
+.dev-chat:hover { transform: translateY(-2px); padding-right: .9rem; }
+.dev-chat-ring {
+  background: conic-gradient(from 0deg, #ffd60a, #ff9500, #34c759, #00c7be, #0a84ff, #af52de, #ffd60a);
+  animation: dev-chat-spin 6s linear infinite;
+  position: relative;
+}
+.dev-chat-ring::after { content: ""; position: absolute; inset: 2px; border-radius: 9999px; background: var(--surface-strong); }
+.dev-chat-icon { position: relative; z-index: 1; animation: spectrum-icon-color 8s linear infinite, dev-chat-spin 6s linear infinite reverse; }
+.dev-chat-label { max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; transition: max-width .35s ease, opacity .3s ease; }
+.dev-chat:hover .dev-chat-label, .dev-chat:focus-visible .dev-chat-label { max-width: 190px; opacity: 1; }
+@keyframes dev-chat-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dev-chat, .dev-chat-ring, .dev-chat-icon { animation: none; } }
+@media (max-width: 640px) { .dev-chat { bottom: 4.5rem; right: .75rem; } }

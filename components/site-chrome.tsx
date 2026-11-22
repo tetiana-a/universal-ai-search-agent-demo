@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Compass, Moon, Pause, Radio, Sparkles, Sun, Users, Telescope } from "lucide-react";
+import { Compass, Moon, Pause, Radio, Send, Sparkles, Sun, Users, Telescope } from "lucide-react";
 
 // One site-wide shell (mounted in the root layout, so it survives page changes):
 // theme, the single radio <audio> element and the dock to switch Главная → Группы → Scout.
@@ -33,6 +33,10 @@ export function Atmosphere() {
   const { playing } = useSite();
   return <div className={"music-atmosphere pointer-events-none fixed inset-0 z-0 " + (playing ? "is-live" : "")} aria-hidden="true" />;
 }
+
+// Developer's Telegram; NEXT_PUBLIC_DEVELOPER_TELEGRAM in Vercel can change it without code.
+const DEV_TG = String(process.env.NEXT_PUBLIC_DEVELOPER_TELEGRAM || "tetiana_K888").trim().replace(/^@/, "").replace(/^https?:\/\/t\.me\//, "");
+const DEV_LINK = /^[a-z0-9_]{4,32}$/i.test(DEV_TG) ? "https://t.me/" + DEV_TG : "https://tetianakotolup.com/";
 
 const TABS = [
   { href: "/", label: "Главная", icon: Sparkles },
@@ -106,6 +110,11 @@ export default function SiteChrome({ children }: Readonly<{ children: ReactNode 
           <span className="hidden max-w-[110px] truncate sm:inline">{playing ? station?.name || "Радио" : "Радио"}</span>
         </button>
       </nav>
+      <a href={DEV_LINK} target="_blank" rel="noreferrer" className="dev-chat fixed bottom-4 right-4 z-[60] inline-flex h-10 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] pl-1 pr-1 text-[13px] text-[var(--text)] shadow-2xl backdrop-blur-xl"
+        aria-label="Написать разработчику в Telegram" title="Написать разработчику">
+        <span className="dev-chat-ring grid h-8 w-8 place-items-center rounded-full"><Send size={14} className="dev-chat-icon" /></span>
+        <span className="dev-chat-label">Написать разработчику</span>
+      </a>
     </SiteContext.Provider>
   );
 }

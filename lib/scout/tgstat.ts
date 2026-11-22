@@ -1,3 +1,4 @@
+import { isQuotaStatus, pauseProvider, providerPaused } from "@/lib/scout/provider-quota";
 // Optional paid TGStat API search; provider documentation:
 // https://api.tgstat.ru/docs/ru/channels/search.html
 // Never enabled implicitly: some channel-search methods require API Stat S+.
@@ -41,6 +42,7 @@ export async function tgStatSearch(topic: string, country: string): Promise<TgSt
   const c = tgStatCountry(country);
   const q = String(topic || "").trim().slice(0, 100);
   if (!c || q.length < 3) return { ok: false, urls: [], source: "tgstat", error: "COUNTRY_OR_QUERY_NOT_SUPPORTED" };
+  if (await providerPaused("tgstat")) return { ok: false, urls: [], source: "tgstat", error: "TGSTAT_LIMIT_PAUSED" };
   const uri = new URL("https://api.tgstat.ru/channels/search");
   uri.searchParams.set("token", String(process.env.TGSTAT_TOKEN).trim());
   uri.searchParams.set("q", q);
@@ -49,6 +51,7 @@ export async function tgStatSearch(topic: string, country: string): Promise<TgSt
   uri.searchParams.set("limit", "20");
   try {
     const response = await fetch(uri.toString(), { signal: AbortSignal.timeout(10000), cache: "no-store" });
+    if (isQuotaStatus(response.status)) { await pauseProvider("tgstat", "HTTP " + response.status); return { ok:false, urls:[], source:"tgstat", error:"TGSTAT_LIMIT_PAUSED" }; }
     if (!response.ok) return { ok:false, urls:[], source:"tgstat", error:"TGSTAT_HTTP_"+response.status };
     const json = await response.json();
     if (json?.status !== "ok") return { ok:false, urls:[], source:"tgstat", error:"TGSTAT_API_ERROR" };
