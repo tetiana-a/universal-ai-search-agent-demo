@@ -1,0 +1,123 @@
+{
+  "name": "AURELIUS — daily campaign report (READ ONLY, no posting)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "aurelius-schedule",
+      "name": "Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/campaigns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "aurelius-read",
+      "name": "Read AURELIUS campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $input.first().json;\nif (!root || root.ok === false) throw new Error('AURELIUS API returned an error');\nconst campaigns = Array.isArray(root.campaigns) ? root.campaigns : [];\nconst tasks = Array.isArray(root.tasks) ? root.tasks : [];\nconst cap = root.capacity || {};\nconst date = new Date().toISOString().slice(0,10);\nconst verified = tasks.filter(t => t.status === 'verified' || t.status === 'sent').length;\nconst failed = tasks.filter(t => t.status === 'failed').length;\nconst active = campaigns.filter(c => c.status === 'approved').length;\nconst lines = [\n  'AURELIUS — ежедневный отчёт ' + date,\n  'Кампаний: ' + campaigns.length + ', активных: ' + active,\n  'Плановая цель: ' + (cap.target || 0) + '/день',\n  'Заданий в выдаче API: ' + tasks.length,\n  'Отправлено/подтверждено: ' + verified,\n  'Ошибок: ' + failed,\n  '',\n  'Внимание: отправлено Telegram-ботом ≠ подтверждено на внешней площадке.',\n  'Не запускайте публикации без согласия администратора.'\n];\nreturn [{json:{text:lines.join('\\\\n')}}];"
+      },
+      "id": "aurelius-report",
+      "name": "Build safe summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "REPLACE_WITH_OWNER_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "disableWebPagePreview": true
+        }
+      },
+      "id": "aurelius-telegram",
+      "name": "Send owner report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        970,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 09:00": {
+      "main": [
+        [
+          {
+            "node": "Read AURELIUS campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read AURELIUS campaigns": {
+      "main": [
+        [
+          {
+            "node": "Build safe summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build safe summary": {
+      "main": [
+        [
+          {
+            "node": "Send owner report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "active": false,
+  "tags": [],
+  "meta": {
+    "description": "Optional READ-ONLY daily report. Credentials must be linked manually after import. No publishing, mass messaging or new Telegram webhook."
+  }
+}
