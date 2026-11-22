@@ -37,14 +37,19 @@ export type ResearchLearningInput = {
   sourceRegistry?: Array<any>;
   results?: Array<any>;
   stats?: Record<string, any>;
+  origin?: "web" | "telegram";
 };
 
 const SOURCE_INDEX_KEY = "aurelius:memory:source-index:v1";
 const SEARCH_HISTORY_KEY = "aurelius:memory:search-history:v1";
 const LEARNED_TASK_PREFIX = "aurelius:memory:learned-task:v1:";
+const RUN_PREFIX = "aurelius:memory:run:v1:";
+const HISTORY_LIMIT = 2000;
+const RUN_TTL = 365 * 86_400;
 
 const localSources = new Map<string, SourceMemoryRecord>();
 const localHistory: any[] = [];
+const localRuns = new Map<string, any>();
 
 function redisUrl() {
   return process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
@@ -205,7 +210,7 @@ export function healthFor(source: Pick<SourceMemoryRecord, "consecutiveFailures"
   return source.successfulChecks > 0 ? "healthy" : "unknown";
 }
 
-async function loadAllSources(): Promise<SourceMemoryRecord[]> {
+export async function loadAllSources(): Promise<SourceMemoryRecord[]> {
   if (!persistentMemoryConfigured()) return Array.from(localSources.values());
 
   const ids = await redisCommand<string[]>("SMEMBERS", [SOURCE_INDEX_KEY]);
@@ -249,14 +254,34 @@ async function appendSearchHistory(entry: any) {
   const record = JSON.stringify(entry);
   if (!persistentMemoryConfigured()) {
     localHistory.unshift(entry);
-    localHistory.splice(200);
+    localHistory.splice(HISTORY_LIMIT);
     return;
   }
 
   await redisPipeline([
     ["LPUSH", SEARCH_HISTORY_KEY, record],
-    ["LTRIM", SEARCH_HISTORY_KEY, 0, 199],
+    ["LTRIM", SEARCH_HISTORY_KEY, 0, HISTORY_LIMIT - 1],
   ]);
+}
+
+// Every finished search, newest first (summary rows; full results via readRun).
+export async function readSearchHistory(limit = HISTORY_LIMIT): Promise<any[]> {
+  if (!persistentMemoryConfigured()) return localHistory.slice(0, limit);
+  const rows = await redisCommand<string[]>("LRANGE", [SEARCH_HISTORY_KEY, 0, limit - 1]);
+  return (Array.isArray(rows) ? rows : []).map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+}
+
+// Full snapshot of one search (query, counters, results, sources) kept for a year.
+async function saveRun(id: string, run: any) {
+  if (!persistentMemoryConfigured()) { localRuns.set(id, run); return; }
+  await redisCommand("SET", [RUN_PREFIX + id, JSON.stringify(run), "EX", RUN_TTL]);
+}
+
+export async function readRun(id: string) {
+  if (!id) return null;
+  if (!persistentMemoryConfigured()) return localRuns.get(id) || null;
+  const raw = await redisCommand<string>("GET", [RUN_PREFIX + id]);
+  try { return raw ? JSON.parse(raw) : null; } catch { return null; }
 }
 
 async function wasTaskLearned(taskId: string) {
@@ -331,10 +356,6 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
   const results = Array.isArray(input.results) ? input.results : [];
   const stats = input.stats || {};
 
-  const existing = await loadAllSources();
-  const byId = new Map(existing.map((source) => [source.id, source]));
-  let learnedSources = 0;
-
   // Collapse a run's registry to one entry per domain; the best access outcome wins.
   const statusRank = (item: any) => {
     const status = String(item?.accessStatus || item?.access_status || "partial");
@@ -347,6 +368,42 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
     const previous = perDomain.get(domain);
     if (!previous || statusRank(item) < statusRank(previous)) perDomain.set(domain, item);
   }
+
+  const runId = taskId || "R-" + Date.now().toString(36).toUpperCase();
+  const domains = Array.from(perDomain.keys());
+  const entry = {
+    id: runId,
+    taskId,
+    query,
+    origin: input.origin || "web",
+    createdAt: now,
+    results: results.length,
+    verified: results.filter((result) => String(result?.status || "").toLowerCase() === "verified").length,
+    duplicatesRemoved: Number(stats.duplicatesRemoved || 0),
+    qualified: Number(stats.qualified ?? results.length),
+    sourceCount: registry.length,
+    sourcesFound: Number(stats.sourcesFound ?? registry.length),
+    sourcesChecked: Number(stats.sourcesChecked ?? 0),
+    pagesProcessed: Number(stats.pagesProcessed ?? 0),
+    failedSources: Array.from(perDomain.values()).filter((item) => FAILED_ACCESS.has(String(item?.accessStatus || item?.access_status || ""))).length,
+    topDomains: domains.slice(0, 8),
+    persistent: persistentMemoryConfigured(),
+  };
+  // Archive first: callers race this function against a short timeout.
+  // shortcut: results capped at 300 per run to keep one Redis value small; raise if runs grow.
+  await Promise.all([
+    appendSearchHistory(entry),
+    saveRun(runId, { ...entry, stats, results: results.slice(0, 300), sourceRegistry: registry.slice(0, 200) }),
+    import("@/lib/scout/store").then(({ logAction }) => logAction({
+      actor: input.origin === "telegram" ? "bot" : "human",
+      action: "research.saved",
+      detail: query.slice(0, 120) + " → " + results.length + " результатов, " + registry.length + " источников",
+    })).catch(() => undefined),
+  ]);
+
+  const existing = await loadAllSources();
+  const byId = new Map(existing.map((source) => [source.id, source]));
+  let learnedSources = 0;
 
   for (const item of perDomain.values()) {
     const candidate = sourceFromRegistry(item, query);
@@ -404,21 +461,11 @@ export async function recordResearchLearning(input: ResearchLearningInput) {
 
   const learned = Array.from(byId.values());
   await saveSources(learned);
-  await appendSearchHistory({
-    taskId,
-    query,
-    createdAt: now,
-    results: results.length,
-    verified: results.filter((result) => String(result?.status || "").toLowerCase() === "verified").length,
-    duplicatesRemoved: Number(stats.duplicatesRemoved || 0),
-    qualified: Number(stats.qualified || results.length),
-    sourceCount: registry.length,
-    persistent: persistentMemoryConfigured(),
-  });
+
 
   if (taskId) await markTaskLearned(taskId);
 
-  return { persisted: persistentMemoryConfigured(), skipped: false, learnedSources };
+  return { persisted: persistentMemoryConfigured(), skipped: false, learnedSources, runId };
 }
 
 export async function getMemoryHealth() {

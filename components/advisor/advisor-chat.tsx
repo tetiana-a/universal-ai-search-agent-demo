@@ -12,6 +12,8 @@ type Turn = { role: "user" | "advisor"; text: string; at?: string };
 const KEY_STORAGE = "aurelius-scout-key";
 const inputClass = "scout-input w-full rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--line)]";
 const SUGGESTIONS = [
+  "Проанализируй работу платформы по реальным данным: что работает, где ошибки и слабые места?",
+  "Составь план роста на 30 дней с целями в цифрах и первыми шагами.",
   "Как упаковать виллу на Бали для русскоязычных инвесторов?",
   "Как поднять цену ретрита и не потерять доверие учеников?",
   "Какие сообщества лучше всего подходят для моей рекламы и как договориться с админами?",
@@ -145,7 +147,7 @@ export default function AdvisorChat() {
         <header>
           <Link href="/" className="brand-mark font-display text-[24px] tracking-[.19em]">AURELIUS</Link>
           <h1 className="mt-1 flex items-center gap-2 text-[18px] font-light"><Compass size={16} style={{ color: "#bf5af2" }} />Личный советник</h1>
-          <p className="text-[12px] text-[var(--text-muted)]">Недвижимость и инвестиции · ретриты и духовный бизнес · маркетинг и сообщества · партнёрства. Помнит беседу; тот же разговор доступен в Telegram: /advisor.</p>
+          <p className="text-[12px] text-[var(--text-muted)]">Аналитик и стратег платформы (видит реальные метрики, поиски и журнал) · недвижимость и инвестиции · ретриты и духовный бизнес · маркетинг и сообщества. Помнит беседу; тот же разговор доступен в Telegram: /advisor.</p>
         </header>
 
         {needKey && (
