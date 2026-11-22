@@ -8,7 +8,7 @@ import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
 import { deleteValue, getOne, getValue, listAll, logAction, putOne, setValue } from "@/lib/scout/store";
 import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingCriteria, listRecentResearchTasks, loadTask, startFreshDialog, startResearch, statusKeyboard, statusText } from "@/lib/scout/research-bot";
-import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
+import { answerCallback, controlIds, editMessage, isOpenGroup, isOwnersGroupAdmin, reportChatId, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
 import { fullExportXlsx, handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
@@ -63,6 +63,7 @@ function commandOf(text: string) {
 async function isControl(chatId: string, userId: string, chatType?: string) {
   const ids = controlIds();
   if (ids.has(chatId) || ids.has(userId)) return true;
+  if (await isOwnersGroupAdmin(chatId, userId, chatType)) return true;
   return isOpenGroup(chatId, chatType);
 }
 
@@ -887,7 +888,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       await sendMessage(chatId, "Откройте вашу тестовую группу и отправьте /connect прямо в ней.");
       return {};
     }
-    if (!controlIds().has(userId)) {
+    if (!controlIds().has(userId) && !(await isOwnersGroupAdmin(chatId, userId, String(message.chat?.type || "")))) {
       await sendMessage(chatId, "⛔ Только владелец агентa может подключать группы.");
       return {};
     }

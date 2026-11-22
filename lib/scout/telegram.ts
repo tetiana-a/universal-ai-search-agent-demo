@@ -28,6 +28,26 @@ export function openGroupIds() {
   return new Set(splitIds(process.env.TELEGRAM_OPEN_GROUP_IDS));
 }
 
+// In a group the owner created, every admin the owner appointed gets the owner's
+// rights, so a new admin works at once without adding ids in Vercel.
+// Admin lists are cached for 10 minutes to keep one Bot API call per group.
+export async function isOwnersGroupAdmin(chatId: string, userId: string, chatType?: string) {
+  if (!userId || !chatId || chatType === "private" || chatType === "channel" || !chatId.startsWith("-")) return false;
+  const key = "tg-admins:" + chatId;
+  let cached = await getValue<{ creator: string; admins: string[] }>(key);
+  if (!cached) {
+    const res = await tgCall("getChatAdministrators", { chat_id: chatId });
+    if (!res?.ok || !Array.isArray(res.result)) return false;
+    const humans = res.result.filter((m: any) => !m?.user?.is_bot);
+    cached = {
+      creator: String(humans.find((m: any) => m.status === "creator")?.user?.id || ""),
+      admins: humans.map((m: any) => String(m?.user?.id || "")).filter(Boolean),
+    };
+    await setValue(key, cached, 600);
+  }
+  return Boolean(cached.creator) && controlIds().has(cached.creator) && cached.admins.includes(userId);
+}
+
 // When open group access is enabled, either explicitly listed groups or the report group
 // are shared workspaces: every human member can use commands/buttons with the same rules.
 export async function isOpenGroup(chatId: string, chatType?: string) {
