@@ -1,0 +1,108 @@
+{
+  "name": "AURELIUS — Postiz safe content draft (no public posting)",
+  "nodes": [
+    {
+      "name": "Manual start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {},
+      "id": "start"
+    },
+    {
+      "id": "draft-params",
+      "name": "OWNER: fill integration and draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        475,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// FIRST: run the Postiz channel-check workflow and copy one allowed integrationId.\n// SECOND: replace these placeholders with your harmless test post.\nconst integrationId = 'REPLACE_WITH_POSTIZ_INTEGRATION_ID';\nconst content = 'Test post AURELIUS. This is a harmless preview, not a real advertisement.';\nconst region = 'Kraków, Poland';\nconst mediaUrl = ''; // Optional public HTTPS image URL\nif (integrationId.startsWith('REPLACE_')) throw new Error('Set integrationId from connected Postiz channels first');\nif (content.length < 10) throw new Error('Provide a meaningful draft');\nconst requestId = 'aurelius-' + Date.now().toString(36);\nreturn [{json:{action:'draft',integrationId,content,region,requestId,...(mediaUrl?{mediaUrl}:{})}}];"
+      }
+    },
+    {
+      "id": "create-draft",
+      "name": "Create private Postiz draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        730,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/scout/postiz",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      }
+    },
+    {
+      "id": "draft-confirm",
+      "name": "Show saved Postiz draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        985,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (!r.ok || !r.postId) throw new Error('Postiz did not confirm draft creation');\nreturn [{json:{postId:r.postId,channel:r.channel?.name || '',platform:r.channel?.identifier || '',state:'DRAFT ONLY - NOT PUBLISHED',createdAt:new Date().toISOString()}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Manual start": {
+      "main": [
+        [
+          {
+            "node": "OWNER: fill integration and draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OWNER: fill integration and draft": {
+      "main": [
+        [
+          {
+            "node": "Create private Postiz draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create private Postiz draft": {
+      "main": [
+        [
+          {
+            "node": "Show saved Postiz draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "tags": [],
+  "meta": {
+    "guide": "This workflow creates a DRAFT in a connected Postiz channel. It does not schedule or publish. Requires SCOUT_ADMIN_KEY credential."
+  }
+}
