@@ -272,7 +272,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       const requestId="tgig-"+userId+"-"+Date.now().toString(36);
       await sendMessage(chatId,"⏳ Проверяю Instagram и ставлю фото в расписание Postiz…");
       const result=await scheduleInstagram({ requestId, ownerId:userId, mediaUrl, caption:caption.join(" | "), scheduledAt })
-        .catch(()=>({ok:false,error:"INSTAGRAM_API_UNAVAILABLE"}));
+        .catch(()=>({ok:false,error:"INSTAGRAM_API_UNAVAILABLE",job:undefined}));
       await sendMessage(chatId,result.ok && result.job
         ? "✅ <b>Instagram запланирован автоматически</b>\nАккаунт: "+escapeHtml(result.job.channelName)+"\nДата: "+escapeHtml(result.job.scheduledAt)+"\nID: <code>"+escapeHtml(result.job.id)+"</code>\nЭто расписание, а не доказательство публикации. Проверить: /igstatus"
         : "⚠️ Instagram не запланирован: "+escapeHtml(result.error||"неизвестная ошибка")+"\nПроверьте /ighelp и настройки INSTAGRAM_AUTOPOST.");
@@ -781,7 +781,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     await sendMessage(chatId,"⏳ Загружаю вашу фотографию в Postiz и ставлю Instagram-публикацию в расписание…");
     return { background:async()=>{
       const result=await scheduleInstagram({requestId,ownerId:userId,telegramFileId:fileId,scheduledAt:parts[0],caption:parts[1]})
-        .catch(()=>({ok:false,error:"INSTAGRAM_API_UNAVAILABLE"}));
+        .catch(()=>({ok:false,error:"INSTAGRAM_API_UNAVAILABLE",job:undefined}));
       await sendMessage(chatId,result.ok && result.job
         ? "✅ <b>Instagram запланирован в Postiz</b>\nАккаунт: "+escapeHtml(result.job.channelName)+"\nДата: "+escapeHtml(result.job.scheduledAt)+"\nID: <code>"+escapeHtml(result.job.id)+"</code>\nПроверить: /igstatus"
         : "⚠️ Запланировать не удалось: "+escapeHtml(result.error||"ошибка")+"\nЕсли ответ не подтверждён, проверьте Postiz перед повторением.");
