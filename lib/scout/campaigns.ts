@@ -295,7 +295,7 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 1) {
     attempted += 1;
     const batch = plan.slice(i, i + 1);
-    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0] }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
+    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0], platforms: c.platforms }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
     for (const r of results) {
       if (!r) continue;
       r.notes.forEach((n) => notes.add(n));
