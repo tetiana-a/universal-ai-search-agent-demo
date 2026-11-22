@@ -286,7 +286,8 @@ export function searchPlan(c: Campaign, maxRuns = Number(process.env.CAMPAIGN_SE
 export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_000) {
   const c = await getOne<Campaign>("campaigns", id);
   if (!c) return null;
-  await putOne("campaigns", { ...c, status: "searching", updatedAt: nowIso() });
+  // An approved campaign keeps running while its base is refreshed (daily cron).
+  if (c.status !== "approved") await putOne("campaigns", { ...c, status: "searching", updatedAt: nowIso() });
   const place = splitRegion(c.region);
   const plan = searchPlan(c);
   const seen = new Map<string, GroupCard>();
@@ -306,7 +307,7 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const all = [...seen.values()];
   const found = { notes: [...notes].slice(0, 3), total: all.length, core: all.filter((g) => g.relevance !== "adjacent").length, adjacent: all.filter((g) => g.relevance === "adjacent").length, inactive: all.filter((g) => g.activity === "inactive").length, at: nowIso() };
   const fresh = (await getOne<Campaign>("campaigns", id)) || c;
-  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, searchGroupIds: all.map((g) => g.id), updatedAt: nowIso() };
+  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : fresh.status === "approved" ? "approved" : "ready", found, searchGroupIds: all.map((g) => g.id), updatedAt: nowIso() };
   await putOne("campaigns", next);
   await logAction({ actor: "agent", action: "campaign.search", detail: c.title + ": " + found.total + " сообществ (профильных " + found.core + ", смежных " + found.adjacent + ", неактивных " + found.inactive + ")" });
   return { campaign: next, groups: all, notes: [...notes], queries: attempted };

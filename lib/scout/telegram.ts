@@ -130,6 +130,21 @@ export async function sendDocument(chatId: string, filename: string, data: Buffe
   }
 }
 
+export async function sendVoice(chatId: string, mp3: Buffer, caption?: string) {
+  const token = botToken();
+  if (!token) return false;
+  const form = new FormData();
+  form.append("chat_id", await resolveChatId(chatId));
+  form.append("voice", new Blob([new Uint8Array(mp3)], { type: "audio/mpeg" }), "advisor.mp3");
+  if (caption) form.append("caption", caption.slice(0, 1000));
+  try {
+    const response = await fetch("https://api.telegram.org/bot" + token + "/sendVoice", { method: "POST", body: form, signal: AbortSignal.timeout(30000), cache: "no-store" });
+    return Boolean(((await response.json().catch(() => null)) as any)?.ok);
+  } catch {
+    return false;
+  }
+}
+
 export async function sendDirect(userId: string, text: string) {
   const result = await tgCall("sendMessage", { chat_id: userId, text: text.slice(0, 4096) });
   return Boolean(result?.ok);
@@ -150,6 +165,8 @@ export const BOT_COMMANDS = [
   { command: "campaigns", description: "Все кампании и прогресс за сегодня" },
   { command: "creport", description: "Отчёт за день" },
   { command: "capacity", description: "Ёмкость сети: сколько размещений в день" },
+  { command: "advisor", description: "Советник: разговор текстом или голосом" },
+  { command: "client", description: "Подобрать сообщества под клиента" },
   { command: "groups", description: "Найти сообщества: страна, город, тема" },
   { command: "find", description: "Найти что угодно" },
   { command: "status", description: "Что сейчас происходит" },

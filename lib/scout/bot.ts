@@ -14,6 +14,7 @@ import { collectOperationalHealth } from "@/lib/scout/health";
 import { fullExportXlsx, handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, campaignSummary, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer, partnerInviteLink, promptNewCampaign } from "@/lib/scout/campaigns-bot";
+import { ADVISOR_COMMANDS, advisorMode, handleAdvisorCallback, handleAdvisorCommand, handleAdvisorText, handleAdvisorVoice } from "@/lib/scout/advisor-bot";
 import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
 import { createPostizDraft, listPostizChannels, postizConfigured } from "@/lib/scout/postiz";
 import { cancelInstagramJob, listInstagramJobs, refreshInstagramJobs, scheduleInstagram } from "@/lib/scout/instagram-posts";
@@ -41,6 +42,9 @@ const HELP = [
   "",
   "📡 <b>Мониторинг и отчёты</b>",
   "Публикации по кампании, просмотры и ежедневный отчёт сюда.",
+  "",
+  "🧭 <b>Советник</b>",
+  "/advisor — разговор с экспертом по недвижимости, ретритам, маркетингу и партнёрствам. Голосом спросили — голосом ответит. /client — подобрать сообщества под клиента.",
   "",
   "<b>Главное</b>",
   "/campaign — новая кампания · /campaigns — все кампании",
@@ -588,6 +592,7 @@ async function handleCallback(query: any): Promise<BotResult> {
   const by = query.from?.username ? "@" + query.from.username : query.from?.first_name || userId;
   if (!(await isControl(chatId, userId, String(query.message?.chat?.type || "")))) { await answerCallback(query.id, "Нет доступа"); return {}; }
   const [kind, action, id] = data.split(":");
+  if (kind === "adv") { await answerCallback(query.id, "✓"); await handleAdvisorCallback(chatId, action); return {}; }
   if (kind === "menu") {
     await answerCallback(query.id, "✓");
     if (action === "find") {
@@ -810,6 +815,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     const chatId = String(message.chat?.id || "");
     const userId = String(message.from?.id || "");
     if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
+    if (await advisorMode(chatId)) return handleAdvisorVoice(chatId, voice.file_id);
     return handleVoice(chatId, voice.file_id, userId);
   }
   // Telegram owner photo with explicit time + caption -> Postiz media upload and
@@ -891,7 +897,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   }
 
   const control = await isControl(chatId, userId, String(message.chat?.type || ""));
-  if (!control && message.chat?.type === "private" && command && ["panel", "find", "search", "status", "tasks", "results", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health", ...GROUP_COMMANDS, ...CAMPAIGN_COMMANDS].includes(command.cmd)) {
+  if (!control && message.chat?.type === "private" && command && ["panel", "find", "search", "status", "tasks", "results", "report", "scan", "objects", "investors", "matches", "drafts", "leads", "sources", "watch", "comments", "stop", "forget", "meet", "settings", "health", ...GROUP_COMMANDS, ...CAMPAIGN_COMMANDS, ...ADVISOR_COMMANDS].includes(command.cmd)) {
     await sendMessage(chatId, "⛔ Нет доступа к панели управления. Отправьте /id и добавьте ваш <b>User ID</b> в TELEGRAM_ALLOWED_CHAT_IDS или SCOUT_ADMIN_TELEGRAM_IDS в Vercel.");
     return {};
   }
@@ -913,14 +919,19 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       return startAdWizard(chatId, userId);
     }
     if (command?.cmd === "cancel" && await cancelAdWizard(chatId, userId)) return {};
+    if (command && ADVISOR_COMMANDS.includes(command.cmd)) return handleAdvisorCommand(chatId, command.cmd, command.args);
     if (command) return handleCommand(chatId, userId, userName, command.cmd, command.args);
     if (message.chat?.type === "private") {
       const wizard = await advanceAdWizard(chatId, userId, String(message.text));
       if (wizard) return wizard;
-      if (isAdPostingIntent(String(message.text))) return startAdWizard(chatId, userId);
+      if (isAdPostingIntent(String(message.text)) && !(await advisorMode(chatId))) return startAdWizard(chatId, userId);
     }
     const answer = await maybeAnswer(chatId, String(message.text), userId);
     if (answer) return answer;
+    if (await advisorMode(chatId)) {
+      const asked = addressedText(message);
+      return asked ? handleAdvisorText(chatId, asked) : {};
+    }
     return handleResearchText(message, chatId, userId);
   }
 

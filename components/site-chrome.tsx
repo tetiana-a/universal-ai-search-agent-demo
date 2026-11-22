@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Moon, Pause, Radio, Sparkles, Sun, Users, Telescope } from "lucide-react";
+import { Compass, Moon, Pause, Radio, Sparkles, Sun, Users, Telescope } from "lucide-react";
 
 // One site-wide shell (mounted in the root layout, so it survives page changes):
 // theme, the single radio <audio> element and the dock to switch Главная → Группы → Scout.
@@ -38,6 +38,7 @@ const TABS = [
   { href: "/", label: "Главная", icon: Sparkles },
   { href: "/groups", label: "Группы", icon: Users },
   { href: "/scout", label: "Scout", icon: Telescope },
+  { href: "/advisor", label: "Советник", icon: Compass },
 ];
 
 export default function SiteChrome({ children }: Readonly<{ children: ReactNode }>) {
@@ -90,7 +91,7 @@ export default function SiteChrome({ children }: Readonly<{ children: ReactNode 
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
               className={"inline-flex h-8 items-center gap-1.5 rounded-full px-3 transition " + (active ? "bg-[var(--gold)]/15 text-[var(--gold-bright)]" : "text-[var(--text-soft)] hover:text-[var(--text)]")}>
-              <Icon size={14} />{label}
+              <Icon size={14} /><span className={active ? "" : "hidden sm:inline"}>{label}</span>
             </Link>
           );
         })}

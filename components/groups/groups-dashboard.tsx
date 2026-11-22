@@ -151,7 +151,7 @@ export default function GroupsDashboard() {
 
         {!needKey && state && <CampaignsPanel headers={headers} onToast={setToast} onExport={() => { void downloadGroups(); }} />}
 
-        <Panel title="1. Найти сообщества и профили" icon={Radar} color="#30d158">
+        <Panel title="1. Найти сообщества и профили" icon={Radar} color="#30d158" actions={<Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("profile", {}, "profile")}>{busy === "profile" ? "Подбираю… до 4 мин" : "✦ Подобрать под клиента"}</Button>}>
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_1fr_auto]">
             <input className={inputClass} placeholder="Страна" value={search.country} onChange={(e) => setSearch({ ...search, country: e.target.value })} />
             <input className={inputClass} placeholder="Город" value={search.city} onChange={(e) => setSearch({ ...search, city: e.target.value })} />
@@ -166,6 +166,7 @@ export default function GroupsDashboard() {
             <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("find", { country: search.country, city: search.city, topic: search.topic, broadPage, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find")}>{busy === "find" ? "Ищу… до 4 мин" : "Найти площадки"}</Button>
           </div>
           {broadSearch && <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--text-muted)]"><span>Обзор разных тематик · подборка {broadPage + 1} из 8</span><Button disabled={Boolean(busy)} onClick={() => { const next = (broadPage + 1) % 8; setBroadPage(next); void act("find", { country: search.country, city: search.city, topic: search.topic, broadPage: next, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find"); }}>Следующие категории</Button><span>Поиск открытых площадок, а не всех существующих групп интернета.</span></div>}
+          <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">«Подобрать под клиента» — недвижимость и инвестиции, ретриты и духовные практики, партнёры и инвесторы, плюс смежные аудитории (экспаты, предприниматели, wellness) в 10 регионах. База дальше пополняется и перепроверяется сама каждый день, а активные кампании — новыми группами по своим запросам.</p>
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Автопоиск: Telegram — группы и каналы; Facebook — группы; Instagram и TikTok — тематические публичные профили. Источник каждого результата виден по наведению на иконку. Профиль из поискового индекса ещё не подтверждает активность, число подписчиков или разрешение на рекламу.</p>
         </Panel>
 
