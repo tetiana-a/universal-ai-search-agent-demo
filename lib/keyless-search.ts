@@ -7,7 +7,7 @@ import { normalizeResultUrl } from "@/lib/result-quality";
 // self-hosted SearXNG (SEARXNG_URL) gives a more stable keyless backend.
 
 export type KeylessHit = { title: string; url: string; snippet: string; domain: string; provider: "duckduckgo" | "searxng" };
-export type KeylessOutcome = { provider: "duckduckgo" | "searxng"; ok: boolean; hits: KeylessHit[]; status?: "rate_limited" | "error"; httpStatus?: number; message?: string };
+export type KeylessOutcome = { provider: "duckduckgo" | "searxng"; ok: boolean; hits: KeylessHit[]; query?: string; status?: "rate_limited" | "error"; httpStatus?: number; message?: string };
 
 const USER_AGENT = "Mozilla/5.0 (compatible; AureliusResearchBot/2.1; +https://universal-ai-search-agent-demo.vercel.app)";
 
@@ -157,7 +157,7 @@ export async function runKeylessSearch(queries: string[], language = "en", deadl
     if (Date.now() > deadlineAt - 3000) break;
     for (const provider of providers) {
       const outcome = provider === "searxng" ? await searxngSearch(query, language) : await duckDuckGoSearch(query, language);
-      outcomes.push(outcome);
+      outcomes.push({ ...outcome, query });
       if (outcome.ok && outcome.hits.length) break; // next query
     }
     const throttled = outcomes.some((o) => o.provider === "duckduckgo" && o.status === "rate_limited");
