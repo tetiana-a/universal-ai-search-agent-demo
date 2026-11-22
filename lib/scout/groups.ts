@@ -1,5 +1,6 @@
 import { geminiSearch } from "@/lib/gemini-search";
 import { dataForSeoEnabled, dataForSeoSearch } from "@/lib/scout/dataforseo-groups";
+import { tgStatEnabled, tgStatSearch } from "@/lib/scout/tgstat";
 import { runKeylessSearch } from "@/lib/keyless-search";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
@@ -290,11 +291,12 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const notes: string[] = [];
   const queries = groupQueries(input);
   const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
-  const [paid, keyless] = await Promise.all([
+  const [paid, keyless, tgstat] = await Promise.all([
     dataForSeoEnabled()
       ? Promise.all([dataForSeoSearch(queries[0], input.country || "", polish ? "pl" : "en"), dataForSeoSearch(queries[2], input.country || "", polish ? "pl" : "en")])
       : Promise.resolve([]),
     runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 15_000)).catch(() => []),
+    tgStatEnabled() ? tgStatSearch(input.topic, input.country || "") : Promise.resolve({ok:false, urls:[], source:"tgstat" as const}),
   ]);
   for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
   const visibleHits = [...paid.flatMap((p) => p.hits), ...keyless.flatMap((k) => k.hits)];
@@ -308,6 +310,13 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   }
 
   const telegram = new Map<string, { snippet: string; trusted: boolean }>();
+  // TGStat provides candidate URLs, never platform posting permissions.
+  // Verify each candidate against Telegram public previews before saving.
+  if (tgstat.ok) for (const link of tgstat.urls) {
+    const url = normalizeTelegramUrl(link);
+    if (url) telegram.set(url, { snippet: "TGStat API: " + input.topic, trusted: true });
+  }
+  else if (tgStatEnabled() && tgstat.error) notes.push(tgstat.error);
   const facebook = new Map<string, { title: string; snippet: string }>();
   const otherPages: string[] = [];
   const hits = [...visibleHits, ...gemini.flatMap((g) => g.hits)] as Array<{ title: string; url: string; snippet: string }>;
