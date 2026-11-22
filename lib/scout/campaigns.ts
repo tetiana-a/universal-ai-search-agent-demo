@@ -628,7 +628,7 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
     const recent = instagram.slice(0, 6);
     const rows = recent.map(j=>j.channelName+" · "+j.status+
       (j.releaseURL ? " · "+j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
-    await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\\n"+rows.join("\\n"));
+    await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n"+rows.join("\n"));
   }
   return { plan, partners, bot };
 }
