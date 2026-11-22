@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Gauge, Megaphone, Mic, Play, Plus, Radio, Search, Square, X } from "lucide-react";
 import type { Campaign, CampaignTask, Mention } from "@/lib/scout/campaigns";
 import { isPolishWineCampaign } from "@/lib/scout/wine-compliance";
+import { startVoiceRecording } from "@/components/voice-recorder";
 
 // Campaigns (TZ 1.2): task → keywords approval → community search → daily placement → monitoring.
 // The same flow runs from Telegram by voice; this screen shows and controls it.
@@ -93,6 +94,8 @@ export default function CampaignsPanel({ headers, onToast }: Readonly<{ headers:
   const [data, setData] = useState<Data | null>(null);
   const [busy, setBusy] = useState("");
   const [task, setTask] = useState("");
+  const [mic, setMic] = useState<MediaRecorder | null>(null);
+  const [hearing, setHearing] = useState(false);
   const [place, setPlace] = useState({ url: "", partnerTelegramId: "", dailyLimit: "", minDaysBetween: "", permissionNote: "" });
 
   const load = useCallback(async () => {
@@ -119,10 +122,14 @@ export default function CampaignsPanel({ headers, onToast }: Readonly<{ headers:
   return (
     <>
       <Section title="Рекламные кампании" icon={Megaphone} color="#ff375f" actions={data.campaigns.some((c) => c.status === "approved") ? <Btn onClick={() => void act("stopAll", {}, "stopAll")}><Square size={12} />Остановить всё</Btn> : undefined}>
-        <textarea className={inputClass + " min-h-20"} placeholder="Задача обычным языком: что рекламируем, где, на каких площадках, сколько в день, текст объявления. Голосом — отправьте голосовое боту в Telegram." value={task} onChange={(e) => setTask(e.target.value)} />
+        <textarea className={inputClass + " min-h-20"} placeholder="Задача обычным языком: что рекламируем, где, на каких площадках, сколько в день, текст объявления. Можно голосом на любом языке." value={task} onChange={(e) => setTask(e.target.value)} />
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Btn variant="spectrum" disabled={task.trim().length < 10 || Boolean(busy)} onClick={async () => { const d = await act("create", { text: task }, "create"); if (d?.ok) setTask(""); }}><Plus size={12} />{busy === "create" ? "Разбираю…" : "Создать кампанию"}</Btn>
-          <span className="flex items-center gap-1 text-[11.5px] text-[var(--text-muted)]"><Mic size={12} />или голосовое боту</span>
+          <Btn disabled={hearing} onClick={async () => {
+            if (mic) { mic.stop(); setMic(null); return; }
+            setMic(await startVoiceRecording((t) => setTask((prev) => (prev ? prev + " " : "") + t), onToast, setHearing));
+          }}><Mic size={12} />{hearing ? "Распознаю…" : mic ? "Остановить запись" : "Сказать голосом"}</Btn>
+          <span className="text-[11.5px] text-[var(--text-muted)]">на любом языке · или голосовое боту в Telegram</span>
         </div>
         <div className="mt-3 space-y-2">{data.campaigns.map((c) => <CampaignEditor key={c.id + c.updatedAt} c={c} act={act} busy={busy} />)}</div>
       </Section>

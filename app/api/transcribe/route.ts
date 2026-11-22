@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { geminiTranscribe } from "@/lib/gemini-audio";
+import { geminiSearchKey } from "@/lib/gemini-search";
 
 export const runtime = "nodejs";
 
@@ -15,18 +17,6 @@ const ALLOWED = new Set([
 ]);
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          "OPENAI_API_KEY is not configured. The UI is ready; add the server-side key to enable real MP3 transcription.",
-      },
-      { status: 503 },
-    );
-  }
-
   const formData = await request.formData();
   const file = formData.get("file");
   const language = String(formData.get("language") || "");
@@ -47,6 +37,16 @@ export async function POST(request: Request) {
       { error: "Unsupported audio format." },
       { status: 415 },
     );
+  }
+
+  // Free Gemini first (any language, auto-detected); the paid OpenAI key only if Gemini is not configured.
+  if (geminiSearchKey()) {
+    const result = await geminiTranscribe(Buffer.from(await file.arrayBuffer()).toString("base64"), file.type || "audio/webm");
+    return result.ok ? NextResponse.json({ text: result.text, model: "gemini" }) : NextResponse.json({ error: result.message }, { status: 502 });
+  }
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: "Speech recognition needs GEMINI_API_KEY (free) or OPENAI_API_KEY." }, { status: 503 });
   }
 
   const upstream = new FormData();
