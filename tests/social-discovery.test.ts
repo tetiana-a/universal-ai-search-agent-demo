@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { findGroups, inferredSearchPlatforms, normalizeInstagramProfileUrl, normalizeTikTokProfileUrl, platformSearchQueries, type Platform } from "@/lib/scout/groups";
+import { BROAD_DISCOVERY_CATEGORIES, BROAD_DISCOVERY_PAGES, findGroups, inferredSearchPlatforms, isBroadDiscoveryTopic, normalizeInstagramProfileUrl, normalizeTikTokProfileUrl, platformSearchQueries, type Platform } from "@/lib/scout/groups";
 import { listGroups, postingTargets } from "@/lib/scout/groups";
 import { resetMemoryStore } from "@/lib/scout/store";
 import { json, mockFetch } from "./helpers";
@@ -26,10 +26,38 @@ describe("automatic multi-platform public discovery", () => {
       .toEqual(["telegram", "instagram", "tiktok"]);
     expect(inferredSearchPlatforms({ topic: "Квартиры в Instagram" })).toEqual(["instagram"]);
     expect(queries).toHaveLength(6);
-    expect(queries.find((q) => q.platform === "instagram")?.query).toContain("inmobiliaria pisos apartamentos");
+    expect(queries.find((q) => q.platform === "instagram")?.query).toContain("продажа квартир");
     expect(queries.find((q) => q.platform === "tiktok")?.query).toContain("TikTok");
     const defaultList = platformSearchQueries({ topic: "flowers", city: "Краков", country: "Польша" });
     expect(new Set(defaultList.map((q) => q.platform))).toEqual(new Set<Platform>(["telegram","instagram","tiktok","facebook"]));
+  });
+
+  it("supports ANY user-defined topic without hard-coded real estate or flower substitutions", () => {
+    for (const topic of ["ремонт велосипедов", "духовные практики", "поиск работы", "знакомства", "услуги адвоката", "коллекционеры марок", "собаководы", "йога"]) {
+      const queries = platformSearchQueries({ country: "Чехия", city: "Брно", topic });
+      expect(queries).toHaveLength(8);
+      expect(queries.every((item) => item.query.includes(topic))).toBe(true);
+      expect(queries.some((item) => item.query.includes("real estate apartments"))).toBe(false);
+    }
+  });
+
+  it("browses broad public community categories by explicit page; never claims all worldwide communities", () => {
+    expect(isBroadDiscoveryTopic("")).toBe(true);
+    expect(isBroadDiscoveryTopic("все группы")).toBe(true);
+    expect(isBroadDiscoveryTopic("все тематики")).toBe(true);
+    expect(isBroadDiscoveryTopic("любые сообщества в Брно")).toBe(true);
+    expect(isBroadDiscoveryTopic("все группы по продаже квартир")).toBe(false);
+    expect(isBroadDiscoveryTopic("животные")).toBe(false);
+    expect(BROAD_DISCOVERY_CATEGORIES.length).toBeGreaterThanOrEqual(12);
+    expect(BROAD_DISCOVERY_PAGES).toBe(8);
+    const first = platformSearchQueries({ country: "Чехия", city: "Брно", topic: "", platforms: ["telegram", "instagram"] });
+    const next = platformSearchQueries({ country: "Чехия", city: "Брно", topic: "", platforms: ["telegram", "instagram"], broadPage: 1 });
+    expect(first).toHaveLength(8);
+    expect(first.slice(0, 2).map((x) => x.platform)).toEqual(["telegram", "instagram"]);
+    expect(first[0].query).toContain(BROAD_DISCOVERY_CATEGORIES[0]);
+    expect(first[2].query).toContain(BROAD_DISCOVERY_CATEGORIES[1]);
+    expect(next[0].query).toContain(BROAD_DISCOVERY_CATEGORIES[2]);
+    expect(first.some((x) => next.some((y) => y.query === x.query))).toBe(false);
   });
 
   it("normalizes profile links only on authentic Instagram/TikTok hosts", () => {
