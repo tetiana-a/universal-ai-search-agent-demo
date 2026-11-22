@@ -250,8 +250,8 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       return {};
 
     case "postiz": {
-      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
-        await sendMessage(chatId, "⛔ Postiz доступен только владельцу в личном чате.");
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId, "⛔ Postiz доступен только владельцу и админам группы.");
         return {};
       }
       if (!postizConfigured()) {
@@ -272,8 +272,8 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     }
 
     case "postizdraft": {
-      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
-        await sendMessage(chatId, "⛔ Черновик Postiz доступен только владельцу в личном чате.");
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId, "⛔ Черновик Postiz доступен только владельцу и админам группы.");
         return {};
       }
       const separator = args.indexOf("|");
@@ -292,15 +292,15 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     }
 
     case "ighelp": {
-      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
-        await sendMessage(chatId,"⛔ Только владелец в личном чате."); return {};
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId,"⛔ Только владелец и админы группы."); return {};
       }
       await sendMessage(chatId,"📸 <b>Автоматические публикации Instagram через Postiz</b>\n\n1. Пришлите ОДНУ фотографию с подписью:\n<code>/igqueue 2026-11-25T19:00:00+01:00 | Мой текст публикации</code>\n\n2. Или без фото, с публичной HTTPS-ссылкой:\n<code>/igqueue 2026-11-25T19:00:00+01:00 | https://example.com/photo.jpg | Мой текст</code>\n\nЭто подтверждённое задание в расписание: Postiz автоматически опубликует пост в указанный час. Нужны права на контент, собственный Instagram и медиа. Контроль: /igstatus. Отмена: /igcancel ID. Время пишите с часовым поясом +01:00 или +02:00.");
       return {};
     }
     case "igqueue": {
-      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
-        await sendMessage(chatId,"⛔ Instagram доступен только владельцу в личном чате."); return {};
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId,"⛔ Instagram доступен только владельцу и админам группы."); return {};
       }
       const parts=args.split("|").map(x=>x.trim());
       if (parts.length !== 3) {
@@ -318,8 +318,8 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       return {};
     }
     case "igstatus": {
-      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
-        await sendMessage(chatId,"⛔ Только владелец в личном чате."); return {};
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId,"⛔ Только владелец и админы группы."); return {};
       }
       let posts=await refreshInstagramJobs().catch(()=>null);
       const stale=!posts;
@@ -332,8 +332,8 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       return {};
     }
     case "igcancel": {
-      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
-        await sendMessage(chatId,"⛔ Только владелец в личном чате."); return {};
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId,"⛔ Только владелец и админы группы."); return {};
       }
       if (!/^ig-[\w-]{8,80}$/.test(args)) {
         await sendMessage(chatId,"Укажите ID из /igstatus: <code>/igcancel ig-...</code>");return {};
@@ -600,13 +600,7 @@ async function handleCallback(query: any): Promise<BotResult> {
       await tgForceReply(chatId, "🔎 Что найти? Напишите запрос обычным сообщением.");
       return {};
     }
-    if (action === "advert") {
-      if (query.message?.chat?.type !== "private") {
-        await sendMessage(chatId, "Откройте личный чат с ботом, чтобы подготовить рекламное объявление.");
-        return {};
-      }
-      return startAdWizard(chatId, userId);
-    }
+    if (action === "advert") return startAdWizard(chatId, userId);
     if (action === "fresh") {
       await startFreshDialog(chatId);
       await sendMessage(chatId, "🆕 <b>Новый диалог</b>\nПрошлые кампании и результаты сохранены, их можно открыть в «Мои кампании».\n\nЧто делаем? Отправьте голосовое или выберите действие.", mainPanelKeyboard());
@@ -824,7 +818,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   if (message?.photo && /^\/igqueue(?:@\w+)?\s/i.test(String(message.caption || "")) && !message.from?.is_bot) {
     const chatId=String(message.chat?.id||"");
     const userId=String(message.from?.id||"");
-    if (message.chat?.type!=="private" || !controlIds().has(chatId) || !controlIds().has(userId)) return {};
+    if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
     const parts=String(message.caption).replace(/^\/igqueue(?:@\w+)?\s*/i,"").split("|").map((x:string)=>x.trim());
     if(parts.length!==2){
       await sendMessage(chatId,"Формат подписи фото: /igqueue 2026-11-25T19:00:00+01:00 | Текст поста");return {};
@@ -859,11 +853,11 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     const by = message.from?.username ? "@" + message.from.username : message.from?.first_name || userId;
     return handleGroupCommand(chatId, "post", String(message.caption).replace(/^\/post(@\w+)?\s*/i, ""), by, photos[photos.length - 1]?.file_id);
   }
-  // Owners may attach an image with its ad text while the ad wizard is active.
-  if (message?.photo && !message.from?.is_bot && message.chat?.type === "private") {
+  // Owners and group admins may attach an image with its ad text while the ad wizard is active.
+  if (message?.photo && !message.from?.is_bot) {
     const ownerChat = String(message.chat?.id || "");
     const ownerId = String(message.from?.id || "");
-    if (await isControl(ownerChat, ownerId, "private")) {
+    if (await isControl(ownerChat, ownerId, String(message.chat?.type || ""))) {
       const photos = Array.isArray(message.photo) ? message.photo : [];
       const result = await advanceAdWizard(ownerChat, ownerId, String(message.caption || ""), photos[photos.length - 1]?.file_id);
       if (result) return result;
@@ -889,7 +883,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       return {};
     }
     if (!controlIds().has(userId) && !(await isOwnersGroupAdmin(chatId, userId, String(message.chat?.type || "")))) {
-      await sendMessage(chatId, "⛔ Только владелец агентa может подключать группы.");
+      await sendMessage(chatId, "⛔ Только владелец и админы группы могут подключать группы.");
       return {};
     }
     const result = await registerOwnedTelegramGroup(message.chat, userId);
@@ -912,21 +906,15 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       if (result.draft) await sendMessage(chatId, draftText(result.draft) + "\n\n" + escapeHtml(result.message), result.ok ? draftKeyboard(result.draft) : undefined);
       return {};
     }
-    if (command?.cmd === "ad" || command?.cmd === "advert") {
-      if (message.chat?.type !== "private") {
-        await sendMessage(chatId, "Для рекламы откройте личный чат с ботом и отправьте /ad.");
-        return {};
-      }
-      return startAdWizard(chatId, userId);
-    }
+    if (command?.cmd === "ad" || command?.cmd === "advert") return startAdWizard(chatId, userId);
     if (command?.cmd === "cancel" && await cancelAdWizard(chatId, userId)) return {};
     if (command && ADVISOR_COMMANDS.includes(command.cmd)) return handleAdvisorCommand(chatId, command.cmd, command.args);
     if (command) return handleCommand(chatId, userId, userName, command.cmd, command.args);
-    if (message.chat?.type === "private") {
-      const wizard = await advanceAdWizard(chatId, userId, String(message.text));
-      if (wizard) return wizard;
-      if (isAdPostingIntent(String(message.text)) && !(await advisorMode(chatId))) return startAdWizard(chatId, userId);
-    }
+    // The wizard is per chat and per person, so it works the same in a group.
+    const wizard = await advanceAdWizard(chatId, userId, String(message.text));
+    if (wizard) return wizard;
+    const intentText = addressedText(message);
+    if (intentText && isAdPostingIntent(intentText) && !(await advisorMode(chatId))) return startAdWizard(chatId, userId);
     const answer = await maybeAnswer(chatId, String(message.text), userId);
     if (answer) return answer;
     if (await advisorMode(chatId)) {
