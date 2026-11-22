@@ -390,7 +390,8 @@ async function activeCampaign(id: string) {
 
 // Bot tasks: only chats where an admin added the bot, ~3 s apart, daily limit shared with /post.
 export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 240_000, pauseMs = 3000) {
-  if (process.env.CAMPAIGN_AUTOPOST === "off") return { sent: 0, failed: 0, left: 0, disabled: true };
+  // Explicit opt-in only: a missing environment flag can never start bulk posting.
+  if (process.env.CAMPAIGN_AUTOPOST !== "on") return { sent: 0, failed: 0, left: 0, disabled: true };
   if (!botToken()) return { sent: 0, failed: 0, left: 0, disabled: true };
   const tasks = (await listAll<CampaignTask>("campaign_tasks")).filter((t) => t.day === day && t.mode === "bot" && t.status === "scheduled");
   let sent = 0, failed = 0, left = 0;
