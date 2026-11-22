@@ -338,55 +338,89 @@ export type FindOutcome = { found: GroupCard[]; added: number; checked: number; 
 
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
-  const queries = groupQueries(input);
+  const selected: Platform[] = input.platforms?.length ? [...new Set(input.platforms)] : ["telegram", "instagram", "tiktok", "facebook"];
+  const descriptors = platformSearchQueries({ ...input, platforms: selected });
+  const queries = descriptors.map((q) => q.query);
   const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
+  const onePerPlatform = descriptors.filter((d, i) => descriptors.findIndex((v) => v.platform === d.platform) === i);
+  const paidQueries = onePerPlatform.slice(0, 4); // billing limit per search run
   const [paid, keyless, tgstat] = await Promise.all([
     dataForSeoEnabled()
-      ? Promise.all([dataForSeoSearch(queries[0], input.country || "", polish ? "pl" : "en"), dataForSeoSearch(queries[2], input.country || "", polish ? "pl" : "en")])
+      ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en")))
       : Promise.resolve([]),
-    runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 15_000)).catch(() => []),
-    tgStatEnabled() ? tgStatSearch(input.topic, input.country || "") : Promise.resolve({ok:false, urls:[], source:"tgstat" as const}),
+    runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 19_000)).catch(() => []),
+    selected.includes("telegram") && tgStatEnabled()
+      ? tgStatSearch(input.topic, input.country || "")
+      : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
   ]);
   for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
-  const visibleHits = [...paid.flatMap((p) => p.hits), ...keyless.flatMap((k) => k.hits)];
-  const directSocialHits = visibleHits.some((h) => normalizeTelegramUrl(h.url) || normalizeFacebookGroupUrl(h.url));
-  const gemini = directSocialHits || Date.now() > deadlineAt - 22_000
+  const paidHits = paid.flatMap((result, i) => result.hits.map((h) => ({ ...h, sourceQuery: paidQueries[i].query })));
+  const keylessHits = keyless.flatMap((result) => result.hits.map((h) => ({ ...h, sourceQuery: result.query || "" })));
+  const visibleHits = [...paidHits, ...keylessHits];
+  const hitPlatform = (url: string): Platform | "" =>
+    normalizeTelegramUrl(url) ? "telegram"
+    : normalizeFacebookGroupUrl(url) ? "facebook"
+    : normalizeInstagramProfileUrl(url) ? "instagram"
+    : normalizeTikTokProfileUrl(url) ? "tiktok" : "";
+  const discovered = new Set(visibleHits.map((h) => hitPlatform(h.url)).filter(Boolean));
+  const missing = selected.filter((p) => !discovered.has(p));
+  // Only use Gemini when indexed search missed a requested platform. Its
+  // grounding may require billable access; 404 must not invent profile URLs.
+  const fallbackQueries = descriptors.filter((q) => missing.includes(q.platform)).slice(0, 2);
+  const gemini = !fallbackQueries.length || Date.now() > deadlineAt - 22_000
     ? []
-    : await Promise.all([geminiSearch(queries[0], polish ? "pl" : "ru", listPrompt(input)), geminiSearch(queries[2], "en", listPrompt(input))]);
+    : await Promise.all(fallbackQueries.map((q) => geminiSearch(q.query, polish ? "pl" : input.language || "en", listPrompt(input))));
   for (const g of gemini) if (!g.ok && g.message) notes.push(g.message);
-  if (!directSocialHits && !gemini.some((g) => g.ok && (g.hits.length || g.text)) && keyless.some((k) => !k.ok)) {
-    notes.push("Search providers were unavailable or throttled. A zero-result report is not proof there are no relevant groups.");
+  const geminiHits = gemini.flatMap((g, i) => g.hits.map((h) => ({ ...h, sourceQuery: fallbackQueries[i].query })));
+  if (!visibleHits.length && !gemini.some((g) => g.ok && (g.hits.length || g.text))) {
+    notes.push("Поисковые источники пока не подтвердили подходящих публичных ссылок. Ноль результатов не означает, что аккаунтов нет.");
   }
 
-  const telegram = new Map<string, { snippet: string; trusted: boolean }>();
-  // TGStat provides candidate URLs, never platform posting permissions.
-  // Verify each candidate against Telegram public previews before saving.
+  const telegram = new Map<string, { snippet: string; trusted: boolean; sourceQuery: string }>();
   if (tgstat.ok) for (const link of tgstat.urls) {
     const url = normalizeTelegramUrl(link);
-    if (url) telegram.set(url, { snippet: "TGStat API: " + input.topic, trusted: true });
-  }
-  else if (tgStatEnabled() && "error" in tgstat && tgstat.error) notes.push(tgstat.error);
-  const facebook = new Map<string, { title: string; snippet: string }>();
+    if (url) telegram.set(url, { snippet: "TGStat API: " + input.topic, trusted: true, sourceQuery: "TGStat: " + input.topic });
+  } else if (tgStatEnabled() && selected.includes("telegram") && "error" in tgstat && tgstat.error) notes.push(tgstat.error);
+  const facebook = new Map<string, { title: string; snippet: string; sourceQuery: string }>();
+  const instagram = new Map<string, { title: string; snippet: string; sourceQuery: string }>();
+  const tiktok = new Map<string, { title: string; snippet: string; sourceQuery: string }>();
   const otherPages: string[] = [];
-  const hits = [...visibleHits, ...gemini.flatMap((g) => g.hits)] as Array<{ title: string; url: string; snippet: string }>;
+  const hits = [...visibleHits, ...geminiHits];
   for (const hit of hits) {
-    const tg = normalizeTelegramUrl(hit.url);
-    const fb = normalizeFacebookGroupUrl(hit.url);
-    if (tg) telegram.set(tg, { snippet: hit.snippet, trusted: true });
-    else if (fb) facebook.set(fb, { title: hit.title, snippet: hit.snippet });
-    else otherPages.push(hit.url);
+    const platform = hitPlatform(hit.url);
+    if (platform && !selected.includes(platform)) continue;
+    const url = platform === "telegram" ? normalizeTelegramUrl(hit.url)
+      : platform === "facebook" ? normalizeFacebookGroupUrl(hit.url)
+      : platform === "instagram" ? normalizeInstagramProfileUrl(hit.url)
+      : platform === "tiktok" ? normalizeTikTokProfileUrl(hit.url) : "";
+    const meta = { title: hit.title || "", snippet: hit.snippet || "", sourceQuery: hit.sourceQuery || input.topic };
+    if (platform === "telegram") telegram.set(url, { snippet: meta.snippet, trusted: true, sourceQuery: meta.sourceQuery });
+    else if (platform === "facebook") facebook.set(url, meta);
+    else if (platform === "instagram") instagram.set(url, meta);
+    else if (platform === "tiktok") tiktok.set(url, meta);
+    else if (hit.url && selected.some((p) => p === "telegram" || p === "facebook")) otherPages.push(hit.url);
+    // Only Telegram/Facebook links in indexed public snippets are considered;
+    // not arbitrary Instagram/TikTok handles hallucinated in an LLM reply.
     const inText = extractGroupLinks(hit.title + " " + hit.snippet);
-    for (const u of inText.telegram) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true });
-    for (const u of inText.facebook) if (!facebook.has(u)) facebook.set(u, { title: "", snippet: hit.snippet });
+    if (selected.includes("telegram")) for (const u of inText.telegram) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true, sourceQuery: meta.sourceQuery });
+    if (selected.includes("facebook")) for (const u of inText.facebook) if (!facebook.has(u)) facebook.set(u, { title: "", snippet: meta.snippet, sourceQuery: meta.sourceQuery });
   }
-  // Links the model wrote itself: Telegram ones are kept only after their public page confirms them.
-  for (const g of gemini) for (const u of extractGroupLinks(g.text || "").telegram) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true });
-  // Catalogue pages (tgstat, lists of chats) often hold the links; read a few of them.
-  const pages = await inBatches(otherPages.slice(0, 6), 6, (url) => fetchHtml(url, 6000));
-  for (const html of pages) {
-    const links = extractGroupLinks(html);
-    for (const u of links.telegram.slice(0, 40)) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: false });
-    for (const u of links.facebook.slice(0, 20)) if (!facebook.has(u)) facebook.set(u, { title: "", snippet: "" });
+  // Gemini text is only a candidate for Telegram; a public Telegram preview
+  // must exist before a result is saved. Never infer TikTok/IG profiles from text.
+  if (selected.includes("telegram")) for (const g of gemini) for (const u of extractGroupLinks(g.text || "").telegram)
+    if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true, sourceQuery: input.topic });
+
+  // Catalogue pages occasionally list additional public Telegram/Facebook
+  // links. Access only public websites and validate every link.
+  if (selected.includes("telegram") || selected.includes("facebook")) {
+    const pages = await inBatches(otherPages.slice(0, 4), 4, (url) => fetchHtml(url, 5000));
+    for (const html of pages) {
+      const links = extractGroupLinks(html);
+      if (selected.includes("telegram")) for (const u of links.telegram.slice(0, 25))
+        if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: false, sourceQuery: "public catalogue" });
+      if (selected.includes("facebook")) for (const u of links.facebook.slice(0, 15))
+        if (!facebook.has(u)) facebook.set(u, { title: "", snippet: "", sourceQuery: "public catalogue" });
+    }
   }
 
   const now = nowIso();
