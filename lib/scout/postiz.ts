@@ -53,6 +53,46 @@ function isHttpsPublicMedia(value: string) {
       && !/^(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(url.hostname);
   } catch { return false; }
 }
+
+const SIMPLE_SCHEDULING_CHANNELS = new Set(["telegram", "facebook", "linkedin", "linkedin-page", "threads", "bluesky", "mastodon", "vk"]);
+export async function schedulePostizApproved(args: {
+ integrationId: string; content: string; mediaUrl?: string; requestId: string; scheduledAt: string; campaignId: string;
+}): Promise<PostizDraftResult> {
+  if (!postizConfigured() || process.env.POSTIZ_ENABLE_SCHEDULE !== "on")
+    return { ok: false, error: "POSTIZ_SCHEDULE_DISABLED" };
+  const date = Date.parse(args.scheduledAt);
+  if (!Number.isFinite(date) || date < Date.now() + 5 * 60 * 1000 || date > Date.now() + 30 * 86400000)
+    return { ok: false, error: "POSTIZ_INVALID_SCHEDULE_DATE" };
+  if (!/^[a-zA-Z0-9_-]{8,80}$/.test(args.requestId)) return { ok: false, error: "INVALID_REQUEST_ID" };
+  const channels = await listPostizChannels();
+  const channel = channels.find(x => x.id === args.integrationId && !x.disabled);
+  if (!channel) return { ok: false, error: "CHANNEL_NOT_CONNECTED" };
+  // Instagram/TikTok require specific media and platform settings, so schedule
+  // them inside the Postiz UI until their channel validation is implemented.
+  if (!SIMPLE_SCHEDULING_CHANNELS.has(channel.identifier)) return { ok: false, error: "POSTIZ_PLATFORM_NEEDS_MANUAL_REVIEW" };
+  if (args.mediaUrl && !isHttpsPublicMedia(args.mediaUrl)) return { ok: false, error: "INVALID_MEDIA_URL" };
+  if (!(await claimOnce("postiz-schedule:" + args.requestId, 3600))) return { ok: false, error: "DUPLICATE_REQUEST" };
+  try {
+    let media: PostizMedia | undefined;
+    if (args.mediaUrl) {
+      const uploaded: any = await postiz("/upload-from-url", { method: "POST", body: JSON.stringify({ url: args.mediaUrl }) });
+      if (typeof uploaded?.id !== "string" || typeof uploaded?.path !== "string") throw new Error("POSTIZ_BAD_UPLOAD");
+      media = { id: uploaded.id, path: uploaded.path };
+    }
+    const payload = makePostizDraftPayload(channel, args.content, media);
+    const request = { ...payload, type: "schedule", date: new Date(date).toISOString() };
+    const response: any = await postiz("/posts", { method: "POST", body: JSON.stringify(request) });
+    const postId = String((Array.isArray(response) ? response[0]?.postId : response?.postId) || "");
+    if (!postId) throw new Error("POSTIZ_BAD_POST_RESPONSE");
+    await logAction({ actor: "owner", action: "postiz.scheduled", detail: args.campaignId + " · Postiz " + postId + " · " + channel.name + " · " + request.date });
+    return { ok: true, postId, channel, status: 202 };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "POSTIZ_UNKNOWN";
+    await logAction({ actor: "agent", action: "postiz.schedule_failed", detail: message.slice(0, 160) });
+    return { ok: false, error: message };
+  }
+}
+
 export async function createPostizDraft(args: { integrationId: string; content: string; mediaUrl?: string; requestId: string }): Promise<PostizDraftResult> {
   if (!postizConfigured()) return { ok: false, error: "POSTIZ_NOT_CONFIGURED" };
   const content = String(args.content || "").trim();
