@@ -24,7 +24,10 @@ export type GroupStatus = "new" | "contacted" | "free" | "exchange" | "paid" | "
 export type GroupCard = {
   id: string;
   platform: Platform;
-  kind?: "group" | "channel";
+  kind?: "group" | "channel" | "profile" | "page";
+  // Indexed public profiles are search candidates, not proof of live activity
+  // or permission to publish on third-party accounts.
+  verification?: "public_page" | "indexed_candidate";
   url: string;
   name: string;
   members?: number;
@@ -107,6 +110,19 @@ export function normalizeFacebookGroupUrl(raw: string): string {
   const m = /(?:https?:\/\/)?(?:www\.|m\.|web\.)?facebook\.com\/groups\/([\w.-]{3,80})/i.exec(raw);
   if (!m || /^(feed|discover|search|joins|create|your_groups|category)$/i.test(m[1])) return "";
   return "https://www.facebook.com/groups/" + m[1];
+}
+
+// Normalize PUBLIC profile URLs only. Individual Instagram posts/reels, TikTok
+// search/hashtags and internal URLs are not community/profile targets.
+export function normalizeInstagramProfileUrl(raw: string): string {
+  const m = /(?:https?:\/\/)?(?:www\.|m\.)?instagram\.com\/([a-zA-Z0-9._]{2,30})(?=\/|[?&#\s"'<>)]|$)/i.exec(raw);
+  if (!m || /^(p|reel|reels|tv|stories|explore|accounts|direct|about|developer|api|directory|tags)$/i.test(m[1])) return "";
+  return "https://www.instagram.com/" + m[1].toLowerCase();
+}
+export function normalizeTikTokProfileUrl(raw: string): string {
+  const m = /(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/(@[a-zA-Z0-9._]{2,24})(?=\/|[?&#\s"'<>)]|$)/i.exec(raw);
+  if (!m) return "";
+  return "https://www.tiktok.com/" + m[1].toLowerCase();
 }
 
 export function extractGroupLinks(text: string) {
@@ -255,34 +271,67 @@ async function inBatches<T, R>(items: T[], size: number, fn: (item: T) => Promis
   return out;
 }
 
-export type FindInput = { country?: string; city?: string; topic: string; relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string };
+export type FindInput = {
+  country?: string; city?: string; topic: string;
+  relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string;
+  platforms?: Platform[];
+};
+export type PlatformQuery = { platform: Platform; query: string };
 
 function placeOf(input: FindInput) {
   return [input.city, input.country].filter(Boolean).join(", ");
 }
 
+// One query per chosen platform is tried first, before second-round variants.
+// This prevents a slow or blocked Telegram search from starving Instagram and
+// TikTok results. We never use API access to users' private accounts.
+export function platformSearchQueries(input: FindInput): PlatformQuery[] {
+  const requested = (input.platforms?.length ? input.platforms : ["telegram", "instagram", "tiktok", "facebook"])
+    .filter((p, i, a) => (["telegram", "instagram", "tiktok", "facebook"] as string[]).includes(p) && a.indexOf(p) === i);
+  const geo = placeOf(input);
+  const polish = /поль|poland|polska|polsce|polski/i.test(geo);
+  const es = /испан|spain|españa|espa|valencia|валенси|barcelona|барселон/i.test(geo);
+  const topic = input.topic.trim().slice(0, 160);
+  // Common multilingual variations; other topics still use the exact owner
+  // keyword and the upstream LLM's approved translated campaign queries.
+  const realEstate = /недвиж|квартир|жиль|inmobil|apartam|pisos?|real estate|property|mieszkan/i.test(topic);
+  const flowers = /цвет|квіт|flor|flower|kwiat|букет/i.test(topic);
+  const localTopic = realEstate ? (polish ? "nieruchomości mieszkania" : es ? "inmobiliaria pisos apartamentos" : "real estate apartments")
+    : flowers ? (polish ? "kwiaty bukiety" : es ? "flores ramos" : "flowers bouquets") : topic;
+  const phrase = [localTopic, geo].filter(Boolean).join(" ");
+  const variants: Record<Platform, string[]> = {
+    telegram: [
+      "Telegram groups channels " + phrase + " t.me",
+      (polish ? "grupy kanały" : es ? "grupos canales" : "groups communities") + " Telegram " + topic + " " + geo + " t.me",
+    ],
+    instagram: [
+      "Instagram creators accounts " + phrase + " instagram.com",
+      (polish ? "profile firmy" : es ? "cuentas creadores negocios" : "business creators profiles") + " Instagram " + topic + " " + geo,
+    ],
+    tiktok: [
+      "TikTok creators profiles " + phrase + " tiktok.com/@",
+      (polish ? "twórcy" : es ? "creadores cuentas" : "creators accounts") + " TikTok " + topic + " " + geo,
+    ],
+    facebook: [
+      "Facebook groups " + phrase + " facebook.com/groups",
+      (polish ? "grupy" : es ? "grupos" : "groups communities") + " Facebook " + topic + " " + geo,
+    ],
+  };
+  return [0, 1].flatMap((round) => requested.map((platform) => ({
+    platform, query: variants[platform][round].replace(/\s+/g, " ").trim(),
+  })));
+}
+
 export function groupQueries(input: FindInput) {
-  const place = placeOf(input);
-  const polish = /поль|poland|polska|polsce|polski/i.test(place);
-  // Relevant *professional* search terms in Poland; research is separate from
-  // permission to advertise (in particular for alcoholic beverages).
-  if (polish) return [
-    "grupy Telegram " + input.topic + " Polska t.me",
-    "polskie grupy branżowe " + input.topic + " Telegram",
-    "grupy Facebook " + input.topic + " Polska",
-    "facebook.com/groups " + input.topic + " Polska",
-  ];
-  return [
-    "Telegram группы и каналы " + input.topic + " " + place + " t.me",
-    "Telegram chats channels " + input.topic + " " + place + " t.me",
-    "Facebook groups " + input.topic + " " + place,
-    "facebook.com/groups " + input.topic + " " + (input.city || input.country || ""),
-  ];
+  return platformSearchQueries(input).map((q) => q.query);
 }
 
 function listPrompt(input: FindInput) {
-  return "Find public Telegram groups and channels and public Facebook groups about \"" + input.topic + "\" in " + (placeOf(input) || "any location") +
-    ". List as many real ones as you can, each with its full link (https://t.me/... or https://www.facebook.com/groups/...), name and member count if known. Only real, existing groups.";
+  const wanted = (input.platforms?.length ? input.platforms : ["telegram", "instagram", "tiktok", "facebook"]).join(", ");
+  return "Find existing PUBLIC topic-relevant community/profile URLs for " + input.topic +
+    " in " + (placeOf(input) || "the requested location") + " on " + wanted +
+    ". Telegram groups/channels use t.me links. Instagram accounts use instagram.com/username. TikTok creators use tiktok.com/@username. Facebook groups use facebook.com/groups/id." +
+    " Return names and direct real URLs only, do not invent URLs or claim access to private groups. Public profile is NOT permission to advertise.";
 }
 
 export type FindOutcome = { found: GroupCard[]; added: number; checked: number; notes: string[] };
