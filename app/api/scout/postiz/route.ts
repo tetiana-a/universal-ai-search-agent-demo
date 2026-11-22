@@ -1,6 +1,7 @@
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
 import { createPostizDraft, listPostizChannels, listRecentPostizPosts, postizConfigured, schedulePostizApproved } from "@/lib/scout/postiz";
 import { getOne } from "@/lib/scout/store";
+import { scheduleAyrshareApproved } from "@/lib/scout/ayrshare";
 import type { Campaign } from "@/lib/scout/campaigns";
 import { isPolishWineCampaign } from "@/lib/scout/wine-compliance";
 
@@ -27,9 +28,10 @@ export async function POST(request: Request) {
   if (!isAuthorized(request)) return unauthorized();
   const data: any = await request.json().catch(() => null);
   if (data?.action === "schedule") {
-    // Separate authorization gate: Postiz connected OAuth channel, approved
+    // Separate authorization gate: Postiz/Ayrshare connected own channel, approved
     // campaign, explicit per-request owner confirmation and Vercel opt-in.
-    if (process.env.POSTIZ_ENABLE_SCHEDULE !== "on") {
+    const ayrshare = data.provider === "ayrshare";
+    if (!ayrshare && process.env.POSTIZ_ENABLE_SCHEDULE !== "on") {
       return Response.json({ ok: false, error: "POSTIZ_SCHEDULE_DISABLED" }, { status: 403 });
     }
     if (data.confirm !== "I_APPROVE_SCHEDULE") {
@@ -43,14 +45,16 @@ export async function POST(request: Request) {
     if (isPolishWineCampaign(campaign)) {
       return Response.json({ ok: false, error: "POLAND_WINE_PUBLIC_ADS_RESTRICTED" }, { status: 403 });
     }
-    const result = await schedulePostizApproved({
-      integrationId: String(data.integrationId || "").slice(0, 100),
+    const common = {
       content: campaign.adText,
       requestId: String(data.requestId || "").slice(0, 100),
       scheduledAt: String(data.scheduledAt || "").slice(0, 60),
       campaignId,
       mediaUrl: typeof data.mediaUrl === "string" ? data.mediaUrl.slice(0, 500) : undefined,
-    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : "POSTIZ_UNKNOWN" }));
+    };
+    const result = ayrshare
+      ? await scheduleAyrshareApproved({ ...common, platforms: Array.isArray(data.platforms) ? data.platforms.map(String).slice(0, 10) : [] })
+      : await schedulePostizApproved({ ...common, integrationId: String(data.integrationId || "").slice(0, 100) }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : "POSTIZ_UNKNOWN" }));
     return Response.json({
       ...result, statusLabel: result.ok ? "SCHEDULED_NOT_VERIFIED_PUBLISHED" : "FAILED",
     }, { status: result.ok ? 202 : 422 });

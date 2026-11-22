@@ -1,5 +1,6 @@
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { normalizeResultUrl } from "@/lib/result-quality";
+import { isQuotaStatus, pauseProvider, providerPaused } from "@/lib/scout/provider-quota";
 
 // Opt-in, billable Google SERP search. Do not activate merely because
 // credentials exist: group discovery can run many queries per campaign.
@@ -60,6 +61,7 @@ export async function dataForSeoSearch(query: string, country: string, language 
   // We deliberately use ordinary keywords and limit results to depth=10.
   const safeQuery = query.replace(/\bsite:\S+/gi, "").trim().slice(0, 600);
   if (!safeQuery) return { ok: false, hits: [], message: "Search phrase is empty." };
+  if (await providerPaused("dataforseo")) return { ok: false, hits: [], message: "DataForSEO: баланс исчерпан, поиск на паузе до завтра." };
   const login = String(process.env.DATAFORSEO_LOGIN);
   const password = String(process.env.DATAFORSEO_PASSWORD);
   const location = dataForSeoRegion(country);
@@ -72,8 +74,14 @@ export async function dataForSeoSearch(query: string, country: string, language 
       signal: AbortSignal.timeout(12_000),
       cache: "no-store",
     });
+    const body = response.ok ? await response.json().catch(() => null) : null;
+    // 402xx task codes are DataForSEO's "payment required / insufficient funds".
+    if (isQuotaStatus(response.status) || /^402/.test(String(body?.tasks?.[0]?.status_code || body?.status_code || ""))) {
+      await pauseProvider("dataforseo", "HTTP " + response.status);
+      return { ok: false, hits: [], httpStatus: response.status, message: "DataForSEO: баланс исчерпан, поиск на паузе до завтра." };
+    }
     if (!response.ok) return { ok: false, hits: [], httpStatus: response.status, message: "DataForSEO HTTP " + response.status };
-    return mapDataForSeoResponse(await response.json());
+    return mapDataForSeoResponse(body);
   } catch (error) {
     return { ok: false, hits: [], message: error instanceof Error && /timeout|abort/i.test(error.name + error.message)
       ? "DataForSEO timed out." : "DataForSEO request failed." };

@@ -1,6 +1,7 @@
 import type { CampaignTask } from "@/lib/scout/campaigns";
 import { geminiSearch } from "@/lib/gemini-search";
 import { dataForSeoEnabled, dataForSeoSearch } from "@/lib/scout/dataforseo-groups";
+import { apifyEnabled, apifySearch } from "@/lib/scout/apify-search";
 import { tgStatEnabled, tgStatSearch } from "@/lib/scout/tgstat";
 import { runKeylessSearch } from "@/lib/keyless-search";
 import { isSafePublicUrl } from "@/lib/url-safety";
@@ -395,7 +396,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
   const onePerPlatform = descriptors.filter((d, i) => descriptors.findIndex((v) => v.platform === d.platform) === i);
   const paidQueries = onePerPlatform.slice(0, 4); // billing limit per search run
-  const [paid, keyless, tgstat] = await Promise.all([
+  const [paid, keyless, tgstat, apify] = await Promise.all([
     dataForSeoEnabled()
       ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en")))
       : Promise.resolve([]),
@@ -403,11 +404,16 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     selected.includes("telegram") && !broad && tgStatEnabled()
       ? tgStatSearch(input.topic, input.country || "")
       : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
+    apifyEnabled()
+      ? apifySearch(paidQueries.map((d) => d.query), input.country || input.city || "", polish ? "pl" : input.language || "en")
+      : Promise.resolve<Awaited<ReturnType<typeof apifySearch>>>({ ok: false, hits: [] }),
   ]);
   for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
+  if (!apify.ok && apify.message && apifyEnabled()) notes.push(apify.message);
   const paidHits = paid.flatMap((result, i) => result.hits.map((h) => ({ ...h, sourceQuery: paidQueries[i].query })));
   const keylessHits = keyless.flatMap((result) => result.hits.map((h) => ({ ...h, sourceQuery: result.query || "" })));
-  const visibleHits = [...paidHits, ...keylessHits];
+  const apifyHits = apify.hits.map((h) => ({ ...h, sourceQuery: h.query }));
+  const visibleHits = [...paidHits, ...apifyHits, ...keylessHits];
   const hitPlatform = (url: string): Platform | "" =>
     normalizeTelegramUrl(url) ? "telegram"
     : normalizeFacebookGroupUrl(url) ? "facebook"
