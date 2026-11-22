@@ -154,6 +154,7 @@ export const BOT_COMMANDS = [
   { command: "capacity", description: "Ёмкость сети: сколько размещений в день" },
   { command: "creport", description: "Отчёт по кампаниям" },
   { command: "groups", description: "Найти группы: страна, город, тема" },
+  { command: "connect", description: "Подключить собственную группу (внутри группы)" },
   { command: "post", description: "Опубликовать объявление" },
   { command: "queue", description: "Очередь ручной публикации" },
   { command: "posts", description: "Отчёт о публикациях" },
