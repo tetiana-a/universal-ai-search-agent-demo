@@ -27,6 +27,31 @@ async function postiz(path: string, init: RequestInit = {}) {
   if (!response.ok) throw new Error("POSTIZ_HTTP_" + response.status);
   return response.json();
 }
+export type PostizPostSummary = {
+  id: string; channel: string; platform: string; publishDate: string;
+  releaseURL: string; verification: "linked" | "not_verified";
+};
+export async function listRecentPostizPosts(): Promise<PostizPostSummary[]> {
+  // Bounded window. Postiz returns releaseURL where the platform has provided it.
+  // A scheduled post is NOT a verified publication without a valid releaseURL.
+  const now = Date.now();
+  const from = new Date(now - 7 * 86400000).toISOString();
+  const to = new Date(now + 7 * 86400000).toISOString();
+  const response: any = await postiz("/posts?startDate=" + encodeURIComponent(from) + "&endDate=" + encodeURIComponent(to));
+  if (!Array.isArray(response?.posts)) throw new Error("POSTIZ_BAD_POST_LIST");
+  return response.posts.slice(0, 1000).filter((p: any) => typeof p?.id === "string").map((p: any) => {
+    const url = String(p.releaseURL || "");
+    const valid = /^https:\/\//i.test(url);
+    return {
+      id: String(p.id), channel: String(p.integration?.name || "").slice(0, 100),
+      platform: String(p.integration?.providerIdentifier || "").slice(0, 80),
+      publishDate: String(p.publishDate || "").slice(0, 64),
+      releaseURL: valid ? url.slice(0, 500) : "",
+      verification: valid ? "linked" as const : "not_verified" as const,
+    };
+  });
+}
+
 export async function listPostizChannels(): Promise<PostizChannel[]> {
   const response: unknown = await postiz("/integrations");
   if (!Array.isArray(response)) throw new Error("POSTIZ_BAD_INTEGRATIONS_RESPONSE");
