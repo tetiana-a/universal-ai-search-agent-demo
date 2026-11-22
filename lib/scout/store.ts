@@ -27,7 +27,7 @@ export type Collection =
 
 const PREFIX = "aurelius:scout:v1:";
 const LOG_KEY = PREFIX + "log";
-const LOG_LIMIT = 500;
+const LOG_LIMIT = 5000;
 
 type MemoryState = { hashes: Map<string, Map<string, string>>; values: Map<string, string>; log: string[] };
 const globalScope = globalThis as unknown as { __scoutMemory?: MemoryState };

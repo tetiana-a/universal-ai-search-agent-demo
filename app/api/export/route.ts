@@ -4,6 +4,7 @@ import type { ResearchExportPayload } from "@/lib/research-report";
 import { safeFilenamePart } from "@/lib/research-report";
 import { assertFeature, resolvePlan, type ExportFormat } from "@/lib/plans";
 import { errorBody } from "@/lib/research-errors";
+import { logAction } from "@/lib/scout/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.json(e.body, { status: e.status });
   }
 
+  await logAction({ actor: "human", action: "export." + format, detail: String(payload.query || "research").slice(0, 100) + " · " + payload.results.length + " строк" }).catch(() => undefined);
   try {
     const base = "aurelius-" + safeFilenamePart(payload.query || "research");
     if (format === "csv") {

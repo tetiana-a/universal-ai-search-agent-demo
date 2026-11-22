@@ -3,8 +3,8 @@ import { runStructuredExtraction } from "@/lib/free-ai";
 import { geminiSearchKey } from "@/lib/gemini-search";
 import { CLIENT_PROFILE } from "@/lib/scout/client-profile";
 import { listCampaigns } from "@/lib/scout/campaigns";
-import { listGroups } from "@/lib/scout/groups";
-import { deleteValue, getValue, setValue } from "@/lib/scout/store";
+import { deleteValue, getValue, logAction, setValue } from "@/lib/scout/store";
+import { analyticsBrief, buildAnalytics } from "@/lib/analytics";
 
 // AI advisor: a senior consultant in real estate, spiritual business (retreats, practices,
 // mentoring), marketing and community promotion. One conversation per Telegram chat or web
@@ -20,7 +20,8 @@ const PERSONA = `Ты — AURELIUS, личный советник клиента
 • недвижимость: инвестиции, виллы и апартаменты (Греция, Кипр, Дубай, Бали, Таиланд, Испания, Турция, Черногория), доходность, ROI, риски, юридическая чистота, девелопмент, упаковка объекта, работа с инвесторами;
 • духовный бизнес: ретриты, практики, наставничество, авторские программы, ценообразование, воронки, доверие и этика, сообщество учеников;
 • маркетинг и продвижение в сообществах Telegram, Facebook, Instagram, TikTok: позиционирование, контент, партнёрства с админами, реклама только там, где она разрешена;
-• партнёрства и переговоры: поиск партнёров и инвесторов, структура сделок, доли, первые шаги.
+• партнёрства и переговоры: поиск партнёров и инвесторов, структура сделок, доли, первые шаги;
+• бизнес-аналитик и стратег самой платформы AURELIUS: ты видишь её реальные метрики (поиски, результаты, источники, сообщества, публикации, кампании, ошибки — блок «РЕАЛЬНЫЕ ДАННЫЕ» ниже). Когда спрашивают о делах, результатах, ошибках, росте или планах — опирайся только на эти цифры, называй их, находи слабые места и их причины, предлагай план на 7/30/90 дней с измеримыми целями (KPI) и говори, что сделать первым. Если данных мало или 0 — так и скажи и предложи, как их получить.
 Как отвечаешь: на языке собеседника; по делу, как профессионал: вывод → 3–5 конкретных шагов → цифры/ориентиры, где уместно → один уточняющий вопрос, если без него совет неточен. Помнишь всю беседу и опираешься на неё. Не выдумываешь факты, законы и цены: если не уверен, говоришь, что проверить и где. Юридические и налоговые вопросы — ориентир плюс совет уточнить у местного юриста. Никаких накруток, фейковых аккаунтов и спама.`;
 
 const VOICE_STYLE = "\nСейчас живой голосовой разговор: отвечай как в беседе, 2–5 предложений, без списков, markdown и эмодзи.";
@@ -36,9 +37,9 @@ export async function resetAdvisor(sessionId: string) {
 }
 
 async function context() {
-  const [groups, campaigns] = await Promise.all([listGroups().catch(() => []), listCampaigns().catch(() => [])]);
+  const [campaigns, analytics] = await Promise.all([listCampaigns().catch(() => []), buildAnalytics().catch(() => null)]);
   const live = campaigns.filter((c) => c.status === "approved").map((c) => c.title).slice(0, 5);
-  return "\nДанные AURELIUS сейчас: сообществ в базе " + groups.length + (live.length ? "; активные кампании: " + live.join("; ") : "") + ".";
+  return "\n\n" + (analytics ? analyticsBrief(analytics) : "Метрики платформы сейчас недоступны (хранилище не ответило).") + (live.length ? "\nАктивные кампании: " + live.join("; ") + "." : "");
 }
 
 async function geminiChat(system: string, history: Turn[], deadlineAt: number) {
@@ -52,7 +53,7 @@ async function geminiChat(system: string, history: Turn[], deadlineAt: number) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: history.map((t) => ({ role: t.role === "user" ? "user" : "model", parts: [{ text: t.text }] })),
-        generationConfig: { temperature: 0.6, maxOutputTokens: 1500, thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: { temperature: 0.6, maxOutputTokens: 2500, thinkingConfig: { thinkingBudget: 0 } },
       }),
       signal: AbortSignal.timeout(Math.max(5000, Math.min(45_000, deadlineAt - Date.now()))),
     });
@@ -77,7 +78,10 @@ export async function askAdvisor(sessionId: string, text: string, opts: { voice?
   }
   if (!reply) return { ok: false, reply: "Советник сейчас недоступен: бесплатный лимит AI исчерпан или ключ не задан. Попробуйте через несколько минут." };
   const next = [...history, { role: "advisor" as const, text: reply, at: new Date().toISOString() }].slice(-MEMORY_TURNS);
-  await setValue(key(sessionId), next, MEMORY_TTL);
+  await Promise.all([
+    setValue(key(sessionId), next, MEMORY_TTL),
+    logAction({ actor: sessionId.startsWith("web:") ? "human" : "bot", action: "advisor.ask", detail: text.slice(0, 120) }).catch(() => undefined),
+  ]);
   return { ok: true, reply };
 }
 

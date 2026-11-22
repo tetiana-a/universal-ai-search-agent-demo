@@ -333,7 +333,7 @@ export const defaultRunner: RoundRunner = async ({ query, lang, round, seenUrls,
   if (pipelineFor(plan) === "paid" && process.env.OPENAI_API_KEY) result = await runPaidRound(String(process.env.OPENAI_API_KEY), input, deadlineAt);
   else result = await runFreeResearch(input);
   await Promise.race([
-    recordResearchLearning({ taskId: String(result?.task?.responseId || ""), query, sourceRegistry: result?.sourceRegistry || [], results: result?.results || [], stats: result?.stats || {} }),
+    recordResearchLearning({ taskId: String(result?.task?.responseId || ""), origin: "telegram", query, sourceRegistry: result?.sourceRegistry || [], results: result?.results || [], stats: result?.stats || {} }),
     new Promise((resolve) => setTimeout(resolve, 1800)),
   ]);
   return {

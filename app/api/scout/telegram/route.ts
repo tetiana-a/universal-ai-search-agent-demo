@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     await logAction({
       actor: "bot",
       action: "telegram.update_received",
-      detail: "update=" + String(update?.update_id || "n/a") + " · " + (update?.callback_query ? "callback" : "message"),
+      detail: "update=" + String(update?.update_id || "n/a") + " · " + (update?.callback_query ? "кнопка " + String(update.callback_query.data || "").slice(0, 40) : update?.message?.voice ? "голос" : String(update?.message?.text || "сообщение").slice(0, 60)),
     });
     if (result.background) {
       const chatId = String(update?.callback_query?.message?.chat?.id || update?.message?.chat?.id || update?.edited_message?.chat?.id || "");

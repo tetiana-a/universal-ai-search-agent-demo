@@ -64,7 +64,7 @@ import {
   exportJsonFile,
   type ResearchExportPayload,
 } from "@/lib/exporters";
-import { resultsByScenario, scenarios } from "@/lib/data";
+import { scenarios } from "@/lib/data";
 
 type Theme = "dark" | "light";
 type ResultFilter = "All" | "Verified" | "High match";
@@ -618,14 +618,14 @@ export default function Home() {
   const [aiModel, setAiModel] = useState("");
   const [memoryStatus, setMemoryStatus] = useState<"persistent" | "local" | "unknown">("unknown");
   const [memoryCount, setMemoryCount] = useState<number | null>(null);
+  const [platformTotals, setPlatformTotals] = useState<Record<string, number> | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   const current = scenarios[scenario];
-  const results = liveAttempted
-    ? (liveResults ?? [])
-    : resultsByScenario[scenario];
+  // Only real results: before a search the table is empty (past searches live in Аналитика).
+  const results = liveResults ?? [];
   const usingLiveData = liveAttempted && liveResults !== null;
 
   useEffect(() => {
@@ -651,6 +651,17 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  // Totals across every saved search (Redis), refreshed after each finished run.
+  useEffect(() => {
+    if (running) return;
+    let cancelled = false;
+    fetch("/api/analytics?view=summary", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled && d?.ok) setPlatformTotals(d); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [running]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2150,25 +2161,25 @@ export default function Home() {
               "Sources",
               liveAttempted
                 ? (usingLiveData ? liveStats.sourcesFound.toLocaleString() : "—")
-                : Math.max(0, Math.floor((current.sourcesFound * progress) / 100)).toLocaleString(),
+                : "—",
             ],
             [
               "Pages / URLs",
               liveAttempted
                 ? (usingLiveData ? liveStats.pagesProcessed.toLocaleString() : "—")
-                : Math.max(0, Math.floor((current.sourcesChecked * 3.2 * progress) / 100)).toLocaleString(),
+                : "—",
             ],
             [
               "Extracted",
               liveAttempted
                 ? (usingLiveData ? liveStats.recordsExtracted.toLocaleString() : "—")
-                : Math.max(0, Math.floor((current.qualified * progress) / 100)).toLocaleString(),
+                : "—",
             ],
             [
               "Qualified",
               liveAttempted
                 ? (usingLiveData ? liveStats.qualified.toLocaleString() : "—")
-                : Math.max(0, Math.floor((current.qualified * Math.min(progress, 100)) / 100)).toLocaleString(),
+                : "—",
             ],
           ].map(([label, value]) => (
             <div key={label} className="glass-soft rounded-xl p-3">
@@ -2382,42 +2393,47 @@ export default function Home() {
         {running || progress > 0 || completedSearch ? renderResearchProcess() : renderControlPanel()}
 
         <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          {[
-            [
-              t.found,
-              liveAttempted
-                ? (usingLiveData ? liveStats.sourcesFound.toLocaleString() : "—")
-                : current.sourcesFound.toLocaleString(),
-              liveAttempted ? (usingLiveData ? "live web sources" : "not available") : "demo baseline",
-              Globe2,
-            ],
-            [
-              t.checked,
-              liveAttempted
-                ? (usingLiveData ? liveStats.sourcesChecked.toLocaleString() : "—")
-                : current.sourcesChecked.toLocaleString(),
-              liveAttempted
-                ? (usingLiveData ? `${liveStats.pagesProcessed.toLocaleString()} pages/URLs` : "not available")
-                : `${((current.sourcesChecked / current.sourcesFound) * 100).toFixed(1)}% coverage`,
-              Activity,
-            ],
-            [
-              t.qualified,
-              liveAttempted
-                ? (usingLiveData ? liveStats.qualified.toLocaleString() : "—")
-                : current.qualified.toLocaleString(),
-              liveAttempted ? (usingLiveData ? `${liveStats.evidenceCoverage}% evidence` : "not available") : "demo baseline",
-              Target,
-            ],
-            [
-              t.duplicates,
-              liveAttempted
-                ? (usingLiveData ? liveStats.duplicatesRemoved.toLocaleString() : "—")
-                : current.duplicates.toLocaleString(),
-              liveAttempted ? (usingLiveData ? "live dedup estimate" : "not available") : "demo baseline",
-              FileSearch,
-            ],
-          ].map(([label, value, note, Icon], index) => (
+          {(() => {
+            const fmt = (v: unknown) => Number(v || 0).toLocaleString(lang === "ru" ? "ru-RU" : "en-US");
+            const total = platformTotals;
+            const searches = Number(total?.searches || 0);
+            const allNote = total === null
+              ? (lang === "ru" ? "загрузка…" : "loading…")
+              : searches
+                ? (lang === "ru" ? `всего за ${fmt(searches)} поисков` : `total across ${fmt(searches)} searches`)
+                : (lang === "ru" ? "поисков ещё не было" : "no searches yet");
+            const show = (v: unknown) => (total === null ? "…" : fmt(v));
+            return [
+              [
+                t.found,
+                liveAttempted ? (usingLiveData ? fmt(liveStats.sourcesFound) : "—") : show(total?.sourcesFound),
+                liveAttempted ? (usingLiveData ? (lang === "ru" ? "в этом поиске" : "this search") : (lang === "ru" ? "нет данных" : "not available")) : allNote,
+                Globe2,
+              ],
+              [
+                t.checked,
+                liveAttempted ? (usingLiveData ? fmt(liveStats.sourcesChecked) : "—") : show(total?.sourcesChecked),
+                liveAttempted
+                  ? (usingLiveData ? `${fmt(liveStats.pagesProcessed)} ${lang === "ru" ? "страниц" : "pages"}` : (lang === "ru" ? "нет данных" : "not available"))
+                  : (total === null ? "…" : `${fmt(total.pagesProcessed)} ${lang === "ru" ? "страниц прочитано" : "pages read"}`),
+                Activity,
+              ],
+              [
+                t.qualified,
+                liveAttempted ? (usingLiveData ? fmt(liveStats.qualified) : "—") : show(total?.results),
+                liveAttempted
+                  ? (usingLiveData ? `${liveStats.evidenceCoverage}% ${lang === "ru" ? "с доказательствами" : "evidence"}` : (lang === "ru" ? "нет данных" : "not available"))
+                  : (total === null ? "…" : `${fmt(total.verified)} ${lang === "ru" ? "подтверждено" : "verified"}`),
+                Target,
+              ],
+              [
+                t.duplicates,
+                liveAttempted ? (usingLiveData ? fmt(liveStats.duplicatesRemoved) : "—") : show(total?.duplicatesRemoved),
+                liveAttempted ? (usingLiveData ? (lang === "ru" ? "в этом поиске" : "this search") : (lang === "ru" ? "нет данных" : "not available")) : allNote,
+                FileSearch,
+              ],
+            ];
+          })().map(([label, value, note, Icon], index) => (
             <div
               key={String(label)}
               data-reveal="card"
@@ -2446,8 +2462,8 @@ export default function Home() {
               </div>
               <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {liveAttempted
-                  ? (usingLiveData ? `${shownResults.length} live web results` : "live research not completed")
-                  : `${shownResults.length} demo baseline matches`}
+                  ? (usingLiveData ? (lang === "ru" ? `${shownResults.length} результатов из интернета` : `${shownResults.length} live web results`) : (lang === "ru" ? "поиск не завершён" : "live research not completed"))
+                  : (lang === "ru" ? "Запустите поиск — здесь появятся только настоящие результаты. Прошлые поиски — в разделе «Аналитика»." : "Run a search to see real results here. Past searches are in Analytics.")}
               </div>
             </div>
 
