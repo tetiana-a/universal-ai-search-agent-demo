@@ -283,6 +283,7 @@ export type FindInput = {
   country?: string; city?: string; topic: string;
   relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string;
   platforms?: Platform[];
+  broadPage?: number;
 };
 export type PlatformQuery = { platform: Platform; query: string };
 
@@ -308,39 +309,59 @@ function placeOf(input: FindInput) {
 // One query per chosen platform is tried first, before second-round variants.
 // This prevents a slow or blocked Telegram search from starving Instagram and
 // TikTok results. We never use API access to users' private accounts.
+// A broad query scans categories in pages. Public search indexes cannot list
+// every community worldwide or guarantee coverage of private communities.
+// Two categories per page keeps API costs and query latency bounded.
+export const BROAD_DISCOVERY_CATEGORIES = [
+  "городские сообщества местные новости",
+  "работа вакансии карьера",
+  "покупка продажа барахолка",
+  "жилье аренда соседи",
+  "бизнес предприниматели услуги",
+  "образование языки студенты",
+  "спорт фитнес путешествия",
+  "еда рестораны кулинария",
+  "культура события музыка",
+  "семья родители дети",
+  "животные природа экология",
+  "технологии игры IT",
+  "здоровье благополучие",
+  "духовные практики медитация",
+  "знакомства общение клубы",
+  "автомобили транспорт",
+] as const;
+export const BROAD_DISCOVERY_PAGE_SIZE = 2;
+export const BROAD_DISCOVERY_PAGES = Math.ceil(BROAD_DISCOVERY_CATEGORIES.length / BROAD_DISCOVERY_PAGE_SIZE);
+
+export function isBroadDiscoveryTopic(topic: string) {
+  const value = String(topic || "").trim().toLowerCase().replace(/[.,!?]+$/g, "");
+  return !value || /^(?:\*|все(?:\s+(?:публичные|доступные|активные))?\s+(?:группы|сообщества|категории|темы|тематики|каналы|площадки)(?:\s+в\s+.+)?|любые\s+(?:группы|сообщества|темы|тематики)(?:\s+в\s+.+)?|все\s+тематики|all\s+(?:public\s+)?(?:topics|groups|communities|categories)|any\s+(?:topics|communities|groups)|усі\s+(?:групи|спільноти|теми)|всі\s+(?:групи|спільноти|теми))$/iu.test(value);
+}
+
 export function platformSearchQueries(input: FindInput): PlatformQuery[] {
   const requested = inferredSearchPlatforms(input);
   const geo = placeOf(input);
+  const broad = isBroadDiscoveryTopic(input.topic);
+  const topicText = input.topic.trim().replace(/(?:telegram|телеграм\w*|instagram|инстаграм\w*|інстаграм\w*|tiktok|tik.?tok|тикток\w*|тік.?ток\w*|facebook|фейсбук\w*)/giu, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+  const page = Math.max(0, Math.min(BROAD_DISCOVERY_PAGES - 1, Math.trunc(input.broadPage || 0)));
+  const topics = broad ? [...BROAD_DISCOVERY_CATEGORIES].slice(page * BROAD_DISCOVERY_PAGE_SIZE, (page + 1) * BROAD_DISCOVERY_PAGE_SIZE) : [topicText || input.topic.trim()];
   const polish = /поль|poland|polska|polsce|polski/i.test(geo);
-  const es = /испан|spain|españa|espa|valencia|валенси|barcelona|барселон/i.test(geo);
-  const topic = input.topic.trim().replace(/(?:telegram|телеграм\w*|instagram|инстаграм\w*|інстаграм\w*|tiktok|tik.?tok|тикток\w*|тік.?ток\w*|facebook|фейсбук\w*)/giu, " ").replace(/\s+/g, " ").trim().slice(0, 160) || input.topic.trim().slice(0, 160);
-  // Common multilingual variations; other topics still use the exact owner
-  // keyword and the upstream LLM's approved translated campaign queries.
-  const realEstate = /недвиж|квартир|жиль|inmobil|apartam|pisos?|real estate|property|mieszkan/i.test(topic);
-  const flowers = /цвет|квіт|flor|flower|kwiat|букет/i.test(topic);
-  const localTopic = realEstate ? (polish ? "nieruchomości mieszkania" : es ? "inmobiliaria pisos apartamentos" : "real estate apartments")
-    : flowers ? (polish ? "kwiaty bukiety" : es ? "flores ramos" : "flowers bouquets") : topic;
-  const phrase = [localTopic, geo].filter(Boolean).join(" ");
-  const variants: Record<Platform, string[]> = {
-    telegram: [
-      "Telegram groups channels " + phrase + " t.me",
-      (polish ? "grupy kanały" : es ? "grupos canales" : "groups communities") + " Telegram " + topic + " " + geo + " t.me",
-    ],
-    instagram: [
-      "Instagram creators accounts " + phrase + " instagram.com",
-      (polish ? "profile firmy" : es ? "cuentas creadores negocios" : "business creators profiles") + " Instagram " + topic + " " + geo,
-    ],
-    tiktok: [
-      "TikTok creators profiles " + phrase + " tiktok.com/@",
-      (polish ? "twórcy" : es ? "creadores cuentas" : "creators accounts") + " TikTok " + topic + " " + geo,
-    ],
-    facebook: [
-      "Facebook groups " + phrase + " facebook.com/groups",
-      (polish ? "grupy" : es ? "grupos" : "groups communities") + " Facebook " + topic + " " + geo,
-    ],
+  const spanish = /испан|spain|españa|valencia|валенси|barcelona|барселон/i.test(geo);
+  const searchWords: Record<Platform, [string, string]> = {
+    telegram: ["Telegram public groups channels", polish ? "grupy kanały" : spanish ? "grupos canales" : "groups communities"],
+    instagram: ["Instagram public creator profiles business accounts", polish ? "profile firmy twórcy" : spanish ? "cuentas creadores negocios" : "profiles creators business"],
+    tiktok: ["TikTok public creator profiles", polish ? "twórcy profile" : spanish ? "creadores perfiles" : "creators profiles"],
+    facebook: ["Facebook public groups", polish ? "grupy społeczności" : spanish ? "grupos comunidades" : "groups communities"],
   };
-  return [0, 1].flatMap((round) => requested.map((platform) => ({
-    platform, query: variants[platform][round].replace(/\s+/g, " ").trim(),
+  const domains: Record<Platform, string> = {
+    telegram: "t.me", instagram: "instagram.com", tiktok: "tiktok.com/@", facebook: "facebook.com/groups",
+  };
+  // Every round runs each requested platform before moving to the next
+  // category or synonym query. New topics never need a code edit.
+  return [0, 1].flatMap((round) => topics.flatMap((topic) => requested.map((platform) => {
+    const prefix = searchWords[platform][round];
+    const query = [prefix, topic, geo, domains[platform]].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    return { platform, query };
   })));
 }
 
@@ -350,7 +371,7 @@ export function groupQueries(input: FindInput) {
 
 function listPrompt(input: FindInput) {
   const wanted = (input.platforms?.length ? input.platforms : ["telegram", "instagram", "tiktok", "facebook"]).join(", ");
-  return "Find existing PUBLIC topic-relevant community/profile URLs for " + input.topic +
+  return "Find existing PUBLIC community/profile URLs for " + (isBroadDiscoveryTopic(input.topic) ? "diverse community categories" : input.topic) +
     " in " + (placeOf(input) || "the requested location") + " on " + wanted +
     ". Telegram groups/channels use t.me links. Instagram accounts use instagram.com/username. TikTok creators use tiktok.com/@username. Facebook groups use facebook.com/groups/id." +
     " Return names and direct real URLs only, do not invent URLs or claim access to private groups. Public profile is NOT permission to advertise.";
