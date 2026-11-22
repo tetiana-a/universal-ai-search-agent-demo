@@ -15,6 +15,7 @@ import { handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/grou
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
 import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
+import { createPostizDraft, listPostizChannels, postizConfigured } from "@/lib/scout/postiz";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -38,6 +39,7 @@ const HELP = [
   "<b>Реклама в сообществах</b>: отправьте <b>голосовое</b> с задачей (что, где, на каких площадках, текст) или /campaign текст.",
   "Я задам уточнения, предложу 40 ключевых слов, найду профильные и смежные сообщества и буду размещать каждый день только там, где разрешено.",
   "/campaigns — кампании · /capacity — ёмкость сети · /creport — отчёт · /cstop all — остановить всё",
+  "/postiz — мои разрешённые аккаунты · /postizdraft ID | текст — черновик (НЕ публикация)",
   "Команды запоминать не нужно — используйте кнопки.",
 ].join("\n");
 
@@ -205,6 +207,48 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "panel":
       await showPanel(chatId);
       return {};
+
+    case "postiz": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId, "⛔ Postiz доступен только владельцу в личном чате.");
+        return {};
+      }
+      if (!postizConfigured()) {
+        await sendMessage(chatId, "⚠️ Postiz не подключён. Откройте Settings → Agents / Developer → Public API и сохраните POSTIZ_API_KEY в Vercel.");
+        return {};
+      }
+      try {
+        const channels = await listPostizChannels();
+        await sendLong(chatId, "<b>Postiz · подключённые аккаунты</b>\\n" + (channels.length
+          ? channels.map((c, i) => (i+1) + ". " + escapeHtml(c.name) + " · " + escapeHtml(c.identifier) +
+            (c.disabled ? " · отключён" : " · доступен") + "\\nID: <code>" + escapeHtml(c.id) + "</code>").join("\\n\\n")
+          : "Нет подключённых аккаунтов. В Postiz подключите собственную страницу.") +
+          "\\n\\nЧерновик: <code>/postizdraft ID | текст</code>. Никаких публикаций автоматически не будет.");
+      } catch {
+        await sendMessage(chatId, "⚠️ Postiz API недоступен. Проверьте ключ в Vercel и тариф.");
+      }
+      return {};
+    }
+
+    case "postizdraft": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId, "⛔ Черновик Postiz доступен только владельцу в личном чате.");
+        return {};
+      }
+      const separator = args.indexOf("|");
+      if (separator < 1) {
+        await sendMessage(chatId, "Формат: <code>/postizdraft ID_аккаунта | точный текст</code>\\nID получаете командой /postiz.");
+        return {};
+      }
+      const integrationId = args.slice(0, separator).trim();
+      const content = args.slice(separator+1).trim();
+      const requestId = "tg-" + userId + "-" + Date.now().toString(36);
+      const result = await createPostizDraft({ integrationId, content, requestId }).catch(() => ({ok:false,error:"POSTIZ_API_ERROR"}));
+      await sendMessage(chatId, result.ok
+        ? "✅ Создан черновик в Postiz, НЕ ОПУБЛИКОВАНО.\\nPost ID: <code>" + escapeHtml(result.postId || "") + "</code>\\nПроверьте черновик в кабинете Postiz."
+        : "⚠️ Черновик не создан: " + escapeHtml(result.error || "ошибка подключения"));
+      return {};
+    }
 
     case "health":
       await sendMessage(chatId, await diagnosticText(chatId, userId), mainPanelKeyboard());
