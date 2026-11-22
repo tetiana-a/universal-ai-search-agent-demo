@@ -508,6 +508,40 @@ export async function handleMyChatMember(update: any) {
   return card;
 }
 
+// Explicit registration for already-connected Telegram groups.
+// Telegram's my_chat_member event may predate the active webhook, so this
+// owner-only command verifies BOTH administrator roles before saving a group.
+export async function registerOwnedTelegramGroup(
+  chat: { id: string | number; type: string; title?: string; username?: string },
+  actorId: string,
+): Promise<{ ok: boolean; message: string; group?: GroupCard }> {
+  if (!["group", "supergroup", "channel"].includes(chat.type)) {
+    return { ok: false, message: "Отправьте /connect внутри Telegram-группы, где бот администратор." };
+  }
+  const bot = await tgCall("getMe", {});
+  const botId = bot?.result?.id;
+  if (!bot?.ok || !botId) return { ok: false, message: "Не удалось проверить аккаунт бота через Telegram API." };
+  const [owner, member] = await Promise.all([
+    tgCall("getChatMember", { chat_id: chat.id, user_id: actorId }),
+    tgCall("getChatMember", { chat_id: chat.id, user_id: botId }),
+  ]);
+  const ownerStatus = String(owner?.result?.status || "");
+  const botStatus = String(member?.result?.status || "");
+  if (!owner?.ok || !["creator", "administrator"].includes(ownerStatus))
+    return { ok: false, message: "Только администратор этой группы может подключить её к публикациям." };
+  if (!member?.ok || botStatus !== "administrator")
+    return { ok: false, message: "AURELIUS пока не администратор этой группы. Назначьте его администратором и повторите /connect." };
+  const card = await handleMyChatMember({
+    chat,
+    from: { id: Number(actorId) },
+    new_chat_member: { status: "administrator" },
+  });
+  if (!card || !card.botConnected) return { ok: false, message: "Telegram-группа не зарегистрирована. Проверьте webhook и Redis." };
+  return { ok: true, message: card.postingEnabled
+    ? "✅ Группа зарегистрирована. Постинг разрешён только после тестового подтверждения владельца."
+    : "✅ Группа зарегистрирована, но постинг выключен. Включите его в панели только после подтверждения прав.", group: card };
+}
+
 // ---- Posting through the Bot API ---------------------------------------------------
 
 function today() {
