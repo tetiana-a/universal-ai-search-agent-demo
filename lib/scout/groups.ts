@@ -294,8 +294,8 @@ function placeOf(input: FindInput) {
 // This prevents a slow or blocked Telegram search from starving Instagram and
 // TikTok results. We never use API access to users' private accounts.
 export function platformSearchQueries(input: FindInput): PlatformQuery[] {
-  const requested = (input.platforms?.length ? input.platforms : ["telegram", "instagram", "tiktok", "facebook"])
-    .filter((p, i, a) => (["telegram", "instagram", "tiktok", "facebook"] as string[]).includes(p) && a.indexOf(p) === i);
+  const requested: Platform[] = (input.platforms?.length ? input.platforms : (["telegram", "instagram", "tiktok", "facebook"] as Platform[]))
+    .filter((p, i, a) => (["telegram", "instagram", "tiktok", "facebook"] as Platform[]).includes(p) && a.indexOf(p) === i);
   const geo = placeOf(input);
   const polish = /поль|poland|polska|polsce|polski/i.test(geo);
   const es = /испан|spain|españa|espa|valencia|валенси|barcelona|барселон/i.test(geo);
