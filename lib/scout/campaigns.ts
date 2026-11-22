@@ -42,6 +42,9 @@ export type Campaign = {
   updatedAt: string;
   approvedAt?: string;
   found?: { total: number; core: number; adjacent: number; inactive: number; at: string; notes?: string[] };
+  // Authoritative per-campaign audience. Never route a campaign to every group
+  // in the global CRM merely because one common keyword happens to match.
+  searchGroupIds?: string[];
 };
 
 export type TaskMode = "bot" | "partner" | "manual";
@@ -231,6 +234,10 @@ export async function setCampaignStatus(id: string, status: "approved" | "stoppe
     await logAction({ actor: "agent", action: "campaign.compliance_block", detail: c.title + ": Poland wine public advertising" });
     return null;
   }
+  if (status === "approved" && (!c.found?.total || !c.searchGroupIds?.length)) {
+    await logAction({ actor: "agent", action: "campaign.no_verified_targets", detail: c.title + ": search/authorization missing" });
+    return null;
+  }
   const next: Campaign = { ...c, status, updatedAt: nowIso(), ...(status === "approved" ? { approvedAt: nowIso() } : {}) };
   await putOne("campaigns", next);
   if (status === "stopped") {
@@ -298,7 +305,7 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const all = [...seen.values()];
   const found = { notes: [...notes].slice(0, 3), total: all.length, core: all.filter((g) => g.relevance !== "adjacent").length, adjacent: all.filter((g) => g.relevance === "adjacent").length, inactive: all.filter((g) => g.activity === "inactive").length, at: nowIso() };
   const fresh = (await getOne<Campaign>("campaigns", id)) || c;
-  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, updatedAt: nowIso() };
+  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, searchGroupIds: all.map((g) => g.id), updatedAt: nowIso() };
   await putOne("campaigns", next);
   await logAction({ actor: "agent", action: "campaign.search", detail: c.title + ": " + found.total + " сообществ (профильных " + found.core + ", смежных " + found.adjacent + ", неактивных " + found.inactive + ")" });
   return { campaign: next, groups: all, notes: [...notes], queries: attempted };
@@ -338,10 +345,12 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
   }
   const ids = new Set(existing.map((t) => t.id));
   const out: CampaignTask[] = [];
-  for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x))) {
+  for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x) && (x.found?.total || 0) > 0 && (x.searchGroupIds?.length || 0) > 0)) {
+    const eligible = new Set(c.searchGroupIds);
     let count = live.filter((t) => t.campaignId === c.id && t.day === day).length;
     for (const g of groups) {
       if (count >= c.dailyTarget) break;
+      if (!eligible.has(g.id)) continue;
       const mode = modeFor(g);
       if (!mode || !matchesCampaign(g, c)) continue;
       const id = stableId("ct", c.id + "|" + g.id + "|" + day);
@@ -376,7 +385,7 @@ export async function planDay(day = today()): Promise<PlanResult> {
 
 async function activeCampaign(id: string) {
   const c = await getOne<Campaign>("campaigns", id);
-  return c?.status === "approved" && !isPolishWineCampaign(c) ? c : null;
+  return c?.status === "approved" && !isPolishWineCampaign(c) && (c.found?.total || 0) > 0 && (c.searchGroupIds?.length || 0) > 0 ? c : null;
 }
 
 // Bot tasks: only chats where an admin added the bot, ~3 s apart, daily limit shared with /post.
@@ -471,7 +480,7 @@ export function capacityOf(groups: GroupCard[], tasks: CampaignTask[], campaigns
     byMode[mode].sustained += limit / Math.max(1, g.minDaysBetween || 1);
   }
   const todays = tasks.filter((t) => t.day === day);
-  const target = campaigns.filter((c) => c.status === "approved" && !isPolishWineCampaign(c)).reduce((s, c) => s + c.dailyTarget, 0);
+  const target = campaigns.filter((c) => c.status === "approved" && !isPolishWineCampaign(c) && (c.found?.total || 0) > 0 && (c.searchGroupIds?.length || 0) > 0).reduce((s, c) => s + c.dailyTarget, 0);
   const sum = (k: "places" | "peak" | "sustained") => Math.round(byMode.bot[k] + byMode.partner[k] + byMode.manual[k]);
   return {
     day,
