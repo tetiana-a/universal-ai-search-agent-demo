@@ -1,7 +1,7 @@
 import { runStructuredExtraction } from "@/lib/free-ai";
 import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
 import { DEFAULT_DAILY_LIMIT, findGroups, listGroups, refreshActivity, telegramFeed, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
-import { getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
+import { claimOnce, getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
 import { botToken, controlIds, reportChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { escapeHtml, nowIso, randomId, stableId } from "@/lib/scout/text";
 import { isPolishWineCampaign, POLISH_WINE_B2B_QUERIES } from "@/lib/scout/wine-compliance";
@@ -400,6 +400,9 @@ export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 
     const campaign = await activeCampaign(task.campaignId);
     const group = await getOne<GroupCard>("groups", task.groupId);
     if (!campaign || !group?.botConnected || !group.postingEnabled || !group.chatId) { await putOne("campaign_tasks", { ...task, status: "cancelled", updatedAt: nowIso() }); continue; }
+    // Two cron workers may overlap. A distributed NX lock prevents duplicate
+    // sends for the same scheduled campaign/group/day item.
+    if (!(await claimOnce("campaign-dispatch:" + task.id, 60 * 60))) continue;
     const text = textFor(campaign, group.language);
     const result = campaign.photo ? await sendPhoto(group.chatId, campaign.photo, text) : await sendMessage(group.chatId, escapeHtml(text)).then((r) => ({ ok: r.ok, result: { message_id: r.messageId }, description: r.error }));
     const link = result?.ok ? messageLink(group, result?.result?.message_id) : undefined;
