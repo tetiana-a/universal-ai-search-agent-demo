@@ -75,7 +75,7 @@ export default function AnalyticsDashboard() {
   const t = a?.totals || {};
   const runs: any[] = useMemo(() => (data?.runs || []).filter((r: any) =>
     (origin === "all" || (r.origin || "web") === origin) && (!q || String(r.query || "").toLowerCase().includes(q.toLowerCase()))), [data, origin, q]);
-  const kinds = useMemo(() => Array.from(new Set((data?.journal || []).map((e: Entry) => e.action.split(".")[0]))).sort() as string[], [data]);
+  const kinds = useMemo(() => Array.from(new Set((data?.journal || []).map((e: Entry) => e.action.split(".")[0]))).sort((x: any, y: any) => String(x).localeCompare(String(y))) as string[], [data]);
   const journal: Entry[] = useMemo(() => (data?.journal || []).filter((e: Entry) =>
     (kind === "all" || e.action.split(".")[0] === kind) && (!q || (e.action + " " + (e.detail || "")).toLowerCase().includes(q.toLowerCase()))), [data, kind, q]);
   const maxDaily = Math.max(1, ...((a?.daily || []).map((d: any) => d.actions + d.searches)));
@@ -249,8 +249,8 @@ export default function AnalyticsDashboard() {
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-2 sm:items-center" onClick={() => setOpen(null)}>
-          <div className="glass max-h-[85vh] w-full max-w-[920px] overflow-y-auto rounded-[18px] bg-[var(--surface-strong)] p-4" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Результаты поиска">
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-2 sm:items-center" onClick={(e) => { if (e.target === e.currentTarget) setOpen(null); }} onKeyDown={(e) => { if (e.key === "Escape") setOpen(null); }}>
+          <div className="glass max-h-[85vh] w-full max-w-[920px] overflow-y-auto rounded-[18px] bg-[var(--surface-strong)] p-4" role="dialog" aria-label="Результаты поиска">
             <div className="mb-3 flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <div className="text-[14px]">{open.query || open.id}</div>
