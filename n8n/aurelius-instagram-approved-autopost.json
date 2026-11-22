@@ -1,0 +1,155 @@
+{
+  "name": "AURELIUS — Instagram automatic owner-approved posting from Google Sheets",
+  "nodes": [
+    {
+      "id": "schedule",
+      "name": "Every morning 08:00 Prague",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        180,
+        260
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-sheet",
+      "name": "Read approved Instagram queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        260
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "InstagramQueue",
+          "mode": "name"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "filter",
+      "name": "Validate owner-approved posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        260
+      ],
+      "parameters": {
+        "jsCode": "const input=$input.all();\nconst rows=[];\nfor(const {json:r} of input){\n if(String(r.status||'').toLowerCase()!=='approved' || String(r.approvedBy||'')!=='OWNER')continue;\n const requestId=String(r.id||'').trim();\n const caption=String(r.caption||'').trim();\n const mediaUrl=String(r.mediaUrl||'').trim();\n const scheduledAt=String(r.scheduledAt||'').trim();\n const integrationId=String(r.integrationId||'').trim();\n if(!/^[\\w-]{8,80}$/.test(requestId)||caption.length<5||caption.length>2200||!/^https:\\/\\//.test(mediaUrl)||!/^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d/.test(scheduledAt))continue;\n const at=Date.parse(scheduledAt);\n if(!Number.isFinite(at)||at<Date.now()+300000||at>Date.now()+30*86400000)continue;\n rows.push({json:{action:'schedule',confirm:'I_APPROVE_INSTAGRAM_SCHEDULE',approved:true,requestId,caption,mediaUrl,scheduledAt,integrationId}});\n}\nreturn rows.slice(0,25);"
+      }
+    },
+    {
+      "id": "http",
+      "name": "Schedule approved Instagram through AURELIUS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        945,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/scout/instagram",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "neverError": true
+        }
+      }
+    },
+    {
+      "id": "show",
+      "name": "Return scheduled IDs and errors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        260
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(x=>({json:{ok:x.json?.ok===true,postId:String(x.json?.job?.postId||''),jobId:String(x.json?.job?.id||''),status:x.json?.job?.status||'failed',error:String(x.json?.error||''),checkedAt:new Date().toISOString()}}));"
+      }
+    }
+  ],
+  "connections": {
+    "Every morning 08:00 Prague": {
+      "main": [
+        [
+          {
+            "node": "Read approved Instagram queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read approved Instagram queue": {
+      "main": [
+        [
+          {
+            "node": "Validate owner-approved posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate owner-approved posts": {
+      "main": [
+        [
+          {
+            "node": "Schedule approved Instagram through AURELIUS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule approved Instagram through AURELIUS": {
+      "main": [
+        [
+          {
+            "node": "Return scheduled IDs and errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "active": false,
+  "tags": [],
+  "meta": {
+    "description": "Daily owner-approved content queue, no automatic AI-generated public posts, no Telegram Trigger. Up to 25 approved rows/day; AURELIUS idempotency prevents double scheduling. POSTIZ_ENABLE_SCHEDULE and INSTAGRAM_AUTOPOST are required. Set Sheets OAuth and HTTP Header Auth x-scout-key credentials."
+  }
+}
