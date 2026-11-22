@@ -11,7 +11,7 @@ import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingC
 import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
-import { handleMyChatMember } from "@/lib/scout/groups";
+import { handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
 import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
@@ -703,6 +703,22 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   // /id is always safe: it only returns IDs from the caller's own update.
   if (command?.cmd === "id") {
     await sendMessage(chatId, await identityText(message));
+    return {};
+  }
+
+  // For bot admins whose original my_chat_member event was missed by the
+  // webhook: register an owned group after checking Telegram permissions.
+  if (command?.cmd === "connect") {
+    if (message.chat?.type === "private") {
+      await sendMessage(chatId, "Откройте вашу тестовую группу и отправьте /connect прямо в ней.");
+      return {};
+    }
+    if (!controlIds().has(userId)) {
+      await sendMessage(chatId, "⛔ Только владелец агентa может подключать группы.");
+      return {};
+    }
+    const result = await registerOwnedTelegramGroup(message.chat, userId);
+    await sendMessage(chatId, result.message + (result.group ? "\nГруппа: " + escapeHtml(result.group.name) + "\nChat ID: <code>" + escapeHtml(String(result.group.chatId || "")) + "</code>" : ""));
     return {};
   }
 
