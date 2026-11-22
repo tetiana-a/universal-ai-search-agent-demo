@@ -1,0 +1,81 @@
+{
+  "name": "AURELIUS — inspect connected Postiz channels",
+  "nodes": [
+    {
+      "name": "Manual start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {},
+      "id": "start"
+    },
+    {
+      "id": "get-channels",
+      "name": "Get connected Postiz channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        475,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/scout/postiz",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "show-channels",
+      "name": "Summarize available channels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        730,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const v = $input.first().json;\nif (!v.ok) throw new Error('Postiz not connected. Check POSTIZ_API_KEY in Vercel and SCOUT_ADMIN_KEY credential in n8n.');\nreturn (v.channels || []).map(c => ({json: {integrationId:c.id, account:c.name, platform:c.identifier, profile:c.profile || '', canDraft:!c.disabled}}));"
+      }
+    }
+  ],
+  "connections": {
+    "Manual start": {
+      "main": [
+        [
+          {
+            "node": "Get connected Postiz channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get connected Postiz channels": {
+      "main": [
+        [
+          {
+            "node": "Summarize available channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "tags": [],
+  "meta": {
+    "guide": "Read-only. Assign generic HTTP Header Auth with Name=x-scout-key and Value=<SCOUT_ADMIN_KEY>."
+  }
+}
