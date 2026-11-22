@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Gauge, Megaphone, Mic, Play, Plus, Radio, Search, Square, X } from "lucide-react";
 import type { Campaign, CampaignTask, Mention } from "@/lib/scout/campaigns";
+import { isPolishWineCampaign } from "@/lib/scout/wine-compliance";
 
 // Campaigns (TZ 1.2): task → keywords approval → community search → daily placement → monitoring.
 // The same flow runs from Telegram by voice; this screen shows and controls it.
@@ -46,22 +47,29 @@ function CampaignEditor({ c, act, busy }: Readonly<{ c: Campaign; act: (a: strin
   const [excl, setExcl] = useState(c.exclusions.join(", "));
   const [target, setTarget] = useState(String(c.dailyTarget));
   const dirty = kw !== c.keywords.join(", ") || adj !== c.adjacent.join(", ") || queries !== c.queries.join(", ") || excl !== c.exclusions.join(", ") || target !== String(c.dailyTarget);
+  const verifiedTargets = Boolean(c.found?.total && c.searchGroupIds?.length);
+  const blockedWine = isPolishWineCampaign(c);
+  const displayedStatus = blockedWine ? "B2B-поиск · публичная реклама вина запрещена"
+    : c.status === "approved" && !verifiedTargets ? "размещение заблокировано — нет подтверждённых целей"
+    : c.status === "ready" && !verifiedTargets ? "поиск завершён · нет пригодных площадок"
+    : STATUS[c.status];
   const save = () => act("update", { id: c.id, keywords: kw, adjacent: adj, queries, exclusions: excl, dailyTarget: Number(target) }, "save");
   return (
     <div className="rounded-xl border border-[var(--line-soft)] p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[14px]">{c.title} <span className="text-[11px] text-[var(--text-muted)]">· {STATUS[c.status]}{c.source === "voice" ? " · 🎙" : ""}</span></div>
+          <div className="text-[14px]">{c.title} <span className="text-[11px] text-[var(--text-muted)]">· {displayedStatus}{c.source === "voice" ? " · 🎙" : ""}</span></div>
           <div className="text-[11.5px] text-[var(--text-muted)]">{[c.topic, c.region, c.languages.join(", "), c.platforms.map((p) => ICON[p]).join(" ")].filter(Boolean).join(" · ")}{c.found ? " · найдено " + c.found.total + " (профильных " + c.found.core + ", смежных " + c.found.adjacent + ", неактивных " + c.found.inactive + ")" : ""}</div>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {c.status !== "approved" && c.status !== "searching" && <Btn variant={c.status === "draft" ? "spectrum" : "ghost"} disabled={Boolean(busy)} onClick={async () => { if (dirty) await save(); await act("search", { id: c.id }, "search"); }}><Search size={12} />{c.status === "draft" ? "Слова верны — искать" : "Искать ещё"}</Btn>}
-          {(c.status === "ready" || c.status === "stopped") && <Btn variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("start", { id: c.id }, "start")}><Play size={12} />Запустить размещение</Btn>}
+          {(c.status === "ready" || c.status === "stopped") && !blockedWine && <Btn variant="spectrum" disabled={Boolean(busy) || !verifiedTargets} onClick={() => void act("start", { id: c.id }, "start")}><Play size={12} />Запустить размещение</Btn>}
           {c.status === "approved" && <Btn onClick={() => void act("stop", { id: c.id }, "stop")}><Square size={12} />Стоп</Btn>}
           <Btn disabled={Boolean(busy)} onClick={() => void act("monitor", { id: c.id }, "monitor")}><Radio size={12} />{busy === "monitor" ? "Мониторинг…" : "Мониторинг"}</Btn>
           {c.status === "draft" && <Btn onClick={() => void act("remove", { id: c.id })}><X size={12} /></Btn>}
         </div>
       </div>
+      {(blockedWine || (c.status === "approved" && !verifiedTargets) || (c.status === "ready" && !verifiedTargets)) && <p className="mt-2 text-[12px] text-amber-600">{blockedWine ? "Публичная реклама вина в Польше отключена. Доступен B2B-поиск; нужна проверка конкретных обращений." : "Нет подтверждённого списка площадок для этой кампании. Остановите её при необходимости и повторите поиск."}</p>}
       {c.questions.length > 0 && c.status === "draft" && <div className="mt-2 rounded-lg border border-[var(--line-soft)] p-2 text-[12px]">❓ Уточните (ответьте боту или поправьте текст задачи): {c.questions.join(" · ")}</div>}
       <details className="mt-2" open={c.status === "draft"}>
         <summary className="cursor-pointer text-[12px] text-[var(--text-soft)]">Текст, ключевые слова ({c.keywords.length}), смежные, свои запросы, исключения</summary>
