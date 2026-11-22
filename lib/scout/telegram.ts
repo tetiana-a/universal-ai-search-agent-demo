@@ -143,26 +143,20 @@ export async function editMessage(chatId: string | number, messageId: number, ht
   await tgCall("editMessageText", { chat_id: chatId, message_id: messageId, text: html.slice(0, 4096), parse_mode: "HTML", disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard || [] } });
 }
 
+// Short menu: the main TZ flow first; every other command still works when typed.
 export const BOT_COMMANDS = [
-  { command: "panel", description: "Открыть меню" },
+  { command: "panel", description: "Главное меню" },
+  { command: "campaign", description: "Новая кампания (или просто голосовое)" },
+  { command: "campaigns", description: "Все кампании и прогресс за сегодня" },
+  { command: "creport", description: "Отчёт за день" },
+  { command: "capacity", description: "Ёмкость сети: сколько размещений в день" },
+  { command: "groups", description: "Найти сообщества: страна, город, тема" },
   { command: "find", description: "Найти что угодно" },
   { command: "status", description: "Что сейчас происходит" },
-  { command: "tasks", description: "Мои последние поиски" },
-  { command: "results", description: "Последние результаты" },
-  { command: "campaign", description: "Новая рекламная кампания (или голосовое)" },
-  { command: "campaigns", description: "Кампании: запуск, стоп, мониторинг" },
-  { command: "capacity", description: "Ёмкость сети: сколько размещений в день" },
-  { command: "creport", description: "Отчёт по кампаниям" },
-  { command: "groups", description: "Найти группы: страна, город, тема" },
-  { command: "connect", description: "Подключить собственную группу (внутри группы)" },
-  { command: "postiz", description: "Проверить собственные подключенные каналы Postiz" },
-  { command: "postizdraft", description: "Создать черновик в Postiz — без публикации" },
-  { command: "ighelp", description: "Настройка автопубликаций Instagram" },
-  { command: "igqueue", description: "Запланировать фото в Instagram" },
-  { command: "igstatus", description: "Проверить Instagram-публикации" },
-  { command: "igcancel", description: "Отменить запланированный Instagram-пост" },
-  { command: "post", description: "Опубликовать объявление" },
-  { command: "queue", description: "Очередь ручной публикации" },
-  { command: "posts", description: "Отчёт о публикациях" },
   { command: "help", description: "Как пользоваться" },
 ];
+
+export const BOT_PROFILE = {
+  short_description: "AURELIUS: AI-агент. Находит сообщества, размещает объявления там, где разрешено, и присылает отчёты.",
+  description: "✦ AURELIUS: AI-агент для рекламы в сообществах.\n\n🎙 Поставьте задачу голосом или текстом\n🔎 Найду профильные и смежные группы в Facebook, Telegram, Instagram, TikTok\n📣 Буду размещать каждый день, только где реклама разрешена\n📊 Пришлю мониторинг и отчёт\n\nНажмите «Старт».",
+};

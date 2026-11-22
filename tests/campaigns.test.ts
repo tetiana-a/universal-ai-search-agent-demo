@@ -167,4 +167,26 @@ describe("campaign flow", () => {
     expect(card.status).toBe("free");
     expect(planTasks([readyCampaign([card])], [card], [], "2026-11-22")[0]?.mode).toBe("partner");
   });
+  it("shows several campaigns at once with today's progress and routes the «new campaign» button to a campaign draft", async () => {
+    const sent: any[] = [];
+    mockFetch([{ match: (u) => u.includes("api.telegram.org"), respond: (_u, init) => { sent.push(JSON.parse(String(init?.body || "{}"))); return json({ ok: true, result: { message_id: sent.length } }); } }]);
+    const day = new Date().toISOString().slice(0, 10);
+    await putOne("campaigns", campaign({ id: "c1", found: { total: 86, core: 83, adjacent: 3, inactive: 3, at: now } }));
+    await putOne("campaigns", campaign({ id: "c2", title: "Ретрит на Бали", topic: "духовные практики", status: "ready", dailyTarget: 50 }));
+    for (let k = 0; k < 120; k++) await putOne("campaign_tasks", { id: "t" + k, campaignId: "c1", campaignTitle: "c", groupId: "g" + k, groupName: "G", platform: "telegram", url: "", day, mode: "bot", status: "sent", createdAt: now, updatedAt: now } satisfies CampaignTask);
+    const owner = { id: 8213865630, type: "private" };
+    await handleUpdate({ update_id: 0, message: { message_id: 0, chat: owner, from: { id: 8213865630 }, text: "/start" } });
+    expect(sent[0].text).toContain("Сегодня размещено: <b>120 / 300</b>");
+    await handleUpdate({ update_id: 1, message: { message_id: 1, chat: owner, from: { id: 8213865630 }, text: "/campaigns" } });
+    const board = sent.find((b) => String(b.text).includes("Кампании"));
+    expect(board.text).toContain("сегодня 120/300");
+    expect(board.text).toContain("Ретрит на Бали");
+    expect(JSON.stringify(board.reply_markup)).toContain("cp:open:c2");
+    await handleUpdate({ update_id: 2, callback_query: { id: "q", from: { id: 8213865630 }, data: "menu:newcampaign", message: { message_id: 5, chat: owner } } } as any);
+    const before = (await listAll<Campaign>("campaigns")).length;
+    const res: any = await handleUpdate({ update_id: 3, message: { message_id: 3, chat: owner, from: { id: 8213865630 }, text: "Продаю квартиру в Валенсии, 3 комнаты, 250 000 €. Telegram и Facebook, 300 в день." } });
+    await res?.background?.();
+    expect((await listAll<Campaign>("campaigns")).length).toBe(before + 1);
+    if (process.env.BOT_PREVIEW_OUT) (await import("node:fs")).writeFileSync(process.env.BOT_PREVIEW_OUT, JSON.stringify(sent, null, 1));
+  });
 });
