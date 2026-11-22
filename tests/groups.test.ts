@@ -92,7 +92,7 @@ describe("bot posting and manual queue", () => {
     const now = new Date().toISOString();
     const base = { ads: "unknown", status: "new", foundAt: now, updatedAt: now } as const;
     await upsertGroups([
-      { ...base, id: "g1", platform: "facebook", url: "https://www.facebook.com/groups/a", name: "FB A" },
+      { ...base, id: "g1", platform: "facebook", url: "https://www.facebook.com/groups/a", name: "FB A", status: "free", permissionNote: "Permission confirmed by admin" },
       { ...base, id: "g2", platform: "telegram", url: "https://t.me/b", name: "TG B", ads: "forbidden" },
     ] as GroupCard[]);
     const result = await queueManual("Текст", "all");
