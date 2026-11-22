@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { findGroups, normalizeInstagramProfileUrl, normalizeTikTokProfileUrl, platformSearchQueries, type Platform } from "@/lib/scout/groups";
+import { findGroups, inferredSearchPlatforms, normalizeInstagramProfileUrl, normalizeTikTokProfileUrl, platformSearchQueries, type Platform } from "@/lib/scout/groups";
 import { listGroups, postingTargets } from "@/lib/scout/groups";
 import { resetMemoryStore } from "@/lib/scout/store";
 import { json, mockFetch } from "./helpers";
@@ -22,6 +22,9 @@ describe("automatic multi-platform public discovery", () => {
       platforms: ["telegram", "instagram", "tiktok"],
     });
     expect(queries.slice(0, 3).map((q) => q.platform)).toEqual(["telegram", "instagram", "tiktok"]);
+    expect(inferredSearchPlatforms({ topic: "Ищи квартиры в Инстаграм, ТикТок и Телеграм", city: "Валенсия" }))
+      .toEqual(["telegram", "instagram", "tiktok"]);
+    expect(inferredSearchPlatforms({ topic: "Квартиры в Instagram" })).toEqual(["instagram"]);
     expect(queries).toHaveLength(6);
     expect(queries.find((q) => q.platform === "instagram")?.query).toContain("inmobiliaria pisos apartamentos");
     expect(queries.find((q) => q.platform === "tiktok")?.query).toContain("TikTok");
