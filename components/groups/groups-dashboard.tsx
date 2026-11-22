@@ -147,7 +147,7 @@ export default function GroupsDashboard() {
           </div>
         )}
 
-        {!needKey && state && <CampaignsPanel headers={headers} onToast={setToast} />}
+        {!needKey && state && <CampaignsPanel headers={headers} onToast={setToast} onExport={() => { void downloadGroups(); }} />}
 
         <Panel title="1. Найти сообщества и профили" icon={Radar} color="#30d158">
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_1fr_auto]">

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Gauge, Megaphone, Mic, Play, Plus, Radio, Search, Square, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Download, Gauge, Megaphone, Mic, Play, Plus, Radio, Search, Square, X } from "lucide-react";
 import type { Campaign, CampaignTask, Mention } from "@/lib/scout/campaigns";
 import { isPolishWineCampaign } from "@/lib/scout/wine-compliance";
 import { startVoiceRecording } from "@/components/voice-recorder";
@@ -90,12 +90,16 @@ function CampaignEditor({ c, act, busy }: Readonly<{ c: Campaign; act: (a: strin
   );
 }
 
-export default function CampaignsPanel({ headers, onToast }: Readonly<{ headers: () => Record<string, string>; onToast: (t: string) => void }>) {
+export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<{ headers: () => Record<string, string>; onToast: (t: string) => void; onExport?: () => void }>) {
   const [data, setData] = useState<Data | null>(null);
   const [busy, setBusy] = useState("");
   const [task, setTask] = useState("");
   const [mic, setMic] = useState<MediaRecorder | null>(null);
   const [hearing, setHearing] = useState(false);
+  const [welcome, setWelcome] = useState(false);
+  const taskRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { try { setWelcome(!sessionStorage.getItem("aurelius-welcome")); } catch { setWelcome(true); } }, []);
+  const closeWelcome = () => { setWelcome(false); try { sessionStorage.setItem("aurelius-welcome", "1"); } catch { /* private mode */ } };
   const [place, setPlace] = useState({ url: "", partnerTelegramId: "", dailyLimit: "", minDaysBetween: "", permissionNote: "" });
 
   const load = useCallback(async () => {
@@ -119,10 +123,22 @@ export default function CampaignsPanel({ headers, onToast }: Readonly<{ headers:
   const cap = data.capacity;
   const proofs = data.tasks.filter((t) => t.status === "proof");
 
+  const active = data.campaigns.filter((c) => c.status !== "stopped").length;
   return (
     <>
+      {welcome && (
+        <div className="glass mb-4 rounded-2xl p-4">
+          <div className="text-[15px]">✦ {data.campaigns.length ? "С возвращением в AURELIUS" : "Добро пожаловать в AURELIUS"}</div>
+          <p className="mt-1 text-[12.5px] text-[var(--text-muted)]">{data.campaigns.length ? "Кампаний в работе: " + active + ". Все кампании, база сообществ и журнал размещений сохранены." : "Опишите задачу текстом или голосом на любом языке, и агент найдёт сообщества и подготовит размещение."}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {data.campaigns.length > 0 && <Btn onClick={closeWelcome}>↩️ Продолжить</Btn>}
+            <Btn variant="spectrum" onClick={() => { closeWelcome(); setTask(""); taskRef.current?.focus(); }}><Plus size={12} />{data.campaigns.length ? "Новый диалог" : "Начать"}</Btn>
+            {onExport && data.campaigns.length > 0 && <Btn onClick={onExport}><Download size={12} />Выгрузить в Excel</Btn>}
+          </div>
+        </div>
+      )}
       <Section title="Рекламные кампании" icon={Megaphone} color="#ff375f" actions={data.campaigns.some((c) => c.status === "approved") ? <Btn onClick={() => void act("stopAll", {}, "stopAll")}><Square size={12} />Остановить всё</Btn> : undefined}>
-        <textarea className={inputClass + " min-h-20"} placeholder="Задача обычным языком: что рекламируем, где, на каких площадках, сколько в день, текст объявления. Можно голосом на любом языке." value={task} onChange={(e) => setTask(e.target.value)} />
+        <textarea ref={taskRef} className={inputClass + " min-h-20"} placeholder="Задача обычным языком: что рекламируем, где, на каких площадках, сколько в день, текст объявления. Можно голосом на любом языке." value={task} onChange={(e) => setTask(e.target.value)} />
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Btn variant="spectrum" disabled={task.trim().length < 10 || Boolean(busy)} onClick={async () => { const d = await act("create", { text: task }, "create"); if (d?.ok) setTask(""); }}><Plus size={12} />{busy === "create" ? "Разбираю…" : "Создать кампанию"}</Btn>
           <Btn disabled={hearing} onClick={async () => {

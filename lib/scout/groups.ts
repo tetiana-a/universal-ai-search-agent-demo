@@ -1,3 +1,4 @@
+import type { CampaignTask } from "@/lib/scout/campaigns";
 import { geminiSearch } from "@/lib/gemini-search";
 import { dataForSeoEnabled, dataForSeoSearch } from "@/lib/scout/dataforseo-groups";
 import { tgStatEnabled, tgStatSearch } from "@/lib/scout/tgstat";
@@ -817,7 +818,7 @@ const ADS_LABEL: Record<AdsPolicy, string> = { allowed: "разрешены", pa
 const STATUS_LABEL: Record<GroupStatus, string> = { new: "новая", contacted: "написали админу", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
 export { ADS_LABEL, STATUS_LABEL };
 
-export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = []) {
+export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = [], tasks: CampaignTask[] = []) {
   const mod: any = await import("exceljs");
   const ExcelJS: any = mod.default || mod;
   const wb = new ExcelJS.Workbook();
@@ -830,16 +831,33 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = []) {
     { header: "Страна", key: "country", width: 12 }, { header: "Город", key: "city", width: 14 }, { header: "Тема", key: "topic", width: 18 },
     { header: "Статус", key: "status", width: 16 }, { header: "Цена поста", key: "price", width: 11 }, { header: "Валюта", key: "currency", width: 8 },
     { header: "Бот в группе", key: "bot", width: 12 }, { header: "Заметки", key: "notes", width: 30 },
+    { header: "Язык", key: "language", width: 7 }, { header: "Релевантность", key: "relevance", width: 13 }, { header: "Найдено по запросу", key: "foundBy", width: 28 },
+    { header: "Активность", key: "activity", width: 12 }, { header: "Последний пост", key: "lastPost", width: 14 }, { header: "Постов в неделю", key: "perWeek", width: 10 },
   ];
-  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль" : g.kind === "page" ? "страница" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
+  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль" : g.kind === "page" ? "страница" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || ""),
+    language: g.language || "", relevance: g.relevance === "adjacent" ? "смежное" : g.relevance === "core" ? "профильное" : "", foundBy: safe(g.foundBy || ""),
+    activity: { active: "активно", inactive: "неактивно", unknown: "не проверено" }[g.activity || "unknown"], lastPost: (g.lastPostAt || "").slice(0, 10), perWeek: g.postsPerWeek ?? "" });
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 1 }];
-  ws.autoFilter = { from: "A1", to: "O1" };
+  ws.autoFilter = { from: "A1", to: "U1" };
   if (posts.length) {
     const log = wb.addWorksheet("Журнал публикаций");
     log.columns = [{ header: "Время (UTC)", key: "at", width: 20 }, { header: "Группа", key: "group", width: 32 }, { header: "Платформа", key: "platform", width: 11 }, { header: "Способ", key: "mode", width: 14 }, { header: "Статус", key: "status", width: 12 }, { header: "Ссылка", key: "link", width: 36 }, { header: "Текст", key: "text", width: 50 }, { header: "Ошибка", key: "error", width: 30 }];
     for (const p of posts) log.addRow({ at: p.at.replace("T", " ").slice(0, 19), group: safe(p.groupName), platform: p.platform, mode: p.mode === "bot" ? "бот" : "вручную", status: { sent: "отправлено", failed: "ошибка", published: "опубликовано", skipped: "пропущено" }[p.status], link: p.link || "", text: safe(p.text), error: safe(p.error || "") });
     log.getRow(1).font = { bold: true };
   }
+  if (tasks.length) {
+    const ct = wb.addWorksheet("Размещения кампаний");
+    ct.columns = [{ header: "День", key: "day", width: 11 }, { header: "Кампания", key: "campaign", width: 30 }, { header: "Площадка", key: "group", width: 32 }, { header: "Платформа", key: "platform", width: 11 }, { header: "Способ", key: "mode", width: 12 }, { header: "Статус", key: "status", width: 14 }, { header: "Ссылка на пост", key: "proof", width: 40 }, { header: "Ссылка на площадку", key: "url", width: 40 }];
+    const MODE: Record<string, string> = { bot: "бот", partner: "админ-партнёр", manual: "вручную" };
+    for (const t of [...tasks].sort((a, b) => b.day.localeCompare(a.day))) ct.addRow({ day: t.day, campaign: safe(t.campaignTitle), group: safe(t.groupName), platform: PLATFORM_LABEL[t.platform] || t.platform, mode: MODE[t.mode] || t.mode, status: t.status, proof: t.link || "", url: t.url || "" });
+    ct.getRow(1).font = { bold: true };
+    ct.views = [{ state: "frozen", ySplit: 1 }];
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+// Everything the TZ asks to export: communities base, publishing log, campaign placements.
+export async function fullExportXlsx() {
+  return groupsXlsx(await listGroups(), await listPosts(2000), await listAll<CampaignTask>("campaign_tasks"));
 }

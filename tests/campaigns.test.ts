@@ -189,4 +189,18 @@ describe("campaign flow", () => {
     expect((await listAll<Campaign>("campaigns")).length).toBe(before + 1);
     if (process.env.BOT_PREVIEW_OUT) (await import("node:fs")).writeFileSync(process.env.BOT_PREVIEW_OUT, JSON.stringify(sent, null, 1));
   });
+  it("greets a returning owner with «continue / new dialog» and exports the whole base to Excel", async () => {
+    const sent: any[] = []; const docs: string[] = [];
+    mockFetch([{ match: (u) => u.includes("api.telegram.org"), respond: (u, init) => { if (u.endsWith("/sendDocument")) docs.push(u); else sent.push(JSON.parse(String(init?.body || "{}"))); return json({ ok: true, result: { message_id: 1 } }); } }]);
+    const owner = { id: 8213865630, type: "private" };
+    await handleUpdate({ update_id: 1, message: { message_id: 1, chat: owner, from: { id: 8213865630, first_name: "T" }, text: "/start" } });
+    expect(sent[0].text).toContain("Здравствуйте");
+    await putOne("campaigns", campaign());
+    await upsertGroups([group("vlc", { relevance: "adjacent", language: "es", activity: "active" })]);
+    await handleUpdate({ update_id: 2, message: { message_id: 2, chat: owner, from: { id: 8213865630, first_name: "T" }, text: "/start" } });
+    expect(sent.at(-1).text).toContain("С возвращением");
+    expect(JSON.stringify(sent.at(-1).reply_markup)).toContain("menu:fresh");
+    await handleUpdate({ update_id: 3, callback_query: { id: "q", from: { id: 8213865630 }, data: "menu:export", message: { message_id: 5, chat: owner } } } as any);
+    expect(docs).toHaveLength(1);
+  });
 });

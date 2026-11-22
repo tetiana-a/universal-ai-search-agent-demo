@@ -368,6 +368,12 @@ export async function loadTask(chatId: string) {
   return getValue<ResearchTask>(TASK_KEY + chatId);
 }
 
+// «Новый диалог»: forget the current search pointer; its results stay in history (research_tasks).
+export async function startFreshDialog(chatId: string) {
+  const task = await loadTask(chatId);
+  if (task && task.state !== "running") await deleteValue(TASK_KEY + chatId);
+}
+
 export async function saveTask(task: ResearchTask) {
   await Promise.all([
     setValue(TASK_KEY + task.chatId, task),
