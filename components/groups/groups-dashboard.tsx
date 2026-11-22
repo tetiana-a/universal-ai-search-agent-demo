@@ -272,7 +272,7 @@ export default function GroupsDashboard() {
         </div>
       )}
 
-      {toast && <output className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] px-4 py-2 text-[12.5px] shadow-xl">{toast}</output>}
+      {toast && <output className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] px-4 py-2 text-[12.5px] shadow-xl">{toast}</output>}
     </main>
   );
 }

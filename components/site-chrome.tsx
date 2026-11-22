@@ -89,28 +89,33 @@ export default function SiteChrome({ children }: Readonly<{ children: ReactNode 
       <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => setPlaying(false)} preload="none">
         <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
       </audio>
-      <nav aria-label="Разделы" className="site-dock fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] p-1 text-[13px] shadow-2xl backdrop-blur-xl">
+      <nav aria-label="Разделы" className="site-dock fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-2 right-2 z-[60] flex items-center justify-between gap-0.5 sm:bottom-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:justify-start sm:gap-1 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] p-1 text-[13px] shadow-2xl backdrop-blur-xl">
         {TABS.map(({ href, label, icon: Icon }) => {
           const active = base === href;
           return (
-            <Link key={href} href={href} aria-current={active ? "page" : undefined}
-              className={"inline-flex h-8 items-center gap-1.5 rounded-full px-3 transition " + (active ? "bg-[var(--gold)]/15 text-[var(--gold-bright)]" : "text-[var(--text-soft)] hover:text-[var(--text)]")}>
-              <Icon size={14} /><span className={active ? "" : "hidden sm:inline"}>{label}</span>
+            <Link key={href} href={href} aria-current={active ? "page" : undefined} aria-label={label}
+              onClick={() => { if (active) window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              className={"inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-3 transition sm:h-8 sm:flex-none " + (active ? "bg-[var(--gold)]/15 text-[var(--gold-bright)]" : "text-[var(--text-soft)] hover:text-[var(--text)]")}>
+              <Icon size={15} /><span className="hidden sm:inline">{label}</span>
             </Link>
           );
         })}
-        <span className="mx-1 h-5 w-px bg-[var(--line)]" aria-hidden="true" />
-        <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="grid h-8 w-8 place-items-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)]"
+        <span className="mx-0.5 h-5 w-px shrink-0 bg-[var(--line)] sm:mx-1" aria-hidden="true" />
+        <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="grid h-9 flex-1 place-items-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] sm:h-8 sm:w-8 sm:flex-none"
           aria-label={theme === "dark" ? "Светлая тема" : "Тёмная тема"} title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}>
           {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
         </button>
-        <button type="button" onClick={() => void toggleRadio()} className={"inline-flex h-8 items-center gap-1.5 rounded-full px-3 " + (playing ? "bg-[var(--success)]/12 text-[var(--success)]" : "text-[var(--text-muted)] hover:text-[var(--text)]")}
+        <button type="button" onClick={() => void toggleRadio()} className={"inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-3 sm:h-8 sm:flex-none " + (playing ? "bg-[var(--success)]/12 text-[var(--success)]" : "text-[var(--text-muted)] hover:text-[var(--text)]")}
           aria-label={playing ? "Выключить радио" : "Включить радио"} title={station ? station.name : "Радио"}>
           {playing ? <Pause size={14} /> : <Radio size={14} />}
           <span className="hidden max-w-[110px] truncate sm:inline">{playing ? station?.name || "Радио" : "Радио"}</span>
         </button>
+        {/* On phones the developer link lives inside the dock, so nothing floats over it. */}
+        <a href={DEV_LINK} target="_blank" rel="noreferrer" aria-label="Написать разработчику в Telegram" className="grid h-9 flex-1 place-items-center sm:hidden">
+          <span className="dev-chat-ring grid h-7 w-7 place-items-center rounded-full"><Send size={13} className="dev-chat-icon" /></span>
+        </a>
       </nav>
-      <a href={DEV_LINK} target="_blank" rel="noreferrer" className="dev-chat fixed bottom-4 right-4 z-[60] inline-flex h-10 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] pl-1 pr-1 text-[13px] text-[var(--text)] shadow-2xl backdrop-blur-xl"
+      <a href={DEV_LINK} target="_blank" rel="noreferrer" className="dev-chat fixed bottom-4 right-4 z-[60] hidden h-10 sm:inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] pl-1 pr-1 text-[13px] text-[var(--text)] shadow-2xl backdrop-blur-xl"
         aria-label="Написать разработчику в Telegram" title="Написать разработчику">
         <span className="dev-chat-ring grid h-8 w-8 place-items-center rounded-full"><Send size={14} className="dev-chat-icon" /></span>
         <span className="dev-chat-label">Написать разработчику</span>

@@ -1332,7 +1332,7 @@ html.light :is(h1, h2, .font-display, .scout-panel-title, .scout-kpi-value):not(
 }
 
 /* Room for the site dock (components/site-chrome.tsx) so it never covers the end of a page. */
-body { padding-bottom: 72px; }
+body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
 .site-dock { max-width: calc(100vw - 16px); }
 
 /* "Write to the developer": small floating Telegram button on every page. */
@@ -1349,4 +1349,3 @@ body { padding-bottom: 72px; }
 .dev-chat:hover .dev-chat-label, .dev-chat:focus-visible .dev-chat-label { max-width: 190px; opacity: 1; }
 @keyframes dev-chat-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dev-chat, .dev-chat-ring, .dev-chat-icon { animation: none; } }
-@media (max-width: 640px) { .dev-chat { bottom: 4.5rem; right: .75rem; } }
