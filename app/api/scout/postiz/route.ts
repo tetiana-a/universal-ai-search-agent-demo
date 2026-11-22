@@ -1,5 +1,5 @@
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
-import { createPostizDraft, listPostizChannels, postizConfigured, schedulePostizApproved } from "@/lib/scout/postiz";
+import { createPostizDraft, listPostizChannels, listRecentPostizPosts, postizConfigured, schedulePostizApproved } from "@/lib/scout/postiz";
 import { getOne } from "@/lib/scout/store";
 import type { Campaign } from "@/lib/scout/campaigns";
 import { isPolishWineCampaign } from "@/lib/scout/wine-compliance";
@@ -12,6 +12,11 @@ export async function GET(request: Request) {
   if (!isAuthorized(request)) return unauthorized();
   if (!postizConfigured()) return Response.json({ ok: false, configured: false, error: "POSTIZ_NOT_CONFIGURED", channels: [] }, { status: 503 });
   try {
+    const view = new URL(request.url).searchParams.get("view");
+    if (view === "posts") {
+      const posts = await listRecentPostizPosts();
+      return Response.json({ ok: true, configured: true, posts });
+    }
     const channels = await listPostizChannels();
     return Response.json({ ok: true, configured: true, channels });
   } catch (error) {
