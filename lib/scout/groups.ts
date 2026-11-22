@@ -115,14 +115,22 @@ export function normalizeFacebookGroupUrl(raw: string): string {
 // Normalize PUBLIC profile URLs only. Individual Instagram posts/reels, TikTok
 // search/hashtags and internal URLs are not community/profile targets.
 export function normalizeInstagramProfileUrl(raw: string): string {
-  const m = /(?:https?:\/\/)?(?:www\.|m\.)?instagram\.com\/([a-zA-Z0-9._]{2,30})(?=\/|[?&#\s"'<>)]|$)/i.exec(raw);
-  if (!m || /^(p|reel|reels|tv|stories|explore|accounts|direct|about|developer|api|directory|tags)$/i.test(m[1])) return "";
-  return "https://www.instagram.com/" + m[1].toLowerCase();
+  let url: URL;
+  try { url = new URL(/^https?:\/\//i.test(raw.trim()) ? raw.trim() : "https://" + raw.trim()); } catch { return ""; }
+  if (!["instagram.com", "www.instagram.com", "m.instagram.com"].includes(url.hostname.toLowerCase())) return "";
+  const pieces = url.pathname.split("/").filter(Boolean);
+  if (!pieces.length || pieces.length > 1 || !/^[a-zA-Z0-9._]{2,30}$/.test(pieces[0])) return "";
+  if (/^(p|reel|reels|tv|stories|explore|accounts|direct|about|developer|api|directory|tags)$/i.test(pieces[0])) return "";
+  return "https://www.instagram.com/" + pieces[0].toLowerCase();
 }
 export function normalizeTikTokProfileUrl(raw: string): string {
-  const m = /(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/(@[a-zA-Z0-9._]{2,24})(?=\/|[?&#\s"'<>)]|$)/i.exec(raw);
-  if (!m) return "";
-  return "https://www.tiktok.com/" + m[1].toLowerCase();
+  let url: URL;
+  try { url = new URL(/^https?:\/\//i.test(raw.trim()) ? raw.trim() : "https://" + raw.trim()); } catch { return ""; }
+  if (!["tiktok.com", "www.tiktok.com", "m.tiktok.com"].includes(url.hostname.toLowerCase())) return "";
+  const pieces = url.pathname.split("/").filter(Boolean);
+  if (!pieces.length || !/^@[a-zA-Z0-9._]{2,24}$/.test(pieces[0])) return "";
+  if (pieces.length > 1 && (pieces.length < 3 || pieces[1] !== "video")) return "";
+  return "https://www.tiktok.com/" + pieces[0].toLowerCase();
 }
 
 export function extractGroupLinks(text: string) {
@@ -441,7 +449,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     // Channels (and some groups) have a public feed: last post date and frequency.
     const feed = Date.now() < deadlineAt ? await telegramFeed(url) : [];
     const live = feed.length ? { ...activityFromPosts(feed), activityCheckedAt: now } : { activity: "unknown" as const };
-    return { ...base, ...live, id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLang(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), (input.language as any) || "en") };
+    return { ...base, ...live, foundBy: meta.sourceQuery, verification: "public_page", id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLang(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), (input.language as any) || "en") };
   });
 
   const fbList = [...facebook.entries()].slice(0, 30);
@@ -451,14 +459,33 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     if (!name) return null;
     const text = (preview?.description || "") + "\n" + meta.snippet;
     if (excluded(name + " " + text)) return null;
-    return { ...base, activity: "unknown", language: detectLang(name + " " + text, (input.language as any) || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
+    return { ...base, foundBy: meta.sourceQuery, verification: preview ? "public_page" : "indexed_candidate", activity: "unknown", language: detectLang(name + " " + text, (input.language as any) || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
   });
 
-  const found = [...tgCards, ...fbCards].filter(Boolean) as GroupCard[];
+  // Instagram/TikTok are PUBLIC thematic creators or business profiles, not
+  // Telegram-style communities. Search indexes are not reliable liveness,
+  // follower-count, posting-rights, or account ownership verification.
+  const makeProfiles = (platform: "instagram" | "tiktok", entries: Map<string, { title: string; snippet: string; sourceQuery: string }>): GroupCard[] =>
+    [...entries.entries()].slice(0, 50).flatMap(([url, meta]) => {
+      const handle = url.split("/").pop() || url;
+      const name = meta.title.replace(/\s*[|·•-]\s*(Instagram|TikTok).*$/i, "").trim().slice(0, 120) || handle;
+      if (excluded(name + " " + meta.snippet)) return [];
+      return [{
+        ...base, id: stableId("grp", url.toLowerCase()),
+        platform, kind: "profile" as const, url, name, ads: "unknown" as const,
+        activity: "unknown" as const, verification: "indexed_candidate" as const,
+        description: meta.snippet.slice(0, 600),
+        foundBy: meta.sourceQuery,
+        language: detectLang(name + " " + meta.snippet, (input.language as any) || "en"),
+      }];
+    });
+  const instagramCards = makeProfiles("instagram", instagram);
+  const tiktokCards = makeProfiles("tiktok", tiktok);
+  const found = [...tgCards, ...fbCards, ...instagramCards, ...tiktokCards].filter(Boolean) as GroupCard[];
   const saved = await upsertGroups(found);
   if (!found.length && !notes.length) notes.push("Поиск не вернул публичных групп. Попробуйте другую формулировку темы или город на местном языке.");
   await logAction({ actor: "agent", action: "groups.find", detail: input.topic + " · " + placeOf(input) + " → " + found.length + " (новых " + saved.added + ")" });
-  return { found: saved.cards.sort((a, b) => (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size, notes };
+  return { found: saved.cards.sort((a, b) => (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
 }
 
 // Keeps what the user already filled in (status, price, notes, posting switch, bot link).
@@ -754,7 +781,7 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = []) {
     { header: "Статус", key: "status", width: 16 }, { header: "Цена поста", key: "price", width: 11 }, { header: "Валюта", key: "currency", width: 8 },
     { header: "Бот в группе", key: "bot", width: 12 }, { header: "Заметки", key: "notes", width: 30 },
   ];
-  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
+  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль" : g.kind === "page" ? "страница" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.autoFilter = { from: "A1", to: "O1" };
