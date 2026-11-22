@@ -1,0 +1,108 @@
+{
+  "name": "AURELIUS — Postiz scheduled post (explicit owner approval only)",
+  "nodes": [
+    {
+      "id": "manual",
+      "name": "Manual owner approval",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        280
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "approve",
+      "name": "OWNER APPROVAL - edit campaign and time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        490,
+        280
+      ],
+      "parameters": {
+        "jsCode": "// This workflow is MANUAL ONLY. Owner must review the AURELIUS campaign first.\n// Change all three placeholders; campaign must already be APPROVED in AURELIUS.\nconst campaignId='REPLACE_APPROVED_CAMPAIGN_ID';\nconst integrationId='REPLACE_CONNECTED_POSTIZ_CHANNEL_ID';\nconst scheduledAt='REPLACE_UTC_DATETIME_2026-12-01T12:00:00Z';\nif ([campaignId,integrationId,scheduledAt].some(x=>x.startsWith('REPLACE_'))) throw new Error('Owner must specify campaign, Postiz integration and UTC time');\nconst ms=Date.parse(scheduledAt);\nif (!Number.isFinite(ms)||ms<Date.now()+300000) throw new Error('Schedule at least 5 minutes in future');\nreturn [{json:{action:'schedule',campaignId,integrationId,scheduledAt,confirm:'I_APPROVE_SCHEDULE',requestId:'owner-schedule-'+Date.now().toString(36)}}];"
+      }
+    },
+    {
+      "id": "schedule",
+      "name": "Schedule on authorized Postiz channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        280
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/scout/postiz",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 25000
+        }
+      }
+    },
+    {
+      "id": "result",
+      "name": "Confirm scheduled not published",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        990,
+        280
+      ],
+      "parameters": {
+        "jsCode": "const r=$input.first().json;\nif (!r.ok || !r.postId) throw new Error('Postiz did not accept scheduled post');\nreturn [{json:{postId:r.postId,channel:r.channel?.name||'',state:'SCHEDULED, NOT YET VERIFIED PUBLISHED',checkedAt:new Date().toISOString()}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Manual owner approval": {
+      "main": [
+        [
+          {
+            "node": "OWNER APPROVAL - edit campaign and time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OWNER APPROVAL - edit campaign and time": {
+      "main": [
+        [
+          {
+            "node": "Schedule on authorized Postiz channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule on authorized Postiz channel": {
+      "main": [
+        [
+          {
+            "node": "Confirm scheduled not published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "tags": [],
+  "meta": {
+    "description": "Manual only. Explicit owner approval + approved campaign + Vercel POSTIZ_ENABLE_SCHEDULE=on. No automatic mass posting. Only simple Postiz channels; Instagram/TikTok require Postiz UI."
+  }
+}
