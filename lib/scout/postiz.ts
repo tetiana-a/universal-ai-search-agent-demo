@@ -109,7 +109,7 @@ export async function schedulePostizApproved(args: {
     const response: any = await postiz("/posts", { method: "POST", body: JSON.stringify(request) });
     const postId = String((Array.isArray(response) ? response[0]?.postId : response?.postId) || "");
     if (!postId) throw new Error("POSTIZ_BAD_POST_RESPONSE");
-    await logAction({ actor: "owner", action: "postiz.scheduled", detail: args.campaignId + " · Postiz " + postId + " · " + channel.name + " · " + request.date });
+    await logAction({ actor: "human", action: "postiz.scheduled", detail: args.campaignId + " · Postiz " + postId + " · " + channel.name + " · " + request.date });
     return { ok: true, postId, channel, status: 202 };
   } catch (error) {
     const message = error instanceof Error ? error.message : "POSTIZ_UNKNOWN";
@@ -139,7 +139,7 @@ export async function createPostizDraft(args: { integrationId: string; content: 
     const response: any = await postiz("/posts", { method: "POST", body: JSON.stringify(payload) });
     const postId = String((Array.isArray(response) ? response[0]?.postId : response?.postId) || "");
     if (!postId) throw new Error("POSTIZ_BAD_POST_RESPONSE");
-    await logAction({ actor: "owner", action: "postiz.draft", detail: "Draft " + postId + " for " + channel.identifier + " (" + channel.name + ")" });
+    await logAction({ actor: "human", action: "postiz.draft", detail: "Draft " + postId + " for " + channel.identifier + " (" + channel.name + ")" });
     return { ok: true, postId, channel };
   } catch (error) {
     const message = error instanceof Error ? error.message : "POSTIZ_UNKNOWN";
