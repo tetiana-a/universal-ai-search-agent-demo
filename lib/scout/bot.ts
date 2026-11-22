@@ -245,7 +245,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       const requestId = "tg-" + userId + "-" + Date.now().toString(36);
       const result = await createPostizDraft({ integrationId, content, requestId }).catch(() => ({ok:false,error:"POSTIZ_API_ERROR"}));
       await sendMessage(chatId, result.ok
-        ? "✅ Создан черновик в Postiz, НЕ ОПУБЛИКОВАНО.\\nPost ID: <code>" + escapeHtml(result.postId || "") + "</code>\\nПроверьте черновик в кабинете Postiz."
+        ? "✅ Создан черновик в Postiz, НЕ ОПУБЛИКОВАНО.\\nPost ID: <code>" + escapeHtml(("postId" in result ? result.postId : "") || "") + "</code>\\nПроверьте черновик в кабинете Postiz."
         : "⚠️ Черновик не создан: " + escapeHtml(result.error || "ошибка подключения"));
       return {};
     }
