@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { Atmosphere } from "@/components/site-chrome";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Copy, Download, ExternalLink, ListChecks, Megaphone, MessageSquare, Radar, ScrollText, Send, Users, X } from "lucide-react";
 import CampaignsPanel from "@/components/groups/campaigns-panel";
@@ -61,7 +63,6 @@ export default function GroupsDashboard() {
 
   useEffect(() => {
     try {
-      document.documentElement.classList.toggle("light", window.localStorage.getItem("aurelius-theme") === "light");
       setKey(window.localStorage.getItem(KEY_STORAGE) || "");
     } catch {}
   }, []);
@@ -122,15 +123,16 @@ export default function GroupsDashboard() {
 
   return (
     <main className="scout-ui relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] spectrum-shell">
+      <Atmosphere />
       <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
       <div className="relative z-10 mx-auto max-w-[1400px] space-y-4 px-4 py-6 sm:px-6">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <a href="/" className="brand-mark font-display text-[24px] tracking-[.19em]">AURELIUS</a>
+            <Link href="/" className="brand-mark font-display text-[24px] tracking-[.19em]">AURELIUS</Link>
             <h1 className="mt-1 text-[18px] font-light">Кампании, сообщества и публикации</h1>
             <p className="text-[12px] text-[var(--text-muted)]">Задача голосом или текстом · 40 ключевых слов · профильные и смежные сообщества · размещение только там, где разрешено · мониторинг и отчёты</p>
           </div>
-          <div className="flex gap-2"><Button href="/scout">← Разведчик</Button></div>
+          
         </header>
 
         {needKey && (

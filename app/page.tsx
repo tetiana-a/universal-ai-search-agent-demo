@@ -1,5 +1,6 @@
 "use client";
 
+import { Atmosphere, useSite } from "@/components/site-chrome";
 import { startVoiceRecording } from "@/components/voice-recorder";
 import {
   Activity,
@@ -496,7 +497,7 @@ function countLocalSourceMemory() {
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ru");
-  const [theme, setTheme] = useState<Theme>("dark");
+  const { theme, setTheme, audioRef: radioAudioRef, playing: radioPlaying, station: siteStation, setStation: setSiteStation } = useSite();
   const [activeNav, setActiveNav] = useState<NavKey>("research");
   const [scenario, setScenario] = useState<Scenario>("realEstate");
   const [query, setQuery] = useState<string>(scenarios.realEstate.query);
@@ -595,7 +596,6 @@ export default function Home() {
   const [radioGenre, setRadioGenre] = useState("chillout");
   const [radioStations, setRadioStations] = useState<RadioStation[]>([]);
   const [radioLoading, setRadioLoading] = useState(false);
-  const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioError, setRadioError] = useState("");
   const [radioVolume, setRadioVolume] = useState(0.55);
   const [shareEmailFallback, setShareEmailFallback] = useState(false);
@@ -605,8 +605,8 @@ export default function Home() {
   const [telegramRecipients, setTelegramRecipients] = useState("");
   const [telegramDiagnostics, setTelegramDiagnostics] = useState<any>(null);
   const [telegramStatus, setTelegramStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
-  const radioAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentStation = siteStation as RadioStation | null;
+  const setCurrentStation = (s: RadioStation | null) => setSiteStation(s);
   const radioPanelRef = useRef<HTMLDivElement | null>(null);
   const [voiceError, setVoiceError] = useState("");
   const recognitionRef = useRef<any>(null);
@@ -724,11 +724,14 @@ export default function Home() {
     };
   }, [radioOpen]);
 
+  // The radio lives in the site shell and keeps playing across pages; show stream errors here.
   useEffect(() => {
-    return () => {
-      radioAudioRef.current?.pause();
-    };
-  }, []);
+    const audio = radioAudioRef.current;
+    if (!audio) return;
+    const onError = () => setRadioError(lang === "ru" ? "Поток станции недоступен. Выберите другую станцию." : "This station stream is unavailable. Choose another station.");
+    audio.addEventListener("error", onError);
+    return () => audio.removeEventListener("error", onError);
+  }, [lang, radioAudioRef]);
 
   useEffect(() => {
     if (!radioOpen) return;
@@ -766,11 +769,6 @@ export default function Home() {
   // Media Session is progressive enhancement; playback itself remains on HTMLAudioElement.
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("aurelius-theme") as Theme | null;
-    if (storedTheme === "light" || storedTheme === "dark") {
-      setTheme(storedTheme);
-    }
-
     const storedSettings = window.localStorage.getItem("aurelius-settings");
     if (storedSettings) {
       try {
@@ -783,8 +781,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("light", theme === "light");
-    window.localStorage.setItem("aurelius-theme", theme);
     setSettings((currentSettings) => ({ ...currentSettings, theme }));
   }, [theme]);
 
@@ -996,10 +992,8 @@ export default function Home() {
       if (currentStation?.stationuuid === station.stationuuid) {
         if (audio.paused) {
           await audio.play();
-          setRadioPlaying(true);
         } else {
           audio.pause();
-          setRadioPlaying(false);
         }
         return;
       }
@@ -1009,16 +1003,13 @@ export default function Home() {
       audio.load();
       setCurrentStation(station);
       await audio.play();
-      setRadioPlaying(true);
     } catch (error) {
-      setRadioPlaying(false);
       setRadioError(error instanceof Error ? error.message : "Unable to start this station.");
     }
   }
 
   function stopRadio() {
     radioAudioRef.current?.pause();
-    setRadioPlaying(false);
   }
 
   function skipRadio() {
@@ -3117,7 +3108,7 @@ export default function Home() {
 
   return (
     <main className={"home-motion relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell " + (radioPlaying ? "radio-live" : "")}>
-      <div className={"music-atmosphere pointer-events-none fixed inset-0 z-0 " + (radioPlaying ? "is-live" : "")} aria-hidden="true" />
+      <Atmosphere />
       <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
@@ -3794,25 +3785,7 @@ export default function Home() {
         </div>
       )}
 
-      <audio
-        ref={radioAudioRef}
-        onPlay={() => setRadioPlaying(true)}
-        onPause={() => setRadioPlaying(false)}
-        onError={() => {
-          setRadioPlaying(false);
-          setRadioError(lang === "ru" ? "Поток станции недоступен. Выберите другую станцию." : "This station stream is unavailable. Choose another station.");
-        }}
-        preload="none"
-      >
-        <track kind="captions" src="/radio-captions.vtt" srcLang="en" label="Radio captions" />
-      </audio>
 
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 hidden -translate-x-1/2 rounded-full border xl:block border-[var(--line)] bg-[var(--surface-strong)] px-3 py-2 text-[10px] text-[var(--text-muted)] shadow-2xl backdrop-blur-xl">
-        <span className="inline-flex items-center gap-2">
-          <Sparkles size={12} className="text-[var(--gold)]" />
-          {t.voice} • {t.noRealTime}
-        </span>
-      </div>
 
       <button
         onClick={() => {

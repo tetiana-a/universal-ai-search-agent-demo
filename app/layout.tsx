@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Alegreya_Sans, Cormorant_Garamond } from "next/font/google";
 import GoldCursor from "@/components/gold-cursor";
 import LineReveal from "@/components/line-reveal";
+import SiteChrome from "@/components/site-chrome";
 import "./globals.css";
 
 // The serif is kept only for the AURELIUS wordmark (see .brand-logo).
@@ -44,7 +45,7 @@ export default function RootLayout({
             </linearGradient>
           </defs>
         </svg>
-        {children}
+        <SiteChrome>{children}</SiteChrome>
         <GoldCursor />
         <LineReveal />
       </body>

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { Atmosphere, useSite } from "@/components/site-chrome";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CalendarPlus, Check, Database, Flame, Handshake, KeyRound, Landmark, Link2, ListChecks, MapPin, MessageSquare, Pencil, Plug,
@@ -235,14 +237,11 @@ export default function ScoutDashboard() {
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState("");
   const [advanced, setAdvanced] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
+  const { theme, setTheme } = useSite();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     try {
-      const savedTheme = window.localStorage.getItem("aurelius-theme") === "light" ? "light" : "dark";
-      setTheme(savedTheme);
-      document.documentElement.classList.toggle("light", savedTheme === "light");
       setKey(window.localStorage.getItem(KEY_STORAGE) || "");
     } catch {}
     const params = new URLSearchParams(window.location.search);
@@ -303,8 +302,6 @@ export default function ScoutDashboard() {
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    document.documentElement.classList.toggle("light", next === "light");
-    try { window.localStorage.setItem("aurelius-theme", next); } catch {}
   };
 
   const counts = dashboardCounts(state);
@@ -314,6 +311,7 @@ export default function ScoutDashboard() {
 
   return (
     <main className="scout-ui relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] transition-colors duration-300 spectrum-shell">
+      <Atmosphere />
       <div className="app-grid pointer-events-none fixed inset-0 z-0 opacity-45" />
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-[1900px]">
@@ -323,13 +321,13 @@ export default function ScoutDashboard() {
         >
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between">
-              <a href="/" className="brand-logo block min-w-0">
+              <Link href="/" className="brand-logo block min-w-0">
                 <div className="brand-mark font-display text-[26px] font-normal leading-none tracking-[.19em]">AURELIUS</div>
                 <div className="mt-2.5 flex items-center gap-2">
                   <span className="h-px w-6 bg-gradient-to-r from-[var(--gold)] to-transparent" />
                   <span className="font-display text-[13.5px] font-normal italic leading-none text-[var(--gold-bright)]">AI Scout · Разведчик</span>
                 </div>
-              </a>
+              </Link>
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}
@@ -364,10 +362,10 @@ export default function ScoutDashboard() {
                   </button>
                 );
               })}
-              <a href="/groups" className="scout-nav-item group flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-[7px] text-left text-[12.5px] text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]">
+              <Link href="/groups" className="scout-nav-item group flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-[7px] text-left text-[12.5px] text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-soft)]">
                 <span className="scout-nav-icon grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-transparent"><Users className="icon-lift icon-foil opacity-60 group-hover:opacity-100" size={14} /></span>
                 <span className="font-normal tracking-[-.005em]">Группы и постинг</span>
-              </a>
+              </Link>
             </nav>
 
             <button
@@ -394,7 +392,7 @@ export default function ScoutDashboard() {
             </div>
 
             <div className="mt-auto border-t border-[var(--line-soft)] pt-4">
-              <a
+              <Link
                 href="/"
                 className="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
               >
@@ -403,7 +401,7 @@ export default function ScoutDashboard() {
                   <span className="block">AI Research Engine</span>
                   <span className="block text-[9.5px] text-[var(--text-faint)]">Вернуться на основной сайт</span>
                 </span>
-              </a>
+              </Link>
             </div>
           </div>
         </aside>
