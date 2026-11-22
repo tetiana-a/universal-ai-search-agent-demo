@@ -730,7 +730,15 @@ export async function postViaBot(text: string, photo?: string, by = "dashboard",
 export async function queueManual(text: string, groupIds: string[] | "all", photoUrl?: string) {
   const body = text.trim().slice(0, 4000);
   if (!body) return { ok: false, added: 0, message: "Пустой текст." };
-  const groups = (await listGroups()).filter((g) => (groupIds === "all" ? !(g.botConnected && g.postingEnabled) && g.status !== "declined" && g.ads !== "forbidden" : groupIds.includes(g.id)));
+  // Publicly indexed IG/TikTok profiles and discovered groups are NOT
+  // advertising permissions. Never create even a manual placement task before
+  // an owner has recorded the administrator/partner agreement.
+  const groups = (await listGroups()).filter((g) =>
+    (groupIds === "all" || groupIds.includes(g.id)) &&
+    !(g.botConnected && g.postingEnabled) &&
+    ["free", "exchange", "paid"].includes(g.status) &&
+    g.ads !== "forbidden"
+  );
   const now = nowIso();
   const items: QueueItem[] = groups.map((g) => ({ id: randomId("q"), groupId: g.id, groupName: g.name, platform: g.platform, url: g.url, text: body, photoUrl: photoUrl || undefined, status: "pending", createdAt: now }));
   await putMany("group_queue", items);
