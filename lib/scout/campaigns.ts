@@ -621,5 +621,14 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
   const bot = await dispatchBotTasks(day, deadlineAt - 15_000);
   const chat = await reportChatId();
   if (chat) await sendMessage(chat, await digestText(day));
+  // Instagram is scheduled in Postiz; one daily check tracks actual external
+  // links without claiming success merely because Postiz accepted a schedule.
+  const instagram = await import("@/lib/scout/instagram-posts").then(m=>m.refreshInstagramJobs()).catch(()=>null);
+  if (chat && instagram?.length) {
+    const recent = instagram.slice(0, 6);
+    const rows = recent.map(j=>j.channelName+" · "+j.status+
+      (j.releaseURL ? " · "+j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
+    await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n"+rows.join("\n"));
+  }
   return { plan, partners, bot };
 }

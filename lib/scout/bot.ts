@@ -16,6 +16,7 @@ import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/s
 import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
 import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
 import { createPostizDraft, listPostizChannels, postizConfigured } from "@/lib/scout/postiz";
+import { cancelInstagramJob, listInstagramJobs, refreshInstagramJobs, scheduleInstagram } from "@/lib/scout/instagram-posts";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -40,6 +41,7 @@ const HELP = [
   "Я задам уточнения, предложу 40 ключевых слов, найду профильные и смежные сообщества и буду размещать каждый день только там, где разрешено.",
   "/campaigns — кампании · /capacity — ёмкость сети · /creport — отчёт · /cstop all — остановить всё",
   "/postiz — мои разрешённые аккаунты · /postizdraft ID | текст — черновик (НЕ публикация)",
+  "/ighelp — автоматическая публикация Instagram · /igqueue — запланировать фото · /igstatus — отчёт · /igcancel ID — отмена",
   "Команды запоминать не нужно — используйте кнопки.",
 ].join("\n");
 
@@ -219,11 +221,11 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       }
       try {
         const channels = await listPostizChannels();
-        await sendLong(chatId, "<b>Postiz · подключённые аккаунты</b>\\n" + (channels.length
+        await sendLong(chatId, "<b>Postiz · подключённые аккаунты</b>\n" + (channels.length
           ? channels.map((c, i) => (i+1) + ". " + escapeHtml(c.name) + " · " + escapeHtml(c.identifier) +
-            (c.disabled ? " · отключён" : " · доступен") + "\\nID: <code>" + escapeHtml(c.id) + "</code>").join("\\n\\n")
+            (c.disabled ? " · отключён" : " · доступен") + "\nID: <code>" + escapeHtml(c.id) + "</code>").join("\n\n")
           : "Нет подключённых аккаунтов. В Postiz подключите собственную страницу.") +
-          "\\n\\nЧерновик: <code>/postizdraft ID | текст</code>. Никаких публикаций автоматически не будет.");
+          "\n\nЧерновик: <code>/postizdraft ID | текст</code>. Никаких публикаций автоматически не будет.");
       } catch {
         await sendMessage(chatId, "⚠️ Postiz API недоступен. Проверьте ключ в Vercel и тариф.");
       }
@@ -237,7 +239,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       }
       const separator = args.indexOf("|");
       if (separator < 1) {
-        await sendMessage(chatId, "Формат: <code>/postizdraft ID_аккаунта | точный текст</code>\\nID получаете командой /postiz.");
+        await sendMessage(chatId, "Формат: <code>/postizdraft ID_аккаунта | точный текст</code>\nID получаете командой /postiz.");
         return {};
       }
       const integrationId = args.slice(0, separator).trim();
@@ -245,8 +247,60 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       const requestId = "tg-" + userId + "-" + Date.now().toString(36);
       const result = await createPostizDraft({ integrationId, content, requestId }).catch(() => ({ok:false,error:"POSTIZ_API_ERROR"}));
       await sendMessage(chatId, result.ok
-        ? "✅ Создан черновик в Postiz, НЕ ОПУБЛИКОВАНО.\\nPost ID: <code>" + escapeHtml(("postId" in result ? result.postId : "") || "") + "</code>\\nПроверьте черновик в кабинете Postiz."
+        ? "✅ Создан черновик в Postiz, НЕ ОПУБЛИКОВАНО.\nPost ID: <code>" + escapeHtml(("postId" in result ? result.postId : "") || "") + "</code>\nПроверьте черновик в кабинете Postiz."
         : "⚠️ Черновик не создан: " + escapeHtml(result.error || "ошибка подключения"));
+      return {};
+    }
+
+    case "ighelp": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId,"⛔ Только владелец в личном чате."); return {};
+      }
+      await sendMessage(chatId,"📸 <b>Автоматические публикации Instagram через Postiz</b>\n\n1. Пришлите ОДНУ фотографию с подписью:\n<code>/igqueue 2026-11-25T19:00:00+01:00 | Мой текст публикации</code>\n\n2. Или без фото, с публичной HTTPS-ссылкой:\n<code>/igqueue 2026-11-25T19:00:00+01:00 | https://example.com/photo.jpg | Мой текст</code>\n\nЭто подтверждённое задание в расписание: Postiz автоматически опубликует пост в указанный час. Нужны права на контент, собственный Instagram и медиа. Контроль: /igstatus. Отмена: /igcancel ID. Время пишите с часовым поясом +01:00 или +02:00.");
+      return {};
+    }
+    case "igqueue": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId,"⛔ Instagram доступен только владельцу в личном чате."); return {};
+      }
+      const parts=args.split("|").map(x=>x.trim());
+      if (parts.length !== 3) {
+        await sendMessage(chatId,"📸 Пришлите фото с подписью /igqueue ДАТА_С_ПОЯСОМ | текст. Или команду /igqueue ДАТА | публичный_https_файл | текст. Подробно: /ighelp");
+        return {};
+      }
+      const [scheduledAt,mediaUrl,...caption]=parts;
+      const requestId="tgig-"+userId+"-"+Date.now().toString(36);
+      await sendMessage(chatId,"⏳ Проверяю Instagram и ставлю фото в расписание Postiz…");
+      const result=await scheduleInstagram({ requestId, ownerId:userId, mediaUrl, caption:caption.join(" | "), scheduledAt })
+        .catch(()=>({ok:false,error:"INSTAGRAM_API_UNAVAILABLE",job:undefined}));
+      await sendMessage(chatId,result.ok && result.job
+        ? "✅ <b>Instagram запланирован автоматически</b>\nАккаунт: "+escapeHtml(result.job.channelName)+"\nДата: "+escapeHtml(result.job.scheduledAt)+"\nID: <code>"+escapeHtml(result.job.id)+"</code>\nЭто расписание, а не доказательство публикации. Проверить: /igstatus"
+        : "⚠️ Instagram не запланирован: "+escapeHtml(result.error||"неизвестная ошибка")+"\nПроверьте /ighelp и настройки INSTAGRAM_AUTOPOST.");
+      return {};
+    }
+    case "igstatus": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId,"⛔ Только владелец в личном чате."); return {};
+      }
+      let posts=await refreshInstagramJobs().catch(()=>null);
+      const stale=!posts;
+      posts ??=await listInstagramJobs();
+      const rows=posts.slice(0,8).map(p=>"<code>"+escapeHtml(p.id)+"</code> · "+escapeHtml(p.channelName)+" · "+
+        (p.status==="published" ? "✅ опубликовано" : p.status==="scheduled" ? "🗓 в расписании" : p.status==="cancelled" ? "⏹ отменено" : "⚠️ не подтверждено")+
+        "\n"+escapeHtml(p.scheduledAt)+(p.releaseURL ? "\n"+escapeHtml(p.releaseURL) : "")).join("\n\n");
+      await sendMessage(chatId,"📊 <b>Instagram / Postiz</b>"+(stale?"\n⚠️ API статистики недоступен, показан журнал AURELIUS.":"")+
+        "\n\n"+(rows||"Очередь пуста. /ighelp"));
+      return {};
+    }
+    case "igcancel": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId,"⛔ Только владелец в личном чате."); return {};
+      }
+      if (!/^ig-[\w-]{8,80}$/.test(args)) {
+        await sendMessage(chatId,"Укажите ID из /igstatus: <code>/igcancel ig-...</code>");return {};
+      }
+      const cancelled=await cancelInstagramJob(args).catch(()=>({ok:false,error:"POSTIZ_CANCEL_FAILED"}));
+      await sendMessage(chatId,cancelled.ok?"⏹ Запланированная публикация отменена в Postiz.":"⚠️ Отмена не подтверждена: "+escapeHtml(cancelled.error||"ошибка"));
       return {};
     }
 
@@ -711,6 +765,29 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
     return handleVoice(chatId, voice.file_id, userId);
   }
+  // Telegram owner photo with explicit time + caption -> Postiz media upload and
+  // one scheduled Instagram feed post. Does not require an additional n8n cron.
+  if (message?.photo && /^\/igqueue(?:@\w+)?\s/i.test(String(message.caption || "")) && !message.from?.is_bot) {
+    const chatId=String(message.chat?.id||"");
+    const userId=String(message.from?.id||"");
+    if (message.chat?.type!=="private" || !controlIds().has(chatId) || !controlIds().has(userId)) return {};
+    const parts=String(message.caption).replace(/^\/igqueue(?:@\w+)?\s*/i,"").split("|").map((x:string)=>x.trim());
+    if(parts.length!==2){
+      await sendMessage(chatId,"Формат подписи фото: /igqueue 2026-11-25T19:00:00+01:00 | Текст поста");return {};
+    }
+    const photo=message.photo[message.photo.length-1];
+    const fileId=String(photo?.file_id||"");
+    const requestId="tgig-"+userId+"-"+String(message.message_id||Date.now());
+    await sendMessage(chatId,"⏳ Загружаю вашу фотографию в Postiz и ставлю Instagram-публикацию в расписание…");
+    return { background:async()=>{
+      const result=await scheduleInstagram({requestId,ownerId:userId,telegramFileId:fileId,scheduledAt:parts[0],caption:parts[1]})
+        .catch(()=>({ok:false,error:"INSTAGRAM_API_UNAVAILABLE",job:undefined}));
+      await sendMessage(chatId,result.ok && result.job
+        ? "✅ <b>Instagram запланирован в Postiz</b>\nАккаунт: "+escapeHtml(result.job.channelName)+"\nДата: "+escapeHtml(result.job.scheduledAt)+"\nID: <code>"+escapeHtml(result.job.id)+"</code>\nПроверить: /igstatus"
+        : "⚠️ Запланировать не удалось: "+escapeHtml(result.error||"ошибка")+"\nЕсли ответ не подтверждён, проверьте Postiz перед повторением.");
+    }};
+  }
+
   // A photo whose caption starts with /campaign: the campaign carries that photo.
   if (message?.photo && /^\/campaign(@\w+)?\b/i.test(String(message.caption || "")) && !message.from?.is_bot) {
     const chatId = String(message.chat?.id || "");

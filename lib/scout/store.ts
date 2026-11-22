@@ -22,6 +22,7 @@ export type Collection =
   | "group_queue"
   | "campaigns"
   | "campaign_tasks"
+  | "instagram_posts"
   | "mentions";
 
 const PREFIX = "aurelius:scout:v1:";
