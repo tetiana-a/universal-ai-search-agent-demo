@@ -23,6 +23,12 @@ const now = new Date().toISOString();
 const group = (id: string, over: Partial<GroupCard> = {}): GroupCard => ({ id, platform: "telegram", url: "https://t.me/" + id, name: id, ads: "unknown", status: "free", foundAt: now, updatedAt: now, ...over });
 const campaign = (over: Partial<Campaign> = {}): Campaign => ({ id: "c1", title: "Квартира Валенсия", adText: "Продаю квартиру", topic: "недвижимость", region: "Валенсия, Испания", languages: ["ru"], keywords: ["квартира"], adjacent: [], queries: [], exclusions: [], questions: [], translations: {}, platforms: ["telegram", "facebook", "instagram", "tiktok"], dailyTarget: 300, status: "approved", source: "text", createdAt: now, updatedAt: now, ...over });
 
+const readyCampaign = (groups: GroupCard[], over: Partial<Campaign> = {}): Campaign => campaign({
+  found: { total: groups.length, core: groups.length, adjacent: 0, inactive: 0, at: now },
+  searchGroupIds: groups.map((g) => g.id),
+  ...over,
+});
+
 describe("task parsing without AI", () => {
   it("asks for the region and ad text when missing and keeps at most 40 unique keywords", () => {
     const c = ruleCampaign("квартиры квартиры дома недвижимость");
@@ -64,10 +70,10 @@ describe("liveness and platforms", () => {
 describe("daily planner", () => {
   it("creates 300 tasks a day over 300 permitted placements, without duplicates, and 300 again the next day", () => {
     const groups = Array.from({ length: 300 }, (_, i) => group("g" + i, { botConnected: true, postingEnabled: true, chatId: String(-100 - i), dailyLimit: 1 }));
-    const day1 = planTasks([campaign()], groups, [], "2026-11-22");
+    const day1 = planTasks([readyCampaign(groups)], groups, [], "2026-11-22");
     expect(day1).toHaveLength(300);
-    expect(planTasks([campaign()], groups, day1, "2026-11-22")).toHaveLength(0);
-    expect(planTasks([campaign()], groups, day1, "2026-11-23")).toHaveLength(300);
+    expect(planTasks([readyCampaign(groups)], groups, day1, "2026-11-22")).toHaveLength(0);
+    expect(planTasks([readyCampaign(groups)], groups, day1, "2026-11-23")).toHaveLength(300);
   });
 
   it("respects permission, inactivity, the per-group interval and stopped campaigns", () => {
@@ -82,13 +88,26 @@ describe("daily planner", () => {
       group("weekly", { botConnected: true, postingEnabled: true, chatId: "-3", minDaysBetween: 7 }),
     ];
     const past: CampaignTask[] = [{ id: "old", campaignId: "x", campaignTitle: "x", groupId: "weekly", groupName: "weekly", platform: "telegram", url: "", day: "2026-11-20", mode: "bot", status: "sent", createdAt: now, updatedAt: now }];
-    const tasks = planTasks([campaign(), campaign({ id: "c2", status: "stopped" })], groups, past, "2026-11-22");
+    const tasks = planTasks([readyCampaign(groups), campaign({ id: "c2", status: "stopped" })], groups, past, "2026-11-22");
     expect(tasks.map((t) => t.groupId + ":" + t.mode).sort()).toEqual(["bot:bot", "manual:manual", "partner:partner"]);
-    const cap = capacityOf(groups, tasks, [campaign()], "2026-11-22");
+    const cap = capacityOf(groups, tasks, [readyCampaign(groups)], "2026-11-22");
     expect(cap.places).toBe(4);
     expect(cap.target).toBe(300);
     expect(cap.sustained).toBeLessThan(cap.peak);
   });
+});
+
+describe("audience isolation", () => {
+  it("does not schedule an unrelated community or a campaign with zero verified search results", async () => {
+    const valencia = group("valencia", { topic: "недвижимость", city: "Валенсия", country: "Испания", botConnected: true, postingEnabled: true, chatId: "-100777" });
+    const krakow = group("krakow", { topic: "цветы", city: "Краков", country: "Польша", botConnected: true, postingEnabled: true, chatId: "-100778" });
+    expect(planTasks([readyCampaign([valencia], { id: "valencia-campaign" })], [valencia, krakow], [], "2026-11-22").map((t) => t.groupId)).toEqual(["valencia"]);
+    const broken = readyCampaign([valencia], { id: "missing", found: { total: 0, core: 0, adjacent: 0, inactive: 0, at: now }, searchGroupIds: [] });
+    expect(planTasks([broken], [valencia], [], "2026-11-22")).toHaveLength(0);
+    await putOne("campaigns", { ...broken, status: "ready" });
+    expect(await setCampaignStatus(broken.id, "approved")).toBeNull();
+  });
+
 });
 
 describe("campaign flow", () => {
@@ -99,6 +118,7 @@ describe("campaign flow", () => {
     expect(ai).toBe(false);
     expect(draft.platforms).toEqual(["facebook", "instagram"]);
     await upsertGroups([group("ig", { platform: "instagram", url: "https://www.instagram.com/vlc", partnerTelegramId: "555" }), group("fb", { platform: "facebook", url: "https://www.facebook.com/groups/vlc", status: "exchange" })]);
+    await putOne("campaigns", { ...draft, found: { total: 2, core: 2, adjacent: 0, inactive: 0, at: now }, searchGroupIds: ["ig", "fb"] });
     await setCampaignStatus(draft.id, "approved");
     const plan = await planDay();
     expect(plan.byMode).toEqual({ bot: 0, partner: 1, manual: 1 });
@@ -122,7 +142,7 @@ describe("campaign flow", () => {
   it("lets a partner send /proof without owner rights and ignores voice from strangers", async () => {
     const sent: any[] = [];
     mockFetch([{ match: (u) => u.includes("api.telegram.org"), respond: (_u, init) => { sent.push(JSON.parse(String(init?.body || "{}"))); return json({ ok: true, result: { message_id: 1 } }); } }]);
-    await putOne("campaigns", campaign());
+    await putOne("campaigns", readyCampaign([group("g")]));
     await putOne("campaign_tasks", { id: "ct_1", campaignId: "c1", campaignTitle: "c", groupId: "g", groupName: "G", platform: "facebook", url: "", day: "2026-11-22", mode: "partner", status: "notified", partnerId: "777", createdAt: now, updatedAt: now } satisfies CampaignTask);
     await handleUpdate({ update_id: 1, message: { message_id: 1, chat: { id: 777, type: "private" }, from: { id: 777, first_name: "P" }, text: "/proof ct_1 https://www.facebook.com/groups/vlc/posts/123" } });
     expect((await getOne<CampaignTask>("campaign_tasks", "ct_1"))?.status).toBe("proof");
@@ -137,7 +157,7 @@ describe("campaign flow", () => {
     await handleUpdate({ update_id: 1, message: { message_id: 1, chat: { id: 555123, type: "private" }, from: { id: 555123, first_name: "Admin" }, text: "/join https://www.facebook.com/groups/valencia 2 3" } });
     let card = (await listAll<GroupCard>("groups"))[0];
     expect(card).toMatchObject({ platform: "facebook", partnerTelegramId: "555123", status: "contacted", dailyLimit: 2, minDaysBetween: 3 });
-    expect(planTasks([campaign()], [card], [], "2026-11-22")).toHaveLength(0);
+    expect(planTasks([readyCampaign([card])], [card], [], "2026-11-22")).toHaveLength(0);
     const owner = sent.find((b) => b.chat_id === "8213865630" && JSON.stringify(b.reply_markup || {}).includes("cp:pok:"));
     expect(owner).toBeTruthy();
     await handleUpdate({ update_id: 2, message: { message_id: 2, chat: { id: 666123, type: "private" }, from: { id: 666123 }, text: "/join https://www.facebook.com/groups/valencia" } });
@@ -145,6 +165,6 @@ describe("campaign flow", () => {
     await handleUpdate({ update_id: 3, callback_query: { id: "q1", from: { id: 8213865630 }, data: "cp:pok:" + card.id, message: { message_id: 9, chat: { id: 8213865630, type: "private" } } } } as any);
     card = (await getOne<GroupCard>("groups", card.id))!;
     expect(card.status).toBe("free");
-    expect(planTasks([campaign()], [card], [], "2026-11-22")[0]?.mode).toBe("partner");
+    expect(planTasks([readyCampaign([card])], [card], [], "2026-11-22")[0]?.mode).toBe("partner");
   });
 });
