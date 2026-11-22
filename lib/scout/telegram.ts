@@ -155,6 +155,8 @@ export const BOT_COMMANDS = [
   { command: "creport", description: "Отчёт по кампаниям" },
   { command: "groups", description: "Найти группы: страна, город, тема" },
   { command: "connect", description: "Подключить собственную группу (внутри группы)" },
+  { command: "postiz", description: "Проверить собственные подключенные каналы Postiz" },
+  { command: "postizdraft", description: "Создать черновик в Postiz — без публикации" },
   { command: "post", description: "Опубликовать объявление" },
   { command: "queue", description: "Очередь ручной публикации" },
   { command: "posts", description: "Отчёт о публикациях" },
