@@ -382,7 +382,14 @@ export type FindOutcome = { found: GroupCard[]; added: number; checked: number; 
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
   const selected = inferredSearchPlatforms(input);
-  const descriptors = platformSearchQueries({ ...input, platforms: selected });
+  const broad = isBroadDiscoveryTopic(input.topic);
+  const broadPage = Math.max(0, Math.min(BROAD_DISCOVERY_PAGES - 1, Math.trunc(input.broadPage || 0)));
+  if (broad) {
+    const cats = BROAD_DISCOVERY_CATEGORIES.slice(broadPage * BROAD_DISCOVERY_PAGE_SIZE, (broadPage + 1) * BROAD_DISCOVERY_PAGE_SIZE);
+    notes.push("Широкий поиск: подборка " + (broadPage + 1) + "/" + BROAD_DISCOVERY_PAGES +
+      " (категории: " + cats.join("; ") + "). Это не исчерпывающий каталог; для следующей подборки нажмите «Следующие категории».");
+  }
+  const descriptors = platformSearchQueries({ ...input, platforms: selected, broadPage });
   const queries = descriptors.map((q) => q.query);
   const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
   const onePerPlatform = descriptors.filter((d, i) => descriptors.findIndex((v) => v.platform === d.platform) === i);
@@ -392,7 +399,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
       ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en")))
       : Promise.resolve([]),
     runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 19_000)).catch(() => []),
-    selected.includes("telegram") && tgStatEnabled()
+    selected.includes("telegram") && !broad && tgStatEnabled()
       ? tgStatSearch(input.topic, input.country || "")
       : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
   ]);
@@ -467,9 +474,9 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   }
 
   const now = nowIso();
-  const topicWords = (input.topic + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
+  const topicWords = ((broad ? "" : input.topic) + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
   const relevant = (text: string) => { const t = text.toLowerCase(); return topicWords.some((w) => t.includes(w)); };
-  const base = { country: input.country || undefined, city: input.city || undefined, topic: input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
+  const base = { country: input.country || undefined, city: input.city || undefined, topic: broad ? "разные тематики" : input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
   const excluded = (text: string) => { const t = text.toLowerCase(); return (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase())); };
 
   const tgList = [...telegram.entries()].slice(0, 60);
