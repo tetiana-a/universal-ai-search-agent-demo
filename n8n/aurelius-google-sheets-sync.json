@@ -1,0 +1,385 @@
+{
+  "name": "AURELIUS — Google Sheets CRM mirror (manual, safe)",
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Manual start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        180,
+        350
+      ],
+      "parameters": {},
+      "typeVersion": 1
+    },
+    {
+      "id": "get-groups",
+      "name": "Read AURELIUS groups",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        420,
+        160
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/groups",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "get-campaigns",
+      "name": "Read AURELIUS campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        420,
+        570
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/campaigns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "map-Groups",
+      "name": "Map Groups",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        750,
+        80
+      ],
+      "parameters": {
+        "jsCode": "const f=(x)=>{const s=String(x??'').slice(0,1500);return /^[=+@-]/.test(s)?'\\''+s:s;};\nconst r=$input.first().json;\nif(!r || r.ok!==true) throw new Error('AURELIUS API not authorized');\nconst a=Array.isArray(r.groups)?r.groups:[];\nreturn a.map(g=>({id:f(g.id),url:f(g.url),name:f(g.name),platform:f(g.platform),city:f(g.city),country:f(g.country),status:f(g.status),ads:f(g.ads),members:Number(g.members||0),botConnected:!!g.botConnected,postingEnabled:!!g.postingEnabled,updatedAt:f(g.updatedAt)})).map(x=>({json:x}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "sheet-Groups",
+      "name": "Sheets Groups",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        1050,
+        80
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Groups",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "url": "={{ $json.url }}",
+            "name": "={{ $json.name }}",
+            "platform": "={{ $json.platform }}",
+            "city": "={{ $json.city }}",
+            "country": "={{ $json.country }}",
+            "status": "={{ $json.status }}",
+            "ads": "={{ $json.ads }}",
+            "members": "={{ $json.members }}",
+            "botConnected": "={{ $json.botConnected }}",
+            "postingEnabled": "={{ $json.postingEnabled }}",
+            "updatedAt": "={{ $json.updatedAt }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "id": "map-GroupPosts",
+      "name": "Map GroupPosts",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        750,
+        260
+      ],
+      "parameters": {
+        "jsCode": "const f=(x)=>{const s=String(x??'').slice(0,1500);return /^[=+@-]/.test(s)?'\\''+s:s;};\nconst r=$input.first().json;\nif(!r || r.ok!==true) throw new Error('AURELIUS API not authorized');\nconst a=Array.isArray(r.posts)?r.posts:[];\nreturn a.map(p=>({id:f(p.id),groupId:f(p.groupId),groupName:f(p.groupName),platform:f(p.platform),status:f(p.status),mode:f(p.mode),link:f(p.link),createdAt:f(p.createdAt),error:f(p.error)})).map(x=>({json:x}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "sheet-GroupPosts",
+      "name": "Sheets GroupPosts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        1050,
+        260
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GroupPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "groupId": "={{ $json.groupId }}",
+            "groupName": "={{ $json.groupName }}",
+            "platform": "={{ $json.platform }}",
+            "status": "={{ $json.status }}",
+            "mode": "={{ $json.mode }}",
+            "link": "={{ $json.link }}",
+            "createdAt": "={{ $json.createdAt }}",
+            "error": "={{ $json.error }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "id": "map-Campaigns",
+      "name": "Map Campaigns",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        750,
+        550
+      ],
+      "parameters": {
+        "jsCode": "const f=(x)=>{const s=String(x??'').slice(0,1500);return /^[=+@-]/.test(s)?'\\''+s:s;};\nconst r=$input.first().json;\nif(!r || r.ok!==true) throw new Error('AURELIUS API not authorized');\nconst a=Array.isArray(r.campaigns)?r.campaigns:[];\nreturn a.map(c=>({id:f(c.id),title:f(c.title),topic:f(c.topic),region:f(c.region),status:f(c.status),platforms:f((c.platforms||[]).join(',')),dailyTarget:Number(c.dailyTarget||0),found:Number(c.found?.total||0),updatedAt:f(c.updatedAt)})).map(x=>({json:x}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "sheet-Campaigns",
+      "name": "Sheets Campaigns",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        1050,
+        550
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Campaigns",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "title": "={{ $json.title }}",
+            "topic": "={{ $json.topic }}",
+            "region": "={{ $json.region }}",
+            "status": "={{ $json.status }}",
+            "platforms": "={{ $json.platforms }}",
+            "dailyTarget": "={{ $json.dailyTarget }}",
+            "found": "={{ $json.found }}",
+            "updatedAt": "={{ $json.updatedAt }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5
+    },
+    {
+      "id": "map-Tasks",
+      "name": "Map Tasks",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        750,
+        730
+      ],
+      "parameters": {
+        "jsCode": "const f=(x)=>{const s=String(x??'').slice(0,1500);return /^[=+@-]/.test(s)?'\\''+s:s;};\nconst r=$input.first().json;\nif(!r || r.ok!==true) throw new Error('AURELIUS API not authorized');\nconst a=Array.isArray(r.tasks)?r.tasks:[];\nreturn a.map(t=>({id:f(t.id),campaignId:f(t.campaignId),groupId:f(t.groupId),groupName:f(t.groupName),platform:f(t.platform),mode:f(t.mode),status:f(t.status),day:f(t.day),link:f(t.link),error:f(t.error)})).map(x=>({json:x}));"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "sheet-Tasks",
+      "name": "Sheets Tasks",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        1050,
+        730
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tasks",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "campaignId": "={{ $json.campaignId }}",
+            "groupId": "={{ $json.groupId }}",
+            "groupName": "={{ $json.groupName }}",
+            "platform": "={{ $json.platform }}",
+            "mode": "={{ $json.mode }}",
+            "status": "={{ $json.status }}",
+            "day": "={{ $json.day }}",
+            "link": "={{ $json.link }}",
+            "error": "={{ $json.error }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "typeVersion": 4.5
+    }
+  ],
+  "connections": {
+    "Manual start": {
+      "main": [
+        [
+          {
+            "node": "Read AURELIUS groups",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read AURELIUS campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read AURELIUS groups": {
+      "main": [
+        [
+          {
+            "node": "Map Groups",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Map GroupPosts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read AURELIUS campaigns": {
+      "main": [
+        [
+          {
+            "node": "Map Campaigns",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Map Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Groups": {
+      "main": [
+        [
+          {
+            "node": "Sheets Groups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map GroupPosts": {
+      "main": [
+        [
+          {
+            "node": "Sheets GroupPosts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Campaigns": {
+      "main": [
+        [
+          {
+            "node": "Sheets Campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Tasks": {
+      "main": [
+        [
+          {
+            "node": "Sheets Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "tags": [],
+  "meta": {
+    "description": "Manual sync, no publication. Configure x-scout-key HTTP credential for requests, Google OAuth for four Sheets nodes, spreadsheet with tabs and header columns as documented."
+  }
+}
