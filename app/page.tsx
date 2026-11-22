@@ -3466,7 +3466,7 @@ export default function Home() {
       )}
 
       {exportError ? (
-        <div role="alert" className="fixed bottom-4 left-1/2 z-[80] w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-xl border border-[var(--danger)]/30 bg-[var(--surface)] p-4 text-xs leading-5 text-[var(--danger)] shadow-2xl">
+        <div role="alert" className="fixed bottom-20 left-1/2 z-[80] w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-xl border border-[var(--danger)]/30 bg-[var(--surface)] p-4 text-xs leading-5 text-[var(--danger)] shadow-2xl">
           <div className="flex items-start justify-between gap-3">
             <span>{exportError}</span>
             <button onClick={() => setExportError("")} className="text-[var(--text-muted)]" aria-label="Close">×</button>
@@ -3787,16 +3787,6 @@ export default function Home() {
 
 
 
-      <button
-        onClick={() => {
-          setActiveNav("research");
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }}
-        className="shine-button fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full btn-gold text-black  ring-4 ring-[var(--bg)] lg:hidden"
-        aria-label={t.newResearch}
-      >
-        <Sparkles size={19} />
-      </button>
     </main>
   );
 }

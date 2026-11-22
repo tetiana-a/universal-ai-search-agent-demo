@@ -513,7 +513,7 @@ export default function ScoutDashboard() {
         </section>
       </div>
 
-      {toast && <output className="glass fixed bottom-4 left-1/2 z-[80] block max-w-[92vw] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm shadow-2xl">{toast}</output>}
+      {toast && <output className="glass fixed bottom-20 left-1/2 z-[80] block max-w-[92vw] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm shadow-2xl">{toast}</output>}
     </main>
   );
 }
