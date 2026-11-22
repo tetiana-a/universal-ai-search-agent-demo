@@ -1,0 +1,132 @@
+{
+  "name": "AURELIUS — Postiz public post links into Google Sheets",
+  "nodes": [
+    {
+      "id": "manual",
+      "name": "Manual report",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "api",
+      "name": "Read Postiz publishing evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/scout/postiz?view=posts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "map",
+      "name": "Map real post URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        790,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const r=$input.first().json;\nif(!r.ok || !Array.isArray(r.posts)) throw new Error('Postiz reporting unavailable');\nconst protect=x=>{const s=String(x??'').slice(0,1500);return /^[=+@-]/.test(s)?\"'\"+s:s;};\nreturn r.posts.map(p=>({json:{id:protect(p.id),channel:protect(p.channel),platform:protect(p.platform),publishDate:protect(p.publishDate),releaseURL:protect(p.releaseURL),verification:protect(p.verification)}}));"
+      }
+    },
+    {
+      "id": "sheet",
+      "name": "Google Sheets PostizPosts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1070,
+        300
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PostizPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "channel": "={{ $json.channel }}",
+            "platform": "={{ $json.platform }}",
+            "publishDate": "={{ $json.publishDate }}",
+            "releaseURL": "={{ $json.releaseURL }}",
+            "verification": "={{ $json.verification }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Manual report": {
+      "main": [
+        [
+          {
+            "node": "Read Postiz publishing evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Postiz publishing evidence": {
+      "main": [
+        [
+          {
+            "node": "Map real post URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map real post URLs": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets PostizPosts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "meta": {
+    "description": "Read-only Postiz last 7 days through AURELIUS authenticated server. Only releaseURL permits 'linked' evidence; drafts/scheduled remain not_verified. Configure Google Sheets credentials."
+  },
+  "tags": []
+}
