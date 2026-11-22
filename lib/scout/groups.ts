@@ -316,7 +316,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     const url = normalizeTelegramUrl(link);
     if (url) telegram.set(url, { snippet: "TGStat API: " + input.topic, trusted: true });
   }
-  else if (tgStatEnabled() && tgstat.error) notes.push(tgstat.error);
+  else if (tgStatEnabled() && "error" in tgstat && tgstat.error) notes.push(tgstat.error);
   const facebook = new Map<string, { title: string; snippet: string }>();
   const otherPages: string[] = [];
   const hits = [...visibleHits, ...gemini.flatMap((g) => g.hits)] as Array<{ title: string; url: string; snippet: string }>;
