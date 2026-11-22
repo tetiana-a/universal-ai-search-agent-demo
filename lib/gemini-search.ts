@@ -47,13 +47,17 @@ export function snippetsByChunk(supports: Support[] | undefined) {
   return out;
 }
 
-// The free tier allows only a few requests a minute per model: on HTTP 429 the lighter model
-// (separate, larger quota) answers instead.
+// Model availability changes: HTTP 404 can mean that a legacy model is no
+// longer accessible to this API project. Grounding on newer models may be paid.
+// Never silently select a new billable model. Retry only an explicitly configured
+// fallback model, then allow the separate SERP/keyless providers to take over.
 export async function geminiSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
-  const first = await geminiSearchWith(process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash", query, language, customPrompt);
-  if (first.status !== "rate_limited") return first;
-  const fallback = process.env.GEMINI_SEARCH_FALLBACK_MODEL || "gemini-2.5-flash-lite";
-  return fallback === "off" ? first : geminiSearchWith(fallback, query, language, customPrompt);
+  const model = process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash";
+  const first = await geminiSearchWith(model, query, language, customPrompt);
+  if (first.ok || (first.httpStatus !== 404 && first.status !== "rate_limited")) return first;
+  const fallback = String(process.env.GEMINI_SEARCH_FALLBACK_MODEL || "").trim();
+  if (!fallback || fallback === "off" || fallback === model) return first;
+  return geminiSearchWith(fallback, query, language, customPrompt);
 }
 
 async function geminiSearchWith(model: string, query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
@@ -84,7 +88,7 @@ async function geminiSearchWith(model: string, query: string, language = "en", c
         status: limited ? "rate_limited" : "error",
         message: limited
           ? "Gemini search daily free quota is used up (HTTP 429)."
-          : response.status === 400 || response.status === 403 ? "Gemini rejected the key or request (HTTP " + response.status + "). Check GEMINI_API_KEY." : "Gemini search failed (HTTP " + response.status + ").",
+          : response.status === 404 ? "Gemini search model " + model + " is unavailable for this API key (HTTP 404). Configure a supported GEMINI_SEARCH_MODEL or enable DataForSEO group search; search results cannot be assumed." : response.status === 400 || response.status === 403 ? "Gemini rejected the key or request (HTTP " + response.status + "). Check model, API tier and grounding permissions." : "Gemini search failed (HTTP " + response.status + ").",
       };
     }
     const payload = await response.json().catch(() => null);

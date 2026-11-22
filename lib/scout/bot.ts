@@ -11,9 +11,11 @@ import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingC
 import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
-import { handleMyChatMember } from "@/lib/scout/groups";
+import { handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
+import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
+import { createPostizDraft, listPostizChannels, postizConfigured } from "@/lib/scout/postiz";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -32,10 +34,12 @@ const HELP = [
   "«Найди инвесторов в Амстердаме для B2B SaaS»",
   "",
   "Я сам уточню детали, выполню поиск и покажу результаты.",
+  "Для размещения объявления напишите «нужно разместить объявление» или нажмите кнопку 📣.",
   "",
   "<b>Реклама в сообществах</b>: отправьте <b>голосовое</b> с задачей (что, где, на каких площадках, текст) или /campaign текст.",
   "Я задам уточнения, предложу 40 ключевых слов, найду профильные и смежные сообщества и буду размещать каждый день только там, где разрешено.",
   "/campaigns — кампании · /capacity — ёмкость сети · /creport — отчёт · /cstop all — остановить всё",
+  "/postiz — мои разрешённые аккаунты · /postizdraft ID | текст — черновик (НЕ публикация)",
   "Команды запоминать не нужно — используйте кнопки.",
 ].join("\n");
 
@@ -103,6 +107,7 @@ function sourceText(s: ScoutSource) {
 function mainPanelKeyboard(): Keyboard {
   return [
     [{ text: "🔎 Найти", callback_data: "menu:find" }],
+    [{ text: "📣 Разместить объявление", callback_data: "menu:advert" }],
     [
       { text: "📋 Мои поиски", callback_data: "menu:tasks" },
       { text: "✅ Результаты", callback_data: "menu:results" },
@@ -202,6 +207,48 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "panel":
       await showPanel(chatId);
       return {};
+
+    case "postiz": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId, "⛔ Postiz доступен только владельцу в личном чате.");
+        return {};
+      }
+      if (!postizConfigured()) {
+        await sendMessage(chatId, "⚠️ Postiz не подключён. Откройте Settings → Agents / Developer → Public API и сохраните POSTIZ_API_KEY в Vercel.");
+        return {};
+      }
+      try {
+        const channels = await listPostizChannels();
+        await sendLong(chatId, "<b>Postiz · подключённые аккаунты</b>\\n" + (channels.length
+          ? channels.map((c, i) => (i+1) + ". " + escapeHtml(c.name) + " · " + escapeHtml(c.identifier) +
+            (c.disabled ? " · отключён" : " · доступен") + "\\nID: <code>" + escapeHtml(c.id) + "</code>").join("\\n\\n")
+          : "Нет подключённых аккаунтов. В Postiz подключите собственную страницу.") +
+          "\\n\\nЧерновик: <code>/postizdraft ID | текст</code>. Никаких публикаций автоматически не будет.");
+      } catch {
+        await sendMessage(chatId, "⚠️ Postiz API недоступен. Проверьте ключ в Vercel и тариф.");
+      }
+      return {};
+    }
+
+    case "postizdraft": {
+      if (!controlIds().has(userId) || !controlIds().has(chatId)) {
+        await sendMessage(chatId, "⛔ Черновик Postiz доступен только владельцу в личном чате.");
+        return {};
+      }
+      const separator = args.indexOf("|");
+      if (separator < 1) {
+        await sendMessage(chatId, "Формат: <code>/postizdraft ID_аккаунта | точный текст</code>\\nID получаете командой /postiz.");
+        return {};
+      }
+      const integrationId = args.slice(0, separator).trim();
+      const content = args.slice(separator+1).trim();
+      const requestId = "tg-" + userId + "-" + Date.now().toString(36);
+      const result = await createPostizDraft({ integrationId, content, requestId }).catch(() => ({ok:false,error:"POSTIZ_API_ERROR"}));
+      await sendMessage(chatId, result.ok
+        ? "✅ Создан черновик в Postiz, НЕ ОПУБЛИКОВАНО.\\nPost ID: <code>" + escapeHtml(("postId" in result ? result.postId : "") || "") + "</code>\\nПроверьте черновик в кабинете Postiz."
+        : "⚠️ Черновик не создан: " + escapeHtml(result.error || "ошибка подключения"));
+      return {};
+    }
 
     case "health":
       await sendMessage(chatId, await diagnosticText(chatId, userId), mainPanelKeyboard());
@@ -459,6 +506,13 @@ async function handleCallback(query: any): Promise<BotResult> {
       await tgForceReply(chatId, "🔎 Что найти? Напишите запрос обычным сообщением.");
       return {};
     }
+    if (action === "advert") {
+      if (query.message?.chat?.type !== "private") {
+        await sendMessage(chatId, "Откройте личный чат с ботом, чтобы подготовить рекламное объявление.");
+        return {};
+      }
+      return startAdWizard(chatId, userId);
+    }
     if (action === "more") {
       await showMoreMenu(chatId);
       return {};
@@ -476,6 +530,7 @@ async function handleCallback(query: any): Promise<BotResult> {
     }
     return {};
   }
+  if (kind === "aw") return adWizardButton(chatId, userId, query.id, action, id);
   if (kind === "gp") return handleGroupCallback(query, action, id, by);
   if (kind === "cp") return handleCampaignCallback(query, action, id, by);
   if (kind === "rs") return { background: await handleResearchCallback(chatId, action, query.id) };
@@ -673,6 +728,16 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     const by = message.from?.username ? "@" + message.from.username : message.from?.first_name || userId;
     return handleGroupCommand(chatId, "post", String(message.caption).replace(/^\/post(@\w+)?\s*/i, ""), by, photos[photos.length - 1]?.file_id);
   }
+  // Owners may attach an image with its ad text while the ad wizard is active.
+  if (message?.photo && !message.from?.is_bot && message.chat?.type === "private") {
+    const ownerChat = String(message.chat?.id || "");
+    const ownerId = String(message.from?.id || "");
+    if (await isControl(ownerChat, ownerId, "private")) {
+      const photos = Array.isArray(message.photo) ? message.photo : [];
+      const result = await advanceAdWizard(ownerChat, ownerId, String(message.caption || ""), photos[photos.length - 1]?.file_id);
+      if (result) return result;
+    }
+  }
   if (!message?.text || message.from?.is_bot) return {};
   const chatId = String(message.chat?.id || "");
   const userId = String(message.from?.id || "");
@@ -682,6 +747,22 @@ export async function handleUpdate(update: any): Promise<BotResult> {
   // /id is always safe: it only returns IDs from the caller's own update.
   if (command?.cmd === "id") {
     await sendMessage(chatId, await identityText(message));
+    return {};
+  }
+
+  // For bot admins whose original my_chat_member event was missed by the
+  // webhook: register an owned group after checking Telegram permissions.
+  if (command?.cmd === "connect") {
+    if (message.chat?.type === "private") {
+      await sendMessage(chatId, "Откройте вашу тестовую группу и отправьте /connect прямо в ней.");
+      return {};
+    }
+    if (!controlIds().has(userId)) {
+      await sendMessage(chatId, "⛔ Только владелец агентa может подключать группы.");
+      return {};
+    }
+    const result = await registerOwnedTelegramGroup(message.chat, userId);
+    await sendMessage(chatId, result.message + (result.group ? "\nГруппа: " + escapeHtml(result.group.name) + "\nChat ID: <code>" + escapeHtml(String(result.group.chatId || "")) + "</code>" : ""));
     return {};
   }
 
@@ -700,7 +781,20 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       if (result.draft) await sendMessage(chatId, draftText(result.draft) + "\n\n" + escapeHtml(result.message), result.ok ? draftKeyboard(result.draft) : undefined);
       return {};
     }
+    if (command?.cmd === "ad" || command?.cmd === "advert") {
+      if (message.chat?.type !== "private") {
+        await sendMessage(chatId, "Для рекламы откройте личный чат с ботом и отправьте /ad.");
+        return {};
+      }
+      return startAdWizard(chatId, userId);
+    }
+    if (command?.cmd === "cancel" && await cancelAdWizard(chatId, userId)) return {};
     if (command) return handleCommand(chatId, userId, userName, command.cmd, command.args);
+    if (message.chat?.type === "private") {
+      const wizard = await advanceAdWizard(chatId, userId, String(message.text));
+      if (wizard) return wizard;
+      if (isAdPostingIntent(String(message.text))) return startAdWizard(chatId, userId);
+    }
     const answer = await maybeAnswer(chatId, String(message.text));
     if (answer) return answer;
     return handleResearchText(message, chatId, userId);

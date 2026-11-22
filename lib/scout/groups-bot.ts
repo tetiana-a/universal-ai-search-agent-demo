@@ -30,16 +30,16 @@ export async function handleGroupCommand(chatId: string, cmd: string, args: stri
   if (cmd === "groups") {
     const input = parseGroupsArgs(args);
     if (!input.topic) {
-      await sendMessage(chatId, "Напишите страну, город и тему через запятую.\nНапример: <code>/groups Испания, Барселона, недвижимость</code>");
+      await sendMessage(chatId, "Укажите страну, город и любую тему через запятую.\nНапример: <code>/groups Испания, Валенсия, ремонт автомобилей</code>");
       return {};
     }
-    await sendMessage(chatId, "🔎 Ищу Telegram и Facebook группы: <b>" + escapeHtml([input.topic, input.city, input.country].filter(Boolean).join(" · ")) + "</b>. Это займёт 1–2 минуты.");
+    await sendMessage(chatId, "🔎 Ищу группы Telegram и Facebook, публичные профили Instagram и TikTok: <b>" + escapeHtml([input.topic, input.city, input.country].filter(Boolean).join(" · ")) + "</b>. Любая тема или «все тематики».");
     return {
       background: async () => {
         const result = await findGroups(input, Date.now() + 200_000);
-        const top = result.found.slice(0, 15).map((g, i) => (i + 1) + ". " + (g.platform === "telegram" ? "✈️ " : "📘 ") + "<a href=\"" + escapeHtml(g.url) + "\">" + escapeHtml(g.name.slice(0, 60)) + "</a>" +
+        const top = result.found.slice(0, 15).map((g, i) => (i + 1) + ". " + ({ telegram: "✈️ ", facebook: "📘 ", instagram: "📸 ", tiktok: "🎵 " } as Record<string, string>)[g.platform] + "<a href=\"" + escapeHtml(g.url) + "\">" + escapeHtml(g.name.slice(0, 60)) + "</a>" +
           (g.members ? " · " + g.members.toLocaleString("ru-RU") : "") + " · реклама: " + ADS_LABEL[g.ads] + (g.adminContact ? " · " + escapeHtml(g.adminContact) : ""));
-        const head = "<b>Найдено групп: " + result.found.length + "</b> (новых " + result.added + ")" + (result.notes.length ? "\n⚠️ " + escapeHtml(result.notes.join(" ")) : "");
+        const head = "<b>Найдено публичных площадок: " + result.found.length + "</b> (новых " + result.added + ")" + (result.notes.length ? "\n⚠️ " + escapeHtml(result.notes.join(" ")) : "");
         await sendLong(chatId, head + (top.length ? "\n\n" + top.join("\n") : ""), [[{ text: "🖥 Открыть таблицу групп", url: groupsPageUrl() }]]);
         if (result.found.length) await sendDocument(chatId, "groups-" + new Date().toISOString().slice(0, 10) + ".xlsx", await groupsXlsx(result.found), "Таблица групп (Excel)");
       },

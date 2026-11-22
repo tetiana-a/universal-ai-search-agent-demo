@@ -1,9 +1,10 @@
 import { runStructuredExtraction } from "@/lib/free-ai";
 import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
 import { DEFAULT_DAILY_LIMIT, findGroups, listGroups, refreshActivity, telegramFeed, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
-import { getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
+import { claimOnce, getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
 import { botToken, controlIds, reportChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { escapeHtml, nowIso, randomId, stableId } from "@/lib/scout/text";
+import { isPolishWineCampaign, POLISH_WINE_B2B_QUERIES } from "@/lib/scout/wine-compliance";
 
 // Advertising campaigns (client TZ "AI Social Agent", Nov 2026):
 // owner sends a text or voice task to the bot → AI turns it into a campaign (ad text, topic, region,
@@ -41,6 +42,9 @@ export type Campaign = {
   updatedAt: string;
   approvedAt?: string;
   found?: { total: number; core: number; adjacent: number; inactive: number; at: string; notes?: string[] };
+  // Authoritative per-campaign audience. Never route a campaign to every group
+  // in the global CRM merely because one common keyword happens to match.
+  searchGroupIds?: string[];
 };
 
 export type TaskMode = "bot" | "partner" | "manual";
@@ -80,6 +84,7 @@ function daysBetween(a: string, b: string) {
 // ---- Task → campaign (AI with a rule-based fallback) ------------------------------------
 
 const STOP = new Set("и в во на по для из с со от до за к о об а но или что это как the and for with from in on of to a an de la el en y para con los las del".split(" "));
+const PROMPT_WORDS = new Set("разместить размещение разместить опубликовать опубликовать публикация опубликуй объявление объявления объявлений оголошення розмістити реклама рекламу продаже продажа нарушая законов соблюдать законы нелегально легально польша польше польшу польши".split(" "));
 
 export function cleanKeywords(list: unknown[], limit = 40) {
   const out: string[] = [];
@@ -104,16 +109,17 @@ export function detectPlatforms(text: string): Platform[] {
 export function ruleCampaign(text: string): Omit<Campaign, "id" | "status" | "createdAt" | "updatedAt" | "source"> {
   const clean = text.replace(/^\/\w+(@\w+)?\s*/, "").trim();
   const firstLine = clean.split(/\n|[.!?](\s|$)/)[0]?.trim() || clean;
-  const words = clean.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w));
+  const words = clean.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !PROMPT_WORDS.has(w));
   const region = /(?:в|во|in|en)\s+([A-ZА-ЯЁ][\p{L}-]+(?:\s+[A-ZА-ЯЁ][\p{L}-]+)?)/u.exec(clean)?.[1] || "";
+  const polishWine = isPolishWineCampaign({ region, adText: clean });
   const target = /(\d{2,4})\s*(?:постов|публикац|размещени|posts|placements)/i.exec(clean);
   return {
     title: firstLine.slice(0, 80),
     adText: clean.slice(0, 3500),
-    topic: words.slice(0, 3).join(" "),
+    topic: polishWine ? "importerzy wina Polska" : words.slice(0, 3).join(" "),
     region,
     languages: /[а-яё]/i.test(clean) ? ["ru"] : ["en"],
-    keywords: cleanKeywords(words, 40),
+    keywords: cleanKeywords(polishWine ? POLISH_WINE_B2B_QUERIES : words, 40),
     adjacent: [],
     queries: [],
     exclusions: [],
@@ -224,6 +230,14 @@ export function textFor(c: Campaign, language?: string) {
 export async function setCampaignStatus(id: string, status: "approved" | "stopped", by = "owner") {
   const c = await getOne<Campaign>("campaigns", id);
   if (!c) return null;
+  if (status === "approved" && isPolishWineCampaign(c)) {
+    await logAction({ actor: "agent", action: "campaign.compliance_block", detail: c.title + ": Poland wine public advertising" });
+    return null;
+  }
+  if (status === "approved" && (!c.found?.total || !c.searchGroupIds?.length)) {
+    await logAction({ actor: "agent", action: "campaign.no_verified_targets", detail: c.title + ": search/authorization missing" });
+    return null;
+  }
   const next: Campaign = { ...c, status, updatedAt: nowIso(), ...(status === "approved" ? { approvedAt: nowIso() } : {}) };
   await putOne("campaigns", next);
   if (status === "stopped") {
@@ -241,12 +255,20 @@ export async function setCampaignStatus(id: string, status: "approved" | "stoppe
 
 export function splitRegion(region: string) {
   const parts = region.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 1 && /^(польша|польше|польши|poland|polska|polsce|polski)$/i.test(parts[0] || "")) {
+    return { city: "", country: "Poland" };
+  }
   return parts.length >= 2 ? { city: parts[0], country: parts.slice(1).join(", ") } : { city: parts[0] || "", country: "" };
 }
 
 export function searchPlan(c: Campaign, maxRuns = Number(process.env.CAMPAIGN_SEARCH_RUNS || 10) || 10) {
-  const core = cleanKeywords([c.topic, ...c.queries, ...c.keywords], 40);
-  const adjacent = c.adjacent;
+  const restricted = isPolishWineCampaign(c);
+  // Wine trade in Poland: prioritize actual professional buyers and Polish
+  // industry language; never search consumer/expat groups as advertising targets.
+  const core = cleanKeywords(restricted
+    ? [...c.queries, ...POLISH_WINE_B2B_QUERIES]
+    : [c.topic, ...c.queries, ...c.keywords.filter((k) => !PROMPT_WORDS.has(k.toLowerCase()))], 40);
+  const adjacent = restricted ? [] : c.adjacent;
   // Interleave: most of the budget on the topic, at least a third on adjacent audiences.
   const adjacentRuns = adjacent.length ? Math.max(1, Math.round(maxRuns / 3)) : 0;
   const coreList = core.slice(0, maxRuns - Math.min(adjacentRuns, adjacent.length)).map((topic) => ({ topic, relevance: "core" as const }));
@@ -268,10 +290,12 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const plan = searchPlan(c);
   const seen = new Map<string, GroupCard>();
   const notes = new Set<string>();
-  // One query at a time: the free Gemini tier allows only a few requests a minute.
+  let attempted = 0;
+  // One query at a time, preserving the budget and provider rate limits.
   for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 1) {
+    attempted += 1;
     const batch = plan.slice(i, i + 1);
-    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0] }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
+    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0], platforms: c.platforms }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
     for (const r of results) {
       if (!r) continue;
       r.notes.forEach((n) => notes.add(n));
@@ -281,10 +305,10 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const all = [...seen.values()];
   const found = { notes: [...notes].slice(0, 3), total: all.length, core: all.filter((g) => g.relevance !== "adjacent").length, adjacent: all.filter((g) => g.relevance === "adjacent").length, inactive: all.filter((g) => g.activity === "inactive").length, at: nowIso() };
   const fresh = (await getOne<Campaign>("campaigns", id)) || c;
-  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, updatedAt: nowIso() };
+  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : "ready", found, searchGroupIds: all.map((g) => g.id), updatedAt: nowIso() };
   await putOne("campaigns", next);
   await logAction({ actor: "agent", action: "campaign.search", detail: c.title + ": " + found.total + " сообществ (профильных " + found.core + ", смежных " + found.adjacent + ", неактивных " + found.inactive + ")" });
-  return { campaign: next, groups: all, notes: [...notes], queries: plan.length };
+  return { campaign: next, groups: all, notes: [...notes], queries: attempted };
 }
 
 // ---- Daily planner -----------------------------------------------------------------------
@@ -294,7 +318,8 @@ export function modeFor(g: GroupCard): TaskMode | null {
   if (g.platform === "telegram" && g.botConnected && g.postingEnabled && g.chatId) return "bot";
   const agreed = ["free", "exchange", "paid"].includes(g.status);
   if (g.partnerTelegramId && agreed) return "partner";
-  if (agreed || g.ads === "allowed") return "manual";
+  // Only explicit agreements authorize partner or manual publication.
+  if (agreed) return "manual";
   return null; // no permission yet: outreach first
 }
 
@@ -320,10 +345,12 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
   }
   const ids = new Set(existing.map((t) => t.id));
   const out: CampaignTask[] = [];
-  for (const c of campaigns.filter((x) => x.status === "approved")) {
+  for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x) && (x.found?.total || 0) > 0 && (x.searchGroupIds?.length || 0) > 0)) {
+    const eligible = new Set(c.searchGroupIds);
     let count = live.filter((t) => t.campaignId === c.id && t.day === day).length;
     for (const g of groups) {
       if (count >= c.dailyTarget) break;
+      if (!eligible.has(g.id)) continue;
       const mode = modeFor(g);
       if (!mode || !matchesCampaign(g, c)) continue;
       const id = stableId("ct", c.id + "|" + g.id + "|" + day);
@@ -358,12 +385,13 @@ export async function planDay(day = today()): Promise<PlanResult> {
 
 async function activeCampaign(id: string) {
   const c = await getOne<Campaign>("campaigns", id);
-  return c?.status === "approved" ? c : null;
+  return c?.status === "approved" && !isPolishWineCampaign(c) && (c.found?.total || 0) > 0 && (c.searchGroupIds?.length || 0) > 0 ? c : null;
 }
 
 // Bot tasks: only chats where an admin added the bot, ~3 s apart, daily limit shared with /post.
 export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 240_000, pauseMs = 3000) {
-  if (process.env.CAMPAIGN_AUTOPOST === "off") return { sent: 0, failed: 0, left: 0, disabled: true };
+  // Explicit opt-in only: a missing environment flag can never start bulk posting.
+  if (process.env.CAMPAIGN_AUTOPOST !== "on") return { sent: 0, failed: 0, left: 0, disabled: true };
   if (!botToken()) return { sent: 0, failed: 0, left: 0, disabled: true };
   const tasks = (await listAll<CampaignTask>("campaign_tasks")).filter((t) => t.day === day && t.mode === "bot" && t.status === "scheduled");
   let sent = 0, failed = 0, left = 0;
@@ -372,6 +400,9 @@ export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 
     const campaign = await activeCampaign(task.campaignId);
     const group = await getOne<GroupCard>("groups", task.groupId);
     if (!campaign || !group?.botConnected || !group.postingEnabled || !group.chatId) { await putOne("campaign_tasks", { ...task, status: "cancelled", updatedAt: nowIso() }); continue; }
+    // Two cron workers may overlap. A distributed NX lock prevents duplicate
+    // sends for the same scheduled campaign/group/day item.
+    if (!(await claimOnce("campaign-dispatch:" + task.id, 60 * 60))) continue;
     const text = textFor(campaign, group.language);
     const result = campaign.photo ? await sendPhoto(group.chatId, campaign.photo, text) : await sendMessage(group.chatId, escapeHtml(text)).then((r) => ({ ok: r.ok, result: { message_id: r.messageId }, description: r.error }));
     const link = result?.ok ? messageLink(group, result?.result?.message_id) : undefined;
@@ -453,7 +484,7 @@ export function capacityOf(groups: GroupCard[], tasks: CampaignTask[], campaigns
     byMode[mode].sustained += limit / Math.max(1, g.minDaysBetween || 1);
   }
   const todays = tasks.filter((t) => t.day === day);
-  const target = campaigns.filter((c) => c.status === "approved").reduce((s, c) => s + c.dailyTarget, 0);
+  const target = campaigns.filter((c) => c.status === "approved" && !isPolishWineCampaign(c) && (c.found?.total || 0) > 0 && (c.searchGroupIds?.length || 0) > 0).reduce((s, c) => s + c.dailyTarget, 0);
   const sum = (k: "places" | "peak" | "sustained") => Math.round(byMode.bot[k] + byMode.partner[k] + byMode.manual[k]);
   return {
     day,

@@ -1,0 +1,90 @@
+{
+  "name": "AURELIUS — AUTHORIZED Telegram dispatch waves (OFF until owner approves)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7-21/2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "aurelius-waves",
+      "name": "Authorized dispatch window",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://universal-ai-search-agent-demo.vercel.app/api/campaigns/dispatch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 260000
+        }
+      },
+      "id": "aurelius-dispatch",
+      "name": "Run signed AURELIUS dispatch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        510,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.ok !== true) throw new Error('AURELIUS dispatch endpoint failed');\nreturn [{json:{time:new Date().toISOString(),sent:r.sent||0,failed:r.failed||0,left:r.left||0,disabled:Boolean(r.disabled)}}];"
+      },
+      "id": "aurelius-observe",
+      "name": "Record dispatch outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        770,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Authorized dispatch window": {
+      "main": [
+        [
+          {
+            "node": "Run signed AURELIUS dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run signed AURELIUS dispatch": {
+      "main": [
+        [
+          {
+            "node": "Record dispatch outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "tags": [],
+  "meta": {
+    "description": "Do not activate until Vercel Pro/commercial plan, CRON_SECRET, server-side CAMPAIGN_AUTOPOST=on, approved topic-specific group rights and client acceptance. Sends ONLY via existing authorized Telegram Bot API; never posts to 3rd-party Facebook groups."
+  }
+}

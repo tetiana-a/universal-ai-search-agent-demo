@@ -156,9 +156,9 @@ function aiHealth() {
 }
 
 function dashboardAccessCheck(publicDashboard: boolean, adminProtected: boolean): HealthCheck {
-  if (publicDashboard) return check("admin", "Dashboard access", "ok", "Public shared dashboard mode is enabled.");
-  if (adminProtected) return check("admin", "Admin protection", "ok", "SCOUT_ADMIN_KEY protects Scout API/dashboard state.");
-  return check("admin", "Admin protection", "warning", "SCOUT_ADMIN_KEY is not set. Do not store real personal data in open demo mode.");
+  if (!adminProtected) return check("admin", "Admin protection", "error", "SCOUT_ADMIN_KEY is required. CRM API access is denied until configured.");
+  if (publicDashboard) return check("admin", "Admin protection", "warning", "SCOUT_PUBLIC_DASHBOARD=on is ignored for private API access. Disable public mode.");
+  return check("admin", "Admin protection", "ok", "SCOUT_ADMIN_KEY protects Scout API/dashboard state.");
 }
 
 function securityHealth() {

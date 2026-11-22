@@ -52,7 +52,9 @@ export default function GroupsDashboard() {
   const [state, setState] = useState<State | null>(null);
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState("");
-  const [search, setSearch] = useState({ country: "Испания", city: "Барселона", topic: "недвижимость" });
+  const [search, setSearch] = useState({ country: "Испания", city: "Валенсия", topic: "", platform: "auto" });
+  const [broadPage, setBroadPage] = useState(0);
+  const broadSearch = !search.topic.trim() || /^(все|любые|all|any|всі|усі)(?:\s|$)/i.test(search.topic.trim());
   const [post, setPost] = useState({ text: "", photoUrl: "" });
   const [filter, setFilter] = useState("");
   const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string } } | null>(null);
@@ -96,7 +98,27 @@ export default function GroupsDashboard() {
 
   const saveKey = () => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); };
   const s = state?.summary;
-  const exportHref = "/api/groups/export" + (key ? "?key=" + encodeURIComponent(key) : "");
+
+  // Download through an authenticated fetch. Never put access keys in URLs.
+  const downloadGroups = async () => {
+    try {
+      const response = await fetch("/api/groups/export", { headers: headers(), cache: "no-store" });
+      if (!response.ok) { setToast("Экспорт недоступен: проверьте ключ доступа."); return; }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      try {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = "aurelius-groups-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      setToast("Ошибка загрузки Excel.");
+    }
+  };
 
   return (
     <main className="scout-ui relative isolate min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)] spectrum-shell">
@@ -127,17 +149,25 @@ export default function GroupsDashboard() {
 
         {!needKey && state && <CampaignsPanel headers={headers} onToast={setToast} />}
 
-        <Panel title="1. Найти группы" icon={Radar} color="#30d158">
-          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_auto]">
+        <Panel title="1. Найти сообщества и профили" icon={Radar} color="#30d158">
+          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_1fr_auto]">
             <input className={inputClass} placeholder="Страна" value={search.country} onChange={(e) => setSearch({ ...search, country: e.target.value })} />
             <input className={inputClass} placeholder="Город" value={search.city} onChange={(e) => setSearch({ ...search, city: e.target.value })} />
-            <input className={inputClass} placeholder="Тема (например, недвижимость)" value={search.topic} onChange={(e) => setSearch({ ...search, topic: e.target.value })} />
-            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("find", search, "find")}>{busy === "find" ? "Ищу… 1–2 мин" : "Найти группы"}</Button>
+            <input className={inputClass} placeholder="Любая тема; пусто = все тематики" value={search.topic} onChange={(e) => { setSearch({ ...search, topic: e.target.value }); setBroadPage(0); }} />
+            <select aria-label="Социальная платформа" className={inputClass} value={search.platform} onChange={(e) => setSearch({ ...search, platform: e.target.value })}>
+              <option value="auto">🔎 Все платформы автоматически</option>
+              <option value="telegram">✈️ Telegram</option>
+              <option value="instagram">📸 Instagram</option>
+              <option value="tiktok">🎵 TikTok</option>
+              <option value="facebook">📘 Facebook</option>
+            </select>
+            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("find", { country: search.country, city: search.city, topic: search.topic, broadPage, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find")}>{busy === "find" ? "Ищу… до 4 мин" : "Найти площадки"}</Button>
           </div>
-          <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Ищем публичные Telegram-группы и каналы и публичные Facebook-группы. Участники и правила берутся с открытых страниц групп.</p>
+          {broadSearch && <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--text-muted)]"><span>Обзор разных тематик · подборка {broadPage + 1} из 8</span><Button disabled={Boolean(busy)} onClick={() => { const next = (broadPage + 1) % 8; setBroadPage(next); void act("find", { country: search.country, city: search.city, topic: search.topic, broadPage: next, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find"); }}>Следующие категории</Button><span>Поиск открытых площадок, а не всех существующих групп интернета.</span></div>}
+          <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Автопоиск: Telegram — группы и каналы; Facebook — группы; Instagram и TikTok — тематические публичные профили. Источник каждого результата виден по наведению на иконку. Профиль из поискового индекса ещё не подтверждает активность, число подписчиков или разрешение на рекламу.</p>
         </Panel>
 
-        <Panel title={"2. База групп · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button href={exportHref}><Download size={13} />Excel</Button></>}>
+        <Panel title={"2. База найденных площадок · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button></>}>
           {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Пока пусто. Запустите поиск выше.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
@@ -145,8 +175,8 @@ export default function GroupsDashboard() {
                 <tbody>
                   {groups.map((g) => (
                     <tr key={g.id} className="border-t border-[var(--line-soft)] align-middle">
-                      <td className="px-2 py-1.5" title={g.foundBy ? "запрос: " + g.foundBy : undefined}>{({ telegram: "✈️", facebook: "📘", instagram: "📸", tiktok: "🎵" } as Record<string, string>)[g.platform]}{g.relevance === "adjacent" ? <span title="смежное сообщество"> 🟡</span> : null}{g.activity === "inactive" ? <span title="неактивна — исключена из размещения"> 💤</span> : null}</td>
-                      <td className="max-w-[260px] px-2 py-1.5">{g.url ? <a className="hover:underline" href={g.url} target="_blank" rel="noreferrer">{g.name}</a> : g.name}<div className="text-[10.5px] text-[var(--text-muted)]">{[g.city, g.country, g.kind === "channel" ? "канал" : "", g.language, g.postsPerWeek !== undefined ? g.postsPerWeek + " пост/нед" : "", g.partnerTelegramId ? "партнёр" : ""].filter(Boolean).join(" · ")}</div></td>
+                      <td className="px-2 py-1.5" title={(g.foundBy ? "Запрос: " + g.foundBy : "Поиск") + (g.verification === "indexed_candidate" ? " · Найдено в индексе, активность и реклама не подтверждены" : "")}>{({ telegram: "✈️", facebook: "📘", instagram: "📸", tiktok: "🎵" } as Record<string, string>)[g.platform]}{g.relevance === "adjacent" ? <span title="смежное сообщество"> 🟡</span> : null}{g.activity === "inactive" ? <span title="неактивна — исключена из размещения"> 💤</span> : null}</td>
+                      <td className="max-w-[260px] px-2 py-1.5">{g.url ? <a className="hover:underline" href={g.url} target="_blank" rel="noreferrer">{g.name}</a> : g.name}<div className="text-[10.5px] text-[var(--text-muted)]">{[g.city, g.country, g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль · требует проверки" : g.verification === "indexed_candidate" ? "кандидат · требует проверки" : "", g.language, g.postsPerWeek !== undefined ? g.postsPerWeek + " пост/нед" : "", g.partnerTelegramId ? "партнёр" : ""].filter(Boolean).join(" · ")}</div></td>
                       <td className="px-2 py-1.5 tabular-nums">{g.members ? g.members.toLocaleString("ru-RU") : "—"}</td>
                       <td className="px-2 py-1.5">{ADS[g.ads]}</td>
                       <td className="px-2 py-1.5"><input className={inputClass + " min-h-7 w-36"} defaultValue={g.adminContact || ""} placeholder="@admin" onBlur={(e) => e.target.value !== (g.adminContact || "") && void act("update", { id: g.id, patch: { adminContact: e.target.value } })} /></td>
@@ -160,7 +190,7 @@ export default function GroupsDashboard() {
               </table>
             </div>
           )}
-          <p className="mt-3 text-[11.5px] text-[var(--text-muted)]">Чтобы бот публиковал в группе, попросите админа добавить <b>{state?.bot || "бота"}</b> в группу. Если его добавил сам админ, постинг включится автоматически; иначе включите галочку после согласия админа. Лимит — 3 поста в день на группу.</p>
+          <p className="mt-3 text-[11.5px] text-[var(--text-muted)]">Найденные Instagram/TikTok профили — для исследования и обращения к владельцам, но не для автоматической публикации. Чтобы бот публиковал в Telegram-группе, попросите админа добавить <b>{state?.bot || "бота"}</b> в группу. Если его добавил сам админ, постинг включится автоматически; иначе включите галочку после согласия админа. Лимит — 3 поста в день на группу.</p>
         </Panel>
 
         <Panel title="3. Опубликовать объявление" icon={Megaphone} color="#ff9f0a">
@@ -178,7 +208,7 @@ export default function GroupsDashboard() {
             <div className="space-y-2">
               {state.queue.slice(0, 30).map((q) => (
                 <div key={q.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--line-soft)] p-2.5">
-                  <div className="min-w-0 flex-1"><div className="text-[12.5px]">{q.platform === "telegram" ? "✈️" : "📘"} {q.groupName}</div><div className="truncate text-[11px] text-[var(--text-muted)]">{q.text}</div></div>
+                  <div className="min-w-0 flex-1"><div className="text-[12.5px]">{({ telegram: "✈️", facebook: "📘", instagram: "📸", tiktok: "🎵" } as Record<string, string>)[q.platform]} {q.groupName}</div><div className="truncate text-[11px] text-[var(--text-muted)]">{q.text}</div></div>
                   <div className="flex flex-wrap gap-1.5">
                     <Button onClick={async () => setToast((await copy(q.text)) ? "Текст скопирован" : "Не удалось скопировать")}><Copy size={12} />Копировать</Button>
                     {q.url && <Button href={q.url}><ExternalLink size={12} />Открыть группу</Button>}
@@ -191,7 +221,7 @@ export default function GroupsDashboard() {
           )}
         </Panel>
 
-        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button href={exportHref}><Download size={13} />Excel</Button>}>
+        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button>}>
           {!state?.posts.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Публикаций пока нет.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-[12px]">

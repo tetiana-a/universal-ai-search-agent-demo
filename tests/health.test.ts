@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/scout/health/route";
+import { isCronRequest } from "@/lib/scout/auth";
 import { collectOperationalHealth } from "@/lib/scout/health";
 import { resetMemoryStore } from "@/lib/scout/store";
 import { json, mockFetch } from "./helpers";
@@ -72,16 +73,33 @@ describe("Scout production health", () => {
     expect((await allowed.json()).ok).toBe(true);
   });
 
-  it("allows the shared dashboard without a key when public mode is explicitly enabled", async () => {
+  it("does not allow public demo mode to expose private CRM endpoints", async () => {
     telegramHealth(true);
     vi.stubEnv("SCOUT_PUBLIC_DASHBOARD", "on");
     vi.stubEnv("TELEGRAM_OPEN_GROUP_ACCESS", "on");
 
-    const response = await GET(new Request("https://x/api/scout/health"));
-    expect(response.status).toBe(200);
-    const data = await response.json();
+    const denied = await GET(new Request("https://x/api/scout/health"));
+    expect(denied.status).toBe(401);
+    const allowed = await GET(new Request("https://x/api/scout/health", { headers: { "x-scout-key": "admin-test-key" } }));
+    expect(allowed.status).toBe(200);
+    const data = await allowed.json();
     expect(data.telegram.openGroupAccess).toBe(true);
-    expect(data.security.adminProtected).toBe(false);
-    expect(data.checks.find((item: any) => item.id === "admin")?.detail).toContain("Public shared dashboard");
+    expect(data.security.adminProtected).toBe(true);
+    expect(data.checks.find((item: any) => item.id === "admin")?.level).toBe("warning");
+  });
+
+  it("fails closed when the admin key is not configured", async () => {
+    vi.stubEnv("SCOUT_ADMIN_KEY", "");
+    vi.stubEnv("SCOUT_PUBLIC_DASHBOARD", "on");
+    const denied = await GET(new Request("https://x/api/scout/health"));
+    expect(denied.status).toBe(401);
+  });
+
+  it("requires a signed cron bearer token and rejects forged User-Agent", () => {
+    vi.stubEnv("CRON_SECRET", "");
+    expect(isCronRequest(new Request("https://x/api/campaigns/cron", { headers: { "user-agent": "vercel-cron" } }))).toBe(false);
+    vi.stubEnv("CRON_SECRET", "a-test-only-cron-secret");
+    expect(isCronRequest(new Request("https://x/api/campaigns/cron", { headers: { "user-agent": "vercel-cron" } }))).toBe(false);
+    expect(isCronRequest(new Request("https://x/api/campaigns/cron", { headers: { "authorization": "Bearer a-test-only-cron-secret" } }))).toBe(true);
   });
 });

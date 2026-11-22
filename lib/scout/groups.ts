@@ -1,4 +1,6 @@
 import { geminiSearch } from "@/lib/gemini-search";
+import { dataForSeoEnabled, dataForSeoSearch } from "@/lib/scout/dataforseo-groups";
+import { tgStatEnabled, tgStatSearch } from "@/lib/scout/tgstat";
 import { runKeylessSearch } from "@/lib/keyless-search";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
@@ -22,7 +24,10 @@ export type GroupStatus = "new" | "contacted" | "free" | "exchange" | "paid" | "
 export type GroupCard = {
   id: string;
   platform: Platform;
-  kind?: "group" | "channel";
+  kind?: "group" | "channel" | "profile" | "page";
+  // Indexed public profiles are search candidates, not proof of live activity
+  // or permission to publish on third-party accounts.
+  verification?: "public_page" | "indexed_candidate";
   url: string;
   name: string;
   members?: number;
@@ -105,6 +110,27 @@ export function normalizeFacebookGroupUrl(raw: string): string {
   const m = /(?:https?:\/\/)?(?:www\.|m\.|web\.)?facebook\.com\/groups\/([\w.-]{3,80})/i.exec(raw);
   if (!m || /^(feed|discover|search|joins|create|your_groups|category)$/i.test(m[1])) return "";
   return "https://www.facebook.com/groups/" + m[1];
+}
+
+// Normalize PUBLIC profile URLs only. Individual Instagram posts/reels, TikTok
+// search/hashtags and internal URLs are not community/profile targets.
+export function normalizeInstagramProfileUrl(raw: string): string {
+  let url: URL;
+  try { url = new URL(/^https?:\/\//i.test(raw.trim()) ? raw.trim() : "https://" + raw.trim()); } catch { return ""; }
+  if (!["instagram.com", "www.instagram.com", "m.instagram.com"].includes(url.hostname.toLowerCase())) return "";
+  const pieces = url.pathname.split("/").filter(Boolean);
+  if (!pieces.length || pieces.length > 1 || !/^[a-zA-Z0-9._]{2,30}$/.test(pieces[0])) return "";
+  if (/^(p|reel|reels|tv|stories|explore|accounts|direct|about|developer|api|directory|tags)$/i.test(pieces[0])) return "";
+  return "https://www.instagram.com/" + pieces[0].toLowerCase();
+}
+export function normalizeTikTokProfileUrl(raw: string): string {
+  let url: URL;
+  try { url = new URL(/^https?:\/\//i.test(raw.trim()) ? raw.trim() : "https://" + raw.trim()); } catch { return ""; }
+  if (!["tiktok.com", "www.tiktok.com", "m.tiktok.com"].includes(url.hostname.toLowerCase())) return "";
+  const pieces = url.pathname.split("/").filter(Boolean);
+  if (!pieces.length || !/^@[a-zA-Z0-9._]{2,24}$/.test(pieces[0])) return "";
+  if (pieces.length > 1 && (pieces.length < 3 || pieces[1] !== "video")) return "";
+  return "https://www.tiktok.com/" + pieces[0].toLowerCase();
 }
 
 export function extractGroupLinks(text: string) {
@@ -253,66 +279,204 @@ async function inBatches<T, R>(items: T[], size: number, fn: (item: T) => Promis
   return out;
 }
 
-export type FindInput = { country?: string; city?: string; topic: string; relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string };
+export type FindInput = {
+  country?: string; city?: string; topic: string;
+  relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string;
+  platforms?: Platform[];
+  broadPage?: number;
+};
+export type PlatformQuery = { platform: Platform; query: string };
+
+// An ordinary text request may name several platforms. The bot need not
+// ask the owner to specify them in a separate form.
+export function inferredSearchPlatforms(input: FindInput): Platform[] {
+  const all: Platform[] = ["telegram", "instagram", "tiktok", "facebook"];
+  if (input.platforms?.length) return [...new Set(input.platforms)].filter((p) => all.includes(p));
+  const text = input.topic.toLowerCase();
+  const matches: Platform[] = all.filter((p) =>
+    ({ telegram: /telegram|телеграм|телегр|телеграмм/,
+       instagram: /instagram|инстаграм|інстаграм|инста\b|insta\b/,
+       tiktok: /tiktok|tik.?tok|тикток|тік.?ток|тик.?ток/,
+       facebook: /facebook|фейсбук|фейсбу|фб\b/ } as Record<Platform, RegExp>)[p].test(text)
+  );
+  return matches.length ? matches : all;
+}
 
 function placeOf(input: FindInput) {
   return [input.city, input.country].filter(Boolean).join(", ");
 }
 
+// One query per chosen platform is tried first, before second-round variants.
+// This prevents a slow or blocked Telegram search from starving Instagram and
+// TikTok results. We never use API access to users' private accounts.
+// A broad query scans categories in pages. Public search indexes cannot list
+// every community worldwide or guarantee coverage of private communities.
+// Two categories per page keeps API costs and query latency bounded.
+export const BROAD_DISCOVERY_CATEGORIES = [
+  "городские сообщества местные новости",
+  "работа вакансии карьера",
+  "покупка продажа барахолка",
+  "жилье аренда соседи",
+  "бизнес предприниматели услуги",
+  "образование языки студенты",
+  "спорт фитнес путешествия",
+  "еда рестораны кулинария",
+  "культура события музыка",
+  "семья родители дети",
+  "животные природа экология",
+  "технологии игры IT",
+  "здоровье благополучие",
+  "духовные практики медитация",
+  "знакомства общение клубы",
+  "автомобили транспорт",
+] as const;
+export const BROAD_DISCOVERY_PAGE_SIZE = 2;
+export const BROAD_DISCOVERY_PAGES = Math.ceil(BROAD_DISCOVERY_CATEGORIES.length / BROAD_DISCOVERY_PAGE_SIZE);
+
+export function isBroadDiscoveryTopic(topic: string) {
+  const value = String(topic || "").trim().toLowerCase().replace(/[.,!?]+$/g, "");
+  return !value || /^(?:\*|все(?:\s+(?:публичные|доступные|активные))?\s+(?:группы|сообщества|категории|темы|тематики|каналы|площадки)(?:\s+в\s+.+)?|любые\s+(?:группы|сообщества|темы|тематики)(?:\s+в\s+.+)?|все\s+тематики|all\s+(?:public\s+)?(?:topics|groups|communities|categories)|any\s+(?:topics|communities|groups)|усі\s+(?:групи|спільноти|теми)|всі\s+(?:групи|спільноти|теми))$/iu.test(value);
+}
+
+export function platformSearchQueries(input: FindInput): PlatformQuery[] {
+  const requested = inferredSearchPlatforms(input);
+  const geo = placeOf(input);
+  const broad = isBroadDiscoveryTopic(input.topic);
+  const topicText = input.topic.trim().replace(/(?:telegram|телеграм\w*|instagram|инстаграм\w*|інстаграм\w*|tiktok|tik.?tok|тикток\w*|тік.?ток\w*|facebook|фейсбук\w*)/giu, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+  const page = Math.max(0, Math.min(BROAD_DISCOVERY_PAGES - 1, Math.trunc(input.broadPage || 0)));
+  const topics = broad ? [...BROAD_DISCOVERY_CATEGORIES].slice(page * BROAD_DISCOVERY_PAGE_SIZE, (page + 1) * BROAD_DISCOVERY_PAGE_SIZE) : [topicText || input.topic.trim()];
+  const polish = /поль|poland|polska|polsce|polski/i.test(geo);
+  const spanish = /испан|spain|españa|valencia|валенси|barcelona|барселон/i.test(geo);
+  const searchWords: Record<Platform, [string, string]> = {
+    telegram: ["Telegram public groups channels", polish ? "grupy kanały" : spanish ? "grupos canales" : "groups communities"],
+    instagram: ["Instagram public creator profiles business accounts", polish ? "profile firmy twórcy" : spanish ? "cuentas creadores negocios" : "profiles creators business"],
+    tiktok: ["TikTok public creator profiles", polish ? "twórcy profile" : spanish ? "creadores perfiles" : "creators profiles"],
+    facebook: ["Facebook public groups", polish ? "grupy społeczności" : spanish ? "grupos comunidades" : "groups communities"],
+  };
+  const domains: Record<Platform, string> = {
+    telegram: "t.me", instagram: "instagram.com", tiktok: "tiktok.com/@", facebook: "facebook.com/groups",
+  };
+  // Every round runs each requested platform before moving to the next
+  // category or synonym query. New topics never need a code edit.
+  return [0, 1].flatMap((round) => topics.flatMap((topic) => requested.map((platform) => {
+    const prefix = searchWords[platform][round];
+    const query = [prefix, topic, geo, domains[platform]].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    return { platform, query };
+  })));
+}
+
 export function groupQueries(input: FindInput) {
-  const place = placeOf(input);
-  return [
-    "Telegram группы и каналы " + input.topic + " " + place + " t.me",
-    "Telegram chats channels " + input.topic + " " + place + " t.me",
-    "Facebook groups " + input.topic + " " + place,
-    "site:facebook.com/groups " + input.topic + " " + (input.city || input.country || ""),
-  ];
+  return platformSearchQueries(input).map((q) => q.query);
 }
 
 function listPrompt(input: FindInput) {
-  return "Find public Telegram groups and channels and public Facebook groups about \"" + input.topic + "\" in " + (placeOf(input) || "any location") +
-    ". List as many real ones as you can, each with its full link (https://t.me/... or https://www.facebook.com/groups/...), name and member count if known. Only real, existing groups.";
+  const wanted = (input.platforms?.length ? input.platforms : ["telegram", "instagram", "tiktok", "facebook"]).join(", ");
+  return "Find existing PUBLIC community/profile URLs for " + (isBroadDiscoveryTopic(input.topic) ? "diverse community categories" : input.topic) +
+    " in " + (placeOf(input) || "the requested location") + " on " + wanted +
+    ". Telegram groups/channels use t.me links. Instagram accounts use instagram.com/username. TikTok creators use tiktok.com/@username. Facebook groups use facebook.com/groups/id." +
+    " Return names and direct real URLs only, do not invent URLs or claim access to private groups. Public profile is NOT permission to advertise.";
 }
 
 export type FindOutcome = { found: GroupCard[]; added: number; checked: number; notes: string[] };
 
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
-  const queries = groupQueries(input);
-  const [gemini, keyless] = await Promise.all([
-    Promise.all([geminiSearch(queries[0], "ru", listPrompt(input)), geminiSearch(queries[2], "en", listPrompt(input))]),
-    runKeylessSearch(queries, "en", Math.min(deadlineAt, Date.now() + 15_000)).catch(() => []),
-  ]);
-  for (const g of gemini) if (!g.ok && g.message) notes.push(g.message);
-
-  const telegram = new Map<string, { snippet: string; trusted: boolean }>();
-  const facebook = new Map<string, { title: string; snippet: string }>();
-  const otherPages: string[] = [];
-  const hits = [...gemini.flatMap((g) => g.hits), ...keyless.flatMap((k) => k.hits)] as Array<{ title: string; url: string; snippet: string }>;
-  for (const hit of hits) {
-    const tg = normalizeTelegramUrl(hit.url);
-    const fb = normalizeFacebookGroupUrl(hit.url);
-    if (tg) telegram.set(tg, { snippet: hit.snippet, trusted: true });
-    else if (fb) facebook.set(fb, { title: hit.title, snippet: hit.snippet });
-    else otherPages.push(hit.url);
-    const inText = extractGroupLinks(hit.title + " " + hit.snippet);
-    for (const u of inText.telegram) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true });
-    for (const u of inText.facebook) if (!facebook.has(u)) facebook.set(u, { title: "", snippet: hit.snippet });
+  const selected = inferredSearchPlatforms(input);
+  const broad = isBroadDiscoveryTopic(input.topic);
+  const broadPage = Math.max(0, Math.min(BROAD_DISCOVERY_PAGES - 1, Math.trunc(input.broadPage || 0)));
+  if (broad) {
+    const cats = BROAD_DISCOVERY_CATEGORIES.slice(broadPage * BROAD_DISCOVERY_PAGE_SIZE, (broadPage + 1) * BROAD_DISCOVERY_PAGE_SIZE);
+    notes.push("Широкий поиск: подборка " + (broadPage + 1) + "/" + BROAD_DISCOVERY_PAGES +
+      " (категории: " + cats.join("; ") + "). Это не исчерпывающий каталог; для следующей подборки нажмите «Следующие категории».");
   }
-  // Links the model wrote itself: Telegram ones are kept only after their public page confirms them.
-  for (const g of gemini) for (const u of extractGroupLinks(g.text || "").telegram) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true });
-  // Catalogue pages (tgstat, lists of chats) often hold the links; read a few of them.
-  const pages = await inBatches(otherPages.slice(0, 6), 6, (url) => fetchHtml(url, 6000));
-  for (const html of pages) {
-    const links = extractGroupLinks(html);
-    for (const u of links.telegram.slice(0, 40)) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: false });
-    for (const u of links.facebook.slice(0, 20)) if (!facebook.has(u)) facebook.set(u, { title: "", snippet: "" });
+  const descriptors = platformSearchQueries({ ...input, platforms: selected, broadPage });
+  const queries = descriptors.map((q) => q.query);
+  const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
+  const onePerPlatform = descriptors.filter((d, i) => descriptors.findIndex((v) => v.platform === d.platform) === i);
+  const paidQueries = onePerPlatform.slice(0, 4); // billing limit per search run
+  const [paid, keyless, tgstat] = await Promise.all([
+    dataForSeoEnabled()
+      ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en")))
+      : Promise.resolve([]),
+    runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 19_000)).catch(() => []),
+    selected.includes("telegram") && !broad && tgStatEnabled()
+      ? tgStatSearch(input.topic, input.country || "")
+      : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
+  ]);
+  for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
+  const paidHits = paid.flatMap((result, i) => result.hits.map((h) => ({ ...h, sourceQuery: paidQueries[i].query })));
+  const keylessHits = keyless.flatMap((result) => result.hits.map((h) => ({ ...h, sourceQuery: result.query || "" })));
+  const visibleHits = [...paidHits, ...keylessHits];
+  const hitPlatform = (url: string): Platform | "" =>
+    normalizeTelegramUrl(url) ? "telegram"
+    : normalizeFacebookGroupUrl(url) ? "facebook"
+    : normalizeInstagramProfileUrl(url) ? "instagram"
+    : normalizeTikTokProfileUrl(url) ? "tiktok" : "";
+  const discovered = new Set(visibleHits.map((h) => hitPlatform(h.url)).filter(Boolean));
+  const missing = selected.filter((p) => !discovered.has(p));
+  // Only use Gemini when indexed search missed a requested platform. Its
+  // grounding may require billable access; 404 must not invent profile URLs.
+  const fallbackQueries = descriptors.filter((q) => missing.includes(q.platform)).slice(0, 2);
+  const gemini = !fallbackQueries.length || Date.now() > deadlineAt - 22_000
+    ? []
+    : await Promise.all(fallbackQueries.map((q) => geminiSearch(q.query, polish ? "pl" : input.language || "en", listPrompt(input))));
+  for (const g of gemini) if (!g.ok && g.message) notes.push(g.message);
+  const geminiHits = gemini.flatMap((g, i) => g.hits.map((h) => ({ ...h, sourceQuery: fallbackQueries[i].query })));
+  if (!visibleHits.length && !gemini.some((g) => g.ok && (g.hits.length || g.text))) {
+    notes.push("Поисковые источники пока не подтвердили подходящих публичных ссылок. Ноль результатов не означает, что аккаунтов нет.");
+  }
+
+  const telegram = new Map<string, { snippet: string; trusted: boolean; sourceQuery: string }>();
+  if (tgstat.ok) for (const link of tgstat.urls) {
+    const url = normalizeTelegramUrl(link);
+    if (url) telegram.set(url, { snippet: "TGStat API: " + input.topic, trusted: true, sourceQuery: "TGStat: " + input.topic });
+  } else if (tgStatEnabled() && selected.includes("telegram") && "error" in tgstat && tgstat.error) notes.push(tgstat.error);
+  const facebook = new Map<string, { title: string; snippet: string; sourceQuery: string }>();
+  const instagram = new Map<string, { title: string; snippet: string; sourceQuery: string }>();
+  const tiktok = new Map<string, { title: string; snippet: string; sourceQuery: string }>();
+  const otherPages: string[] = [];
+  const hits = [...visibleHits, ...geminiHits];
+  for (const hit of hits) {
+    const platform = hitPlatform(hit.url);
+    if (platform && !selected.includes(platform)) continue;
+    const url = platform === "telegram" ? normalizeTelegramUrl(hit.url)
+      : platform === "facebook" ? normalizeFacebookGroupUrl(hit.url)
+      : platform === "instagram" ? normalizeInstagramProfileUrl(hit.url)
+      : platform === "tiktok" ? normalizeTikTokProfileUrl(hit.url) : "";
+    const meta = { title: hit.title || "", snippet: hit.snippet || "", sourceQuery: hit.sourceQuery || input.topic };
+    if (platform === "telegram") telegram.set(url, { snippet: meta.snippet, trusted: true, sourceQuery: meta.sourceQuery });
+    else if (platform === "facebook") facebook.set(url, meta);
+    else if (platform === "instagram") instagram.set(url, meta);
+    else if (platform === "tiktok") tiktok.set(url, meta);
+    else if (hit.url && selected.some((p) => p === "telegram" || p === "facebook")) otherPages.push(hit.url);
+    // Only Telegram/Facebook links in indexed public snippets are considered;
+    // not arbitrary Instagram/TikTok handles hallucinated in an LLM reply.
+    const inText = extractGroupLinks(hit.title + " " + hit.snippet);
+    if (selected.includes("telegram")) for (const u of inText.telegram) if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true, sourceQuery: meta.sourceQuery });
+    if (selected.includes("facebook")) for (const u of inText.facebook) if (!facebook.has(u)) facebook.set(u, { title: "", snippet: meta.snippet, sourceQuery: meta.sourceQuery });
+  }
+  // Gemini text is only a candidate for Telegram; a public Telegram preview
+  // must exist before a result is saved. Never infer TikTok/IG profiles from text.
+  if (selected.includes("telegram")) for (const g of gemini) for (const u of extractGroupLinks(g.text || "").telegram)
+    if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: true, sourceQuery: input.topic });
+
+  // Catalogue pages occasionally list additional public Telegram/Facebook
+  // links. Access only public websites and validate every link.
+  if (selected.includes("telegram") || selected.includes("facebook")) {
+    const pages = await inBatches(otherPages.slice(0, 4), 4, (url) => fetchHtml(url, 5000));
+    for (const html of pages) {
+      const links = extractGroupLinks(html);
+      if (selected.includes("telegram")) for (const u of links.telegram.slice(0, 25))
+        if (!telegram.has(u)) telegram.set(u, { snippet: "", trusted: false, sourceQuery: "public catalogue" });
+      if (selected.includes("facebook")) for (const u of links.facebook.slice(0, 15))
+        if (!facebook.has(u)) facebook.set(u, { title: "", snippet: "", sourceQuery: "public catalogue" });
+    }
   }
 
   const now = nowIso();
-  const topicWords = (input.topic + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
+  const topicWords = ((broad ? "" : input.topic) + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
   const relevant = (text: string) => { const t = text.toLowerCase(); return topicWords.some((w) => t.includes(w)); };
-  const base = { country: input.country || undefined, city: input.city || undefined, topic: input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
+  const base = { country: input.country || undefined, city: input.city || undefined, topic: broad ? "разные тематики" : input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
   const excluded = (text: string) => { const t = text.toLowerCase(); return (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase())); };
 
   const tgList = [...telegram.entries()].slice(0, 60);
@@ -327,7 +491,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     // Channels (and some groups) have a public feed: last post date and frequency.
     const feed = Date.now() < deadlineAt ? await telegramFeed(url) : [];
     const live = feed.length ? { ...activityFromPosts(feed), activityCheckedAt: now } : { activity: "unknown" as const };
-    return { ...base, ...live, id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLang(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), (input.language as any) || "en") };
+    return { ...base, ...live, foundBy: meta.sourceQuery, verification: "public_page", id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLang(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), (input.language as any) || "en") };
   });
 
   const fbList = [...facebook.entries()].slice(0, 30);
@@ -337,14 +501,33 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     if (!name) return null;
     const text = (preview?.description || "") + "\n" + meta.snippet;
     if (excluded(name + " " + text)) return null;
-    return { ...base, activity: "unknown", language: detectLang(name + " " + text, (input.language as any) || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
+    return { ...base, foundBy: meta.sourceQuery, verification: preview ? "public_page" : "indexed_candidate", activity: "unknown", language: detectLang(name + " " + text, (input.language as any) || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
   });
 
-  const found = [...tgCards, ...fbCards].filter(Boolean) as GroupCard[];
+  // Instagram/TikTok are PUBLIC thematic creators or business profiles, not
+  // Telegram-style communities. Search indexes are not reliable liveness,
+  // follower-count, posting-rights, or account ownership verification.
+  const makeProfiles = (platform: "instagram" | "tiktok", entries: Map<string, { title: string; snippet: string; sourceQuery: string }>): GroupCard[] =>
+    [...entries.entries()].slice(0, 50).flatMap(([url, meta]) => {
+      const handle = url.split("/").pop() || url;
+      const name = meta.title.replace(/\s*[|·•-]\s*(Instagram|TikTok).*$/i, "").trim().slice(0, 120) || handle;
+      if (excluded(name + " " + meta.snippet)) return [];
+      return [{
+        ...base, id: stableId("grp", url.toLowerCase()),
+        platform, kind: "profile" as const, url, name, ads: "unknown" as const,
+        activity: "unknown" as const, verification: "indexed_candidate" as const,
+        description: meta.snippet.slice(0, 600),
+        foundBy: meta.sourceQuery,
+        language: detectLang(name + " " + meta.snippet, (input.language as any) || "en"),
+      }];
+    });
+  const instagramCards = makeProfiles("instagram", instagram);
+  const tiktokCards = makeProfiles("tiktok", tiktok);
+  const found = [...tgCards, ...fbCards, ...instagramCards, ...tiktokCards].filter(Boolean) as GroupCard[];
   const saved = await upsertGroups(found);
   if (!found.length && !notes.length) notes.push("Поиск не вернул публичных групп. Попробуйте другую формулировку темы или город на местном языке.");
   await logAction({ actor: "agent", action: "groups.find", detail: input.topic + " · " + placeOf(input) + " → " + found.length + " (новых " + saved.added + ")" });
-  return { found: saved.cards.sort((a, b) => (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size, notes };
+  return { found: saved.cards.sort((a, b) => (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
 }
 
 // Keeps what the user already filled in (status, price, notes, posting switch, bot link).
@@ -486,6 +669,40 @@ export async function handleMyChatMember(update: any) {
   return card;
 }
 
+// Explicit registration for already-connected Telegram groups.
+// Telegram's my_chat_member event may predate the active webhook, so this
+// owner-only command verifies BOTH administrator roles before saving a group.
+export async function registerOwnedTelegramGroup(
+  chat: { id: string | number; type: string; title?: string; username?: string },
+  actorId: string,
+): Promise<{ ok: boolean; message: string; group?: GroupCard }> {
+  if (!["group", "supergroup", "channel"].includes(chat.type)) {
+    return { ok: false, message: "Отправьте /connect внутри Telegram-группы, где бот администратор." };
+  }
+  const bot = await tgCall("getMe", {});
+  const botId = bot?.result?.id;
+  if (!bot?.ok || !botId) return { ok: false, message: "Не удалось проверить аккаунт бота через Telegram API." };
+  const [owner, member] = await Promise.all([
+    tgCall("getChatMember", { chat_id: chat.id, user_id: actorId }),
+    tgCall("getChatMember", { chat_id: chat.id, user_id: botId }),
+  ]);
+  const ownerStatus = String(owner?.result?.status || "");
+  const botStatus = String(member?.result?.status || "");
+  if (!owner?.ok || !["creator", "administrator"].includes(ownerStatus))
+    return { ok: false, message: "Только администратор этой группы может подключить её к публикациям." };
+  if (!member?.ok || botStatus !== "administrator")
+    return { ok: false, message: "AURELIUS пока не администратор этой группы. Назначьте его администратором и повторите /connect." };
+  const card = await handleMyChatMember({
+    chat,
+    from: { id: Number(actorId) },
+    new_chat_member: { status: "administrator" },
+  });
+  if (!card || !card.botConnected) return { ok: false, message: "Telegram-группа не зарегистрирована. Проверьте webhook и Redis." };
+  return { ok: true, message: card.postingEnabled
+    ? "✅ Группа зарегистрирована. Постинг разрешён только после тестового подтверждения владельца."
+    : "✅ Группа зарегистрирована, но постинг выключен. Включите его в панели только после подтверждения прав.", group: card };
+}
+
 // ---- Posting through the Bot API ---------------------------------------------------
 
 function today() {
@@ -541,7 +758,15 @@ export async function postViaBot(text: string, photo?: string, by = "dashboard",
 export async function queueManual(text: string, groupIds: string[] | "all", photoUrl?: string) {
   const body = text.trim().slice(0, 4000);
   if (!body) return { ok: false, added: 0, message: "Пустой текст." };
-  const groups = (await listGroups()).filter((g) => (groupIds === "all" ? !(g.botConnected && g.postingEnabled) && g.status !== "declined" && g.ads !== "forbidden" : groupIds.includes(g.id)));
+  // Publicly indexed IG/TikTok profiles and discovered groups are NOT
+  // advertising permissions. Never create even a manual placement task before
+  // an owner has recorded the administrator/partner agreement.
+  const groups = (await listGroups()).filter((g) =>
+    (groupIds === "all" || groupIds.includes(g.id)) &&
+    !(g.botConnected && g.postingEnabled) &&
+    ["free", "exchange", "paid"].includes(g.status) &&
+    g.ads !== "forbidden"
+  );
   const now = nowIso();
   const items: QueueItem[] = groups.map((g) => ({ id: randomId("q"), groupId: g.id, groupName: g.name, platform: g.platform, url: g.url, text: body, photoUrl: photoUrl || undefined, status: "pending", createdAt: now }));
   await putMany("group_queue", items);
@@ -606,7 +831,7 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = []) {
     { header: "Статус", key: "status", width: 16 }, { header: "Цена поста", key: "price", width: 11 }, { header: "Валюта", key: "currency", width: 8 },
     { header: "Бот в группе", key: "bot", width: 12 }, { header: "Заметки", key: "notes", width: 30 },
   ];
-  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
+  for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль" : g.kind === "page" ? "страница" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || "") });
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.autoFilter = { from: "A1", to: "O1" };

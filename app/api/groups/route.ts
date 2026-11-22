@@ -30,9 +30,14 @@ export async function POST(request: Request) {
   switch (str(body.action, 40)) {
     case "find": {
       const topic = str(body.topic, 120);
-      if (!topic) return Response.json({ ok: false, error: "Укажите тему, например «недвижимость»." }, { status: 400 });
-      const result = await findGroups({ topic, country: str(body.country, 60), city: str(body.city, 60) }, Date.now() + 240_000);
-      return Response.json({ ok: true, added: result.added, total: result.found.length, message: "Найдено групп: " + result.found.length + " (новых " + result.added + ")" + (result.notes.length ? ". " + result.notes.join(" ") : "") });
+      const country = str(body.country, 60);
+      const city = str(body.city, 60);
+      if (!topic && !country && !city) return Response.json({ ok: false, error: "Для широкого поиска укажите хотя бы страну или город либо конкретную тему." }, { status: 400 });
+      const broadPage = Math.max(0, Math.min(7, Math.trunc(Number(body.broadPage) || 0)));
+      const requested = Array.isArray(body.platforms) ? body.platforms.filter((p: unknown) => ["telegram", "facebook", "instagram", "tiktok"].includes(String(p))).slice(0, 4) : undefined;
+      const result = await findGroups({ topic, country, city, broadPage, platforms: requested?.length ? requested : undefined }, Date.now() + 240_000);
+      const byPlatform = Object.fromEntries(["telegram", "facebook", "instagram", "tiktok"].map((p) => [p, result.found.filter((g) => g.platform === p).length]));
+      return Response.json({ ok: true, added: result.added, total: result.found.length, byPlatform, message: "Найдено публичных площадок: " + result.found.length + " (новых " + result.added + "). Telegram: " + byPlatform.telegram + ", Facebook: " + byPlatform.facebook + ", Instagram: " + byPlatform.instagram + ", TikTok: " + byPlatform.tiktok + "." + (result.notes.length ? " " + result.notes.join(" ") : "") });
     }
     case "update": {
       const card = await updateGroup(str(body.id, 80), body.patch || {});
