@@ -34,7 +34,7 @@ export function validateInstagramRequest(args: InstagramRequest): string | null 
   if (args.telegramFileId && !/^[\w-]{10,250}$/.test(args.telegramFileId)) return "INVALID_TELEGRAM_FILE_ID";
   const at = Date.parse(args.scheduledAt);
   if (!Number.isFinite(at) || at < Date.now() + 5 * 60_000 || at > Date.now() + 30 * 86400000) return "SCHEDULE_DATE_NOT_ALLOWED";
-  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?(?:Z|[+-]\d\d:\d\d)$/.test(args.scheduledAt)) return "TIMEZONE_REQUIRED";
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(args.scheduledAt)) return "TIMEZONE_REQUIRED";
   return null;
 }
 async function postizRequest(path: string, init: RequestInit) {
