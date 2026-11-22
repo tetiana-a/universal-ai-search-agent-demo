@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/scout/postiz/route";
 import { createPostizDraft, makePostizDraftPayload } from "@/lib/scout/postiz";
-import { resetMemoryStore } from "@/lib/scout/store";
+import { putOne, resetMemoryStore } from "@/lib/scout/store";
 import { json, mockFetch } from "./helpers";
 
 const auth = { "x-scout-key": "owner-admin" };
@@ -61,7 +61,7 @@ describe("Postiz integration: safe drafts", () => {
       method: "POST", headers: { ...auth, "content-type": "application/json" },
       body: JSON.stringify({ action: "schedule", integrationId: integration.id, requestId: "a-test", content: "Test floral delivery in Krakow" }),
     }));
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
   });
 
   it("blocks a public Polish wine ad", async () => {
@@ -71,6 +71,35 @@ describe("Postiz integration: safe drafts", () => {
       body: JSON.stringify({ action: "draft", integrationId: integration.id, requestId: "polish-wine-001", region: "Польша", content: "Объявление о продаже вина в Польше для публичного размещения" }),
     }));
     expect(res.status).toBe(403);
+  });
+
+  it("schedules only after explicit owner approval and on a connected Postiz Page", async () => {
+    vi.stubEnv("POSTIZ_API_KEY", "not-a-real-secret");
+    vi.stubEnv("POSTIZ_ENABLE_SCHEDULE", "on");
+    const approved = { id:"c-owned", title:"Flowers", adText:"Fresh flowers and bouquets in Krakow.",
+      region:"Krakow, Poland", topic:"flowers", platforms:["facebook"], status:"approved", approvedAt:new Date().toISOString() };
+    await putOne("campaigns", approved);
+    const at = new Date(Date.now()+3600000).toISOString();
+    const body={action:"schedule",campaignId:approved.id,integrationId:integration.id,
+      scheduledAt:at,requestId:"owner-schedule-001",confirm:"I_APPROVE_SCHEDULE"};
+    const denied=await POST(new Request("https://x/api/scout/postiz",{
+      method:"POST",headers:{...auth,"content-type":"application/json"},body:JSON.stringify({...body,confirm:""}),
+    }));
+    expect(denied.status).toBe(403);
+    const created:any[]=[];
+    mockFetch([{match:u=>u.startsWith("https://api.postiz.com/public/v1/"),respond:(u,i)=>{
+      if(u.endsWith("/integrations"))return json([integration]);
+      created.push(JSON.parse(String(i?.body||"{}")));
+      return json([{postId:"scheduled-123",integration:integration.id}]);
+    }}]);
+    const response=await POST(new Request("https://x/api/scout/postiz",{
+      method:"POST",headers:{...auth,"content-type":"application/json"},body:JSON.stringify(body),
+    }));
+    expect(response.status).toBe(202);
+    expect((await response.json()).statusLabel).toBe("SCHEDULED_NOT_VERIFIED_PUBLISHED");
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({type:"schedule",date:at,
+      posts:[{integration:{id:integration.id},value:[{content:approved.adText}],settings:{__type:"facebook"}}]});
   });
 
   it("requires Postiz's format and does not allow unsupported integrations", () => {
