@@ -6,6 +6,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/groups/cron",
+      "schedule": "0 7 * * *"
+    },
+    {
       "path": "/api/campaigns/cron",
       "schedule": "0 8 * * *"
     }
