@@ -52,7 +52,9 @@ export default function GroupsDashboard() {
   const [state, setState] = useState<State | null>(null);
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState("");
-  const [search, setSearch] = useState({ country: "Испания", city: "Валенсия", topic: "недвижимость", platform: "auto" });
+  const [search, setSearch] = useState({ country: "Испания", city: "Валенсия", topic: "", platform: "auto" });
+  const [broadPage, setBroadPage] = useState(0);
+  const broadSearch = !search.topic.trim() || /^(все|любые|all|any|всі|усі)(?:\s|$)/i.test(search.topic.trim());
   const [post, setPost] = useState({ text: "", photoUrl: "" });
   const [filter, setFilter] = useState("");
   const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string } } | null>(null);
@@ -151,7 +153,7 @@ export default function GroupsDashboard() {
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_1fr_auto]">
             <input className={inputClass} placeholder="Страна" value={search.country} onChange={(e) => setSearch({ ...search, country: e.target.value })} />
             <input className={inputClass} placeholder="Город" value={search.city} onChange={(e) => setSearch({ ...search, city: e.target.value })} />
-            <input className={inputClass} placeholder="Тема (например, недвижимость)" value={search.topic} onChange={(e) => setSearch({ ...search, topic: e.target.value })} />
+            <input className={inputClass} placeholder="Любая тема; пусто = все тематики" value={search.topic} onChange={(e) => { setSearch({ ...search, topic: e.target.value }); setBroadPage(0); }} />
             <select aria-label="Социальная платформа" className={inputClass} value={search.platform} onChange={(e) => setSearch({ ...search, platform: e.target.value })}>
               <option value="auto">🔎 Все платформы автоматически</option>
               <option value="telegram">✈️ Telegram</option>
@@ -159,8 +161,9 @@ export default function GroupsDashboard() {
               <option value="tiktok">🎵 TikTok</option>
               <option value="facebook">📘 Facebook</option>
             </select>
-            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("find", { country: search.country, city: search.city, topic: search.topic, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find")}>{busy === "find" ? "Ищу… до 4 мин" : "Найти площадки"}</Button>
+            <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("find", { country: search.country, city: search.city, topic: search.topic, broadPage, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find")}>{busy === "find" ? "Ищу… до 4 мин" : "Найти площадки"}</Button>
           </div>
+          {broadSearch && <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--text-muted)]"><span>Обзор разных тематик · подборка {broadPage + 1} из 8</span><Button disabled={Boolean(busy)} onClick={() => { const next = (broadPage + 1) % 8; setBroadPage(next); void act("find", { country: search.country, city: search.city, topic: search.topic, broadPage: next, ...(search.platform === "auto" ? {} : { platforms: [search.platform] }) }, "find"); }}>Следующие категории</Button><span>Поиск открытых площадок, а не всех существующих групп интернета.</span></div>}
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Автопоиск: Telegram — группы и каналы; Facebook — группы; Instagram и TikTok — тематические публичные профили. Источник каждого результата виден по наведению на иконку. Профиль из поискового индекса ещё не подтверждает активность, число подписчиков или разрешение на рекламу.</p>
         </Panel>
 
