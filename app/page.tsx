@@ -1,5 +1,6 @@
 "use client";
 
+import { startVoiceRecording } from "@/components/voice-recorder";
 import {
   Activity,
   ArrowUpRight,
@@ -1475,48 +1476,20 @@ export default function Home() {
   }
   */
 
-  function startMic() {
+  async function startMic() {
     setVoiceError("");
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setVoiceError(
-        lang === "ru"
-          ? "Этот браузер не поддерживает Web Speech API. Используйте MP3."
-          : "This browser does not support Web Speech API. Use an MP3 file.",
-      );
-      return;
-    }
-
     if (audioState === "listening") {
       recognitionRef.current?.stop();
       return;
     }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = lang === "ru" ? "ru-RU" : "en-US";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-
-    recognition.onstart = () => setAudioState("listening");
-    recognition.onresult = (event: any) => {
-      const text = Array.from(event.results)
-        .map((result: any) => result[0]?.transcript || "")
-        .join(" ");
-      setTranscript(text);
-      setQuery(text);
-    };
-    recognition.onerror = (event: any) => {
-      setVoiceError(event?.error || "Speech recognition error");
-      setAudioState("idle");
-    };
-    recognition.onend = () => setAudioState("idle");
-
-    recognitionRef.current = recognition;
-    recognition.start();
+    const recorder = await startVoiceRecording(
+      (text) => { setTranscript(text); setQuery(text); },
+      (message) => setVoiceError(message),
+      (busy) => setAudioState(busy ? "transcribing" : "idle"),
+    );
+    if (!recorder) return;
+    recognitionRef.current = recorder;
+    setAudioState("listening");
   }
 
   async function transcribeFile(file: File) {
@@ -1526,7 +1499,6 @@ export default function Home() {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("language", lang === "ru" ? "ru" : "en");
 
     try {
       const response = await fetch("/api/transcribe", {

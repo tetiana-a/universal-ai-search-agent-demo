@@ -7,13 +7,13 @@ import { collectReport, renderReport } from "@/lib/scout/report";
 import { scoreInvestor } from "@/lib/scout/scoring";
 import { addWatch, removeWatch, setSourceState } from "@/lib/scout/sources";
 import { deleteValue, getOne, getValue, listAll, logAction, putOne, setValue } from "@/lib/scout/store";
-import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingCriteria, listRecentResearchTasks, loadTask, startResearch, statusKeyboard, statusText } from "@/lib/scout/research-bot";
-import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
+import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingCriteria, listRecentResearchTasks, loadTask, startFreshDialog, startResearch, statusKeyboard, statusText } from "@/lib/scout/research-bot";
+import { answerCallback, controlIds, editMessage, isOpenGroup, reportChatId, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
-import { handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
+import { fullExportXlsx, handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
-import { CAMPAIGN_COMMANDS, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer } from "@/lib/scout/campaigns-bot";
+import { CAMPAIGN_COMMANDS, campaignSummary, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer, partnerInviteLink, promptNewCampaign } from "@/lib/scout/campaigns-bot";
 import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
 import { createPostizDraft, listPostizChannels, postizConfigured } from "@/lib/scout/postiz";
 import { cancelInstagramJob, listInstagramJobs, refreshInstagramJobs, scheduleInstagram } from "@/lib/scout/instagram-posts";
@@ -27,22 +27,28 @@ import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSou
 export type BotResult = { background?: () => Promise<void> };
 
 const HELP = [
-  "<b>AURELIUS</b>",
-  "Просто напишите обычным сообщением, что нужно найти.",
+  "✦ <b>AURELIUS</b> · AI-агент для поиска сообществ и размещения объявлений",
+  "━━━━━━━━━━━━━━",
   "",
-  "Например:",
-  "«Найди участки возле Мадрида от 10 000 м²»",
-  "«Найди инвесторов в Амстердаме для B2B SaaS»",
+  "🎙 <b>Поставить задачу</b>",
+  "Отправьте голосовое или текст: что рекламируем, где, на каких площадках. Я задам уточнения, предложу 40 ключевых слов и начну работу только после вашего «да».",
   "",
-  "Я сам уточню детали, выполню поиск и покажу результаты.",
-  "Для размещения объявления напишите «нужно разместить объявление» или нажмите кнопку 📣.",
+  "🔎 <b>Поиск сообществ</b>",
+  "Facebook, Telegram, Instagram, TikTok на любом языке: профильные и смежные (экспаты, барахолки, городские), с проверкой активности и выгрузкой в Excel.",
   "",
-  "<b>Реклама в сообществах</b>: отправьте <b>голосовое</b> с задачей (что, где, на каких площадках, текст) или /campaign текст.",
-  "Я задам уточнения, предложу 40 ключевых слов, найду профильные и смежные сообщества и буду размещать каждый день только там, где разрешено.",
-  "/campaigns — кампании · /capacity — ёмкость сети · /creport — отчёт · /cstop all — остановить всё",
-  "/postiz — мои разрешённые аккаунты · /postizdraft ID | текст — черновик (НЕ публикация)",
-  "/ighelp — автоматическая публикация Instagram · /igqueue — запланировать фото · /igstatus — отчёт · /igcancel ID — отмена",
-  "Команды запоминать не нужно — используйте кнопки.",
+  "📣 <b>Размещение</b>",
+  "Каждый день до цели (например, 300) и только там, где реклама разрешена: бот в Telegram-группах, где его добавили админы, задания админам-партнёрам и ваши страницы через Postiz.",
+  "",
+  "📡 <b>Мониторинг и отчёты</b>",
+  "Публикации по кампании, просмотры и ежедневный отчёт сюда.",
+  "",
+  "<b>Главное</b>",
+  "/campaign — новая кампания · /campaigns — все кампании",
+  "/capacity — ёмкость сети · /creport — отчёт за день",
+  "/cstop all — остановить всё",
+  "",
+  "🤝 Ссылка для админов-партнёров: " + partnerInviteLink(),
+  "Всё остальное — кнопками в /panel.",
 ].join("\n");
 
 function commandOf(text: string) {
@@ -108,8 +114,10 @@ function sourceText(s: ScoutSource) {
 
 function mainPanelKeyboard(): Keyboard {
   return [
-    [{ text: "🔎 Найти", callback_data: "menu:find" }],
-    [{ text: "📣 Разместить объявление", callback_data: "menu:advert" }],
+    [{ text: "📢 Новая кампания", callback_data: "menu:newcampaign" }, { text: "🗂 Мои кампании", callback_data: "menu:campaigns" }],
+    [{ text: "📊 Отчёт за день", callback_data: "menu:creport" }, { text: "📈 Ёмкость сети", callback_data: "menu:capacity" }],
+    [{ text: "🔎 Найти что угодно", callback_data: "menu:find" }, { text: "📣 Одно объявление", callback_data: "menu:advert" }],
+    [{ text: "📥 Выгрузка в Excel", callback_data: "menu:export" }],
     [
       { text: "📋 Мои поиски", callback_data: "menu:tasks" },
       { text: "✅ Результаты", callback_data: "menu:results" },
@@ -158,11 +166,32 @@ async function showPanel(chatId: string) {
 
   await sendMessage(
     chatId,
-    "<b>AURELIUS</b>\n" +
-      "Напишите, что хотите найти, обычным сообщением — или выберите кнопку.\n\n" +
-      state,
+    "✦ <b>AURELIUS</b>\n━━━━━━━━━━━━━━\n" +
+      (await campaignSummary()) + "\n\n" +
+      "🔎 " + state + "\n\n" +
+      "<i>Отправьте голосовое с задачей или выберите действие.</i>",
     mainPanelKeyboard(),
   );
+}
+
+// First screen: a returning user picks «continue» (everything is kept in the database) or «new dialog».
+async function showWelcome(chatId: string, rawName: string) {
+  const userName = /^\d+$/.test(rawName) ? "" : rawName.replace(/^@/, "");
+  const [task, campaigns] = await Promise.all([loadTask(chatId), listAll("campaigns")]);
+  const hello = "✦ <b>AURELIUS</b>\n━━━━━━━━━━━━━━\n";
+  if (!task && !campaigns.length) {
+    await sendMessage(chatId, hello + "👋 Здравствуйте" + (userName ? ", " + escapeHtml(userName) : "") + "! Я AI-агент: нахожу сообщества в Facebook, Telegram, Instagram и TikTok, размещаю объявления там, где это разрешено, и присылаю отчёты.\n\n🎙 Начните с голосового: что рекламируем, где и на каких площадках.", mainPanelKeyboard());
+    return;
+  }
+  await sendMessage(chatId, hello + "👋 С возвращением" + (userName ? ", " + escapeHtml(userName) : "") + "!\n\n" + (await campaignSummary()) + (task ? "\n🔎 Последний поиск: <b>" + escapeHtml(task.query.slice(0, 80)) + "</b>" : "") + "\n\n<i>Все кампании, поиски и база сообществ сохранены.</i>", [
+    [{ text: "↩️ Продолжить", callback_data: "menu:panel" }, { text: "🆕 Новый диалог", callback_data: "menu:fresh" }],
+    [{ text: "📥 Выгрузка в Excel", callback_data: "menu:export" }],
+  ]);
+}
+
+async function sendExport(chatId: string) {
+  await sendMessage(chatId, "📥 Готовлю Excel: база сообществ, журнал публикаций, размещения кампаний…");
+  await sendDocument(chatId, "aurelius-" + new Date().toISOString().slice(0, 10) + ".xlsx", await fullExportXlsx(), "📥 AURELIUS · база сообществ, журнал публикаций и размещения кампаний");
 }
 
 async function showMoreMenu(chatId: string) {
@@ -206,8 +235,13 @@ async function identityText(message: any) {
 async function handleCommand(chatId: string, userId: string, userName: string, cmd: string, args: string): Promise<BotResult> {
   switch (cmd) {
     case "start":
+      await showWelcome(chatId, userName);
+      return {};
     case "panel":
       await showPanel(chatId);
+      return {};
+    case "export":
+      await sendExport(chatId);
       return {};
 
     case "postiz": {
@@ -567,6 +601,19 @@ async function handleCallback(query: any): Promise<BotResult> {
       }
       return startAdWizard(chatId, userId);
     }
+    if (action === "fresh") {
+      await startFreshDialog(chatId);
+      await sendMessage(chatId, "🆕 <b>Новый диалог</b>\nПрошлые кампании и результаты сохранены, их можно открыть в «Мои кампании».\n\nЧто делаем? Отправьте голосовое или выберите действие.", mainPanelKeyboard());
+      return {};
+    }
+    if (action === "export") {
+      await sendExport(chatId);
+      return {};
+    }
+    if (action === "newcampaign") {
+      await promptNewCampaign(chatId);
+      return {};
+    }
     if (action === "more") {
       await showMoreMenu(chatId);
       return {};
@@ -579,7 +626,7 @@ async function handleCallback(query: any): Promise<BotResult> {
       await sendMessage(chatId, "<b>Группы и постинг</b>\n\n<code>/groups Испания, Барселона, недвижимость</code> — найти группы (таблица + Excel)\n<code>/post текст</code> — опубликовать ботом там, где его добавили админы, или поставить в очередь\n/queue — следующий пост для ручной публикации со своего аккаунта\n/posts — отчёт за сегодня");
       return {};
     }
-    if (["status", "tasks", "results", "report", "scan", "sources", "drafts", "leads", "settings", "health", "posts", "queue", "campaigns", "capacity"].includes(action)) {
+    if (["status", "tasks", "results", "report", "scan", "sources", "drafts", "leads", "settings", "health", "posts", "queue", "campaigns", "capacity", "creport"].includes(action)) {
       return handleCommand(chatId, userId, by, action, "");
     }
     return {};
@@ -872,7 +919,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       if (wizard) return wizard;
       if (isAdPostingIntent(String(message.text))) return startAdWizard(chatId, userId);
     }
-    const answer = await maybeAnswer(chatId, String(message.text));
+    const answer = await maybeAnswer(chatId, String(message.text), userId);
     if (answer) return answer;
     return handleResearchText(message, chatId, userId);
   }

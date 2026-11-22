@@ -1,9 +1,9 @@
-import { answerCampaign, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign } from "@/lib/scout/campaigns";
+import { answerCampaign, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, today, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign, type CampaignTask } from "@/lib/scout/campaigns";
 import { dashboardUrl } from "@/lib/scout/config";
 import { addGroupManually, groupsXlsx, PLATFORM_LABEL, platformOfUrl, updateGroup, type GroupCard } from "@/lib/scout/groups";
 import { botHandle } from "@/lib/scout/config";
 import { controlIds, reportChatId } from "@/lib/scout/telegram";
-import { deleteValue, getOne, getValue, removeMany, setValue } from "@/lib/scout/store";
+import { deleteValue, getOne, getValue, listAll, removeMany, setValue } from "@/lib/scout/store";
 import { answerCallback, editMessage, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, stableId } from "@/lib/scout/text";
 import { isPolishWineCampaign, POLISH_WINE_NOTICE } from "@/lib/scout/wine-compliance";
@@ -22,39 +22,67 @@ function pageUrl() {
 }
 
 const STATUS: Record<Campaign["status"], string> = { draft: "черновик", searching: "ищу сообщества", ready: "сообщества найдены", approved: "размещение идёт", stopped: "остановлена" };
+const STATUS_ICON: Record<Campaign["status"], string> = { draft: "📝", searching: "🔎", ready: "🟡", approved: "🟢", stopped: "⏹" };
+const LINE = "━━━━━━━━━━━━━━";
+
+function bar(done: number, target: number) {
+  const n = target > 0 ? Math.min(10, Math.round((done / target) * 10)) : 0;
+  return "▰".repeat(n) + "▱".repeat(10 - n);
+}
+
+// Today's placements per campaign: several campaigns run in parallel, each with its own progress.
+export async function campaignBoard() {
+  const [list, tasks] = await Promise.all([listCampaigns(), listAll<CampaignTask>("campaign_tasks")]);
+  const day = today();
+  const done = new Map<string, number>();
+  for (const t of tasks) if (t.day === day && (t.status === "sent" || t.status === "verified")) done.set(t.campaignId, (done.get(t.campaignId) || 0) + 1);
+  const active = list.filter((c) => c.status !== "stopped");
+  const placed = active.reduce((n, c) => n + (done.get(c.id) || 0), 0);
+  const target = active.filter((c) => c.status === "approved").reduce((n, c) => n + c.dailyTarget, 0);
+  return { list, active, done, placed, target };
+}
+
+export async function campaignSummary() {
+  const b = await campaignBoard();
+  if (!b.list.length) return "📢 Кампаний пока нет. Отправьте голосовое с задачей.";
+  return "📢 Кампаний в работе: <b>" + b.active.length + "</b>" + (b.target ? "\n📈 Сегодня размещено: <b>" + b.placed + " / " + b.target + "</b>\n" + bar(b.placed, b.target) : "");
+}
 
 export function campaignCard(c: Campaign) {
-  const kw = c.keywords.map((k, i) => (i + 1) + ". " + escapeHtml(k)).join("\n");
-  return "<b>Кампания</b> <code>" + c.id + "</code> · " + STATUS[c.status] +
-    "\n<b>" + escapeHtml(c.title) + "</b>" +
-    "\nТема: " + escapeHtml(c.topic || "—") + " · Регион: " + escapeHtml(c.region || "—") +
-    "\nЯзыки: " + escapeHtml(c.languages.join(", ") || "—") + " · Площадки: " + c.platforms.map((p) => PLATFORM_LABEL[p]).join(", ") +
-    "\nЦель: " + c.dailyTarget + " размещений в день" +
-    "\n\n<b>Текст объявления</b>\n" + escapeHtml(c.adText.slice(0, 900)) +
-    (Object.keys(c.translations || {}).length ? "\n<i>Переводы: " + Object.keys(c.translations).join(", ") + "</i>" : "") +
-    (c.questions.length ? "\n\n❓ <b>Уточните, пожалуйста</b> (ответьте одним сообщением):\n" + c.questions.map((q) => "• " + escapeHtml(q)).join("\n") : "") +
-    "\n\n<b>Ключевые слова (" + c.keywords.length + ")</b>\n" + kw +
-    (c.adjacent.length ? "\n\n<b>Смежные сообщества</b>: " + escapeHtml(c.adjacent.join(", ")) : "") +
-    (c.queries.length ? "\n<b>Свои запросы</b>: " + escapeHtml(c.queries.join(", ")) : "") +
-    (c.exclusions.length ? "\n<b>Исключения</b>: " + escapeHtml(c.exclusions.join(", ")) : "") +
-    (isPolishWineCampaign(c) ? "\n\n" + escapeHtml(POLISH_WINE_NOTICE) : "") +
-    "\n\nПравка: <code>/keywords " + c.id + " +слово -слово</code> · свой запрос <code>/cq " + c.id + " текст</code> · исключить <code>/cx " + c.id + " слово</code>";
+  return STATUS_ICON[c.status] + " <b>" + escapeHtml(c.title) + "</b>\n<i>" + STATUS[c.status] + " · <code>" + c.id + "</code></i>\n" + LINE +
+    "\n🎯 <b>Тема:</b> " + escapeHtml(c.topic || "—") +
+    "\n📍 <b>Регион:</b> " + escapeHtml(c.region || "—") +
+    "\n🌐 <b>Языки:</b> " + escapeHtml(c.languages.join(", ") || "—") +
+    "\n📱 <b>Площадки:</b> " + c.platforms.map((p) => PLATFORM_LABEL[p]).join(", ") +
+    "\n📈 <b>Цель:</b> " + c.dailyTarget + " размещений в день" +
+    (c.found ? "\n👥 <b>Найдено:</b> " + c.found.total + " (профильных " + c.found.core + ", смежных " + c.found.adjacent + ", неактивных " + c.found.inactive + ")" : "") +
+    "\n\n📝 <b>Объявление</b>\n<blockquote>" + escapeHtml(c.adText.slice(0, 900)) + "</blockquote>" +
+    (Object.keys(c.translations || {}).length ? "<i>Переводы: " + Object.keys(c.translations).join(", ") + "</i>\n" : "") +
+    (c.questions.length ? "\n❓ <b>Уточните, пожалуйста</b> (одним сообщением)\n" + c.questions.map((q) => "• " + escapeHtml(q)).join("\n") + "\n" : "") +
+    "\n🔑 <b>Ключевые слова · " + c.keywords.length + "</b>\n<blockquote expandable>" + escapeHtml(c.keywords.join(" · ")) + "</blockquote>" +
+    (c.adjacent.length ? "🧭 <b>Смежные сообщества:</b> " + escapeHtml(c.adjacent.join(", ")) + "\n" : "") +
+    (c.queries.length ? "➕ <b>Свои запросы:</b> " + escapeHtml(c.queries.join(", ")) + "\n" : "") +
+    (c.exclusions.length ? "🚫 <b>Исключения:</b> " + escapeHtml(c.exclusions.join(", ")) + "\n" : "") +
+    (isPolishWineCampaign(c) ? "\n" + escapeHtml(POLISH_WINE_NOTICE) + "\n" : "") +
+    "\n<i>Правка слов:</i> <code>/keywords " + c.id + " +слово -слово</code>";
 }
 
 function draftKeyboard(c: Campaign): Keyboard {
   return [
     [{ text: isPolishWineCampaign(c) ? "🔎 Поиск B2B-сообществ (без публикации)" : "✅ Слова верны — искать сообщества", callback_data: "cp:search:" + c.id }],
-    [{ text: "✖️ Удалить черновик", callback_data: "cp:del:" + c.id }],
+    [{ text: "✖️ Удалить черновик", callback_data: "cp:del:" + c.id }, { text: "🗂 Все кампании", callback_data: "menu:campaigns" }],
   ];
 }
 
 function runningKeyboard(c: Campaign): Keyboard {
   const search = [{ text: "📡 Мониторинг", callback_data: "cp:mon:" + c.id }, { text: "🔎 Искать ещё", callback_data: "cp:search:" + c.id }];
-  if (isPolishWineCampaign(c)) return [search];
-  if (c.status !== "approved" && (!c.found || c.found.total === 0)) return [search];
+  const nav = [{ text: "📊 Ёмкость", callback_data: "cp:cap:" + c.id }, { text: "🗂 Все кампании", callback_data: "menu:campaigns" }];
+  if (isPolishWineCampaign(c)) return [search, nav];
+  if (c.status !== "approved" && (!c.found || c.found.total === 0)) return [search, nav];
   return [
     c.status === "approved" ? [{ text: "⏹ Остановить", callback_data: "cp:stop:" + c.id }] : [{ text: "▶️ Запустить размещение", callback_data: "cp:start:" + c.id }],
     search,
+    nav,
   ];
 }
 
@@ -86,7 +114,16 @@ export async function handleVoice(chatId: string, fileId: string, ownerId: strin
 }
 
 // A plain text message right after clarifying questions is the answer to them.
-export async function maybeAnswer(chatId: string, text: string): Promise<Result | null> {
+export async function promptNewCampaign(chatId: string) {
+  await setValue("cmp-new:" + chatId, "1", 3600);
+  await sendMessage(chatId, "📢 <b>Новая кампания</b>\n" + LINE + "\nОтправьте <b>голосовое</b> или напишите одним сообщением:\n\n• что рекламируем и текст объявления\n• город и страна\n• площадки: Telegram, Facebook, Instagram, TikTok\n• сколько размещений в день\n\n<i>Пример: «Продаю квартиру в Валенсии, 3 комнаты, 250 000 €. Telegram и Facebook, 300 в день.»</i>");
+}
+
+export async function maybeAnswer(chatId: string, text: string, ownerId = chatId): Promise<Result | null> {
+  if (!text.startsWith("/") && (await getValue<string>("cmp-new:" + chatId))) {
+    await deleteValue("cmp-new:" + chatId);
+    return startCampaignFromText(chatId, text, ownerId, "text");
+  }
   const pending = await getValue<string>("cmp-answer:" + chatId);
   if (!pending || text.startsWith("/")) return null;
   await deleteValue("cmp-answer:" + chatId);
@@ -156,9 +193,15 @@ export async function handleCampaignCommand(chatId: string, userId: string, cmd:
       if (!args.trim()) { await sendMessage(chatId, "Отправьте голосовое или напишите задачу после команды:\n<code>/campaign Продаю квартиру в Валенсии, 2 спальни, 240 000 €. Разместить в Telegram и Facebook, 300 в день. Текст: …</code>"); return {}; }
       return startCampaignFromText(chatId, args, userId, "text", photo);
     case "campaigns": {
-      const list = await listCampaigns();
-      if (!list.length) { await sendMessage(chatId, "Кампаний пока нет. Отправьте голосовое с задачей или /campaign текст."); return {}; }
-      for (const c of list.slice(0, 6)) await sendMessage(chatId, "<code>" + c.id + "</code> · <b>" + escapeHtml(c.title) + "</b>\n" + STATUS[c.status] + " · цель " + c.dailyTarget + "/день" + (c.found ? " · сообществ " + c.found.total : ""), c.status === "draft" ? draftKeyboard(c) : runningKeyboard(c));
+      const b = await campaignBoard();
+      if (!b.list.length) { await promptNewCampaign(chatId); return {}; }
+      const shown = b.list.slice(0, 10);
+      const lines = shown.map((c, i) => (i + 1) + ". " + STATUS_ICON[c.status] + " <b>" + escapeHtml(c.title.slice(0, 60)) + "</b>\n    " + STATUS[c.status] +
+        (c.status === "approved" ? " · сегодня " + (b.done.get(c.id) || 0) + "/" + c.dailyTarget : "") + (c.found ? " · сообществ " + c.found.total : ""));
+      const buttons: Keyboard = [];
+      for (let i = 0; i < shown.length; i += 2) buttons.push(shown.slice(i, i + 2).map((c, j) => ({ text: (i + j + 1) + ". " + c.title.slice(0, 22), callback_data: "cp:open:" + c.id })));
+      buttons.push([{ text: "➕ Новая кампания", callback_data: "menu:newcampaign" }, { text: "📊 Отчёт", callback_data: "menu:creport" }]);
+      await sendMessage(chatId, "🗂 <b>Кампании</b>\n" + LINE + "\n" + lines.join("\n\n") + (b.target ? "\n" + LINE + "\n📈 Сегодня всего: <b>" + b.placed + " / " + b.target + "</b>\n" + bar(b.placed, b.target) : "") + "\n\n<i>Все кампании работают одновременно. Нажмите, чтобы открыть.</i>", buttons);
       return {};
     }
     case "keywords": case "cq": case "cx": {
@@ -245,6 +288,12 @@ export async function handleCampaignCallback(query: any, action: string, id: str
   const chatId = String(query.message?.chat?.id || "");
   const messageId = Number(query.message?.message_id || 0);
   switch (action) {
+    case "open": {
+      const c = await getOne<Campaign>("campaigns", id);
+      await answerCallback(query.id, c ? "✓" : "Не найдено");
+      if (c) await showDraft(chatId, c);
+      return {};
+    }
     case "search":
       await answerCallback(query.id, "Ищу сообщества…");
       await sendMessage(chatId, "🔎 Ищу профильные и смежные сообщества по всему списку слов. Это 3–5 минут, результат придёт сюда.");

@@ -1,4 +1,5 @@
 import { runStructuredExtraction } from "@/lib/free-ai";
+import { geminiTranscribe } from "@/lib/gemini-audio";
 import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
 import { DEFAULT_DAILY_LIMIT, findGroups, listGroups, refreshActivity, telegramFeed, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
 import { claimOnce, getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
@@ -588,24 +589,13 @@ export async function monitorCampaign(id: string, deadlineAt = Date.now() + 200_
 // ---- Voice → text (free Gemini) ----------------------------------------------------------------
 
 export async function transcribeTelegramVoice(fileId: string) {
-  const key = geminiSearchKey();
-  if (!key) return { ok: false, text: "", message: "Для голосовых нужен GEMINI_API_KEY (бесплатный)." };
+  if (!geminiSearchKey()) return { ok: false, text: "", message: "Для голосовых нужен GEMINI_API_KEY (бесплатный)." };
   const file = await tgCall("getFile", { file_id: fileId });
   const path = file?.result?.file_path;
   if (!path || Number(file?.result?.file_size || 0) > 15 * 1024 * 1024) return { ok: false, text: "", message: "Не удалось получить голосовое (до 15 МБ)." };
   try {
     const audio = await fetch("https://api.telegram.org/file/bot" + botToken() + "/" + path, { signal: AbortSignal.timeout(20000) });
-    const data = Buffer.from(await audio.arrayBuffer()).toString("base64");
-    const model = process.env.GEMINI_AUDIO_MODEL || "gemini-2.5-flash";
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ inline_data: { mime_type: /\.mp3$/i.test(path) ? "audio/mp3" : "audio/ogg", data } }, { text: "Transcribe this voice message word for word in its original language. Return only the text." }] }], generationConfig: { temperature: 0 } }),
-      signal: AbortSignal.timeout(40000),
-    });
-    const payload: any = await response.json().catch(() => null);
-    const text = (payload?.candidates?.[0]?.content?.parts || []).map((p: any) => String(p?.text || "")).join(" ").trim();
-    return text ? { ok: true, text, message: "" } : { ok: false, text: "", message: "Gemini не распознал голосовое (HTTP " + response.status + ")." };
+    return geminiTranscribe(Buffer.from(await audio.arrayBuffer()).toString("base64"), /\.mp3$/i.test(path) ? "audio/mp3" : "audio/ogg");
   } catch (error) {
     return { ok: false, text: "", message: "Ошибка распознавания: " + (error instanceof Error ? error.message : "сеть") };
   }

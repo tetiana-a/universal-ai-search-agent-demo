@@ -1,5 +1,5 @@
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
-import { BOT_COMMANDS, botToken, tgCall, webhookSecret } from "@/lib/scout/telegram";
+import { BOT_COMMANDS, BOT_PROFILE, botToken, tgCall, webhookSecret } from "@/lib/scout/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,5 +24,7 @@ export async function POST(request: Request) {
   const url = webhookUrl(request);
   const hook = await tgCall("setWebhook", { url, secret_token: webhookSecret(), allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member"], drop_pending_updates: false });
   const commands = await tgCall("setMyCommands", { commands: BOT_COMMANDS });
+  await tgCall("setMyShortDescription", { short_description: BOT_PROFILE.short_description });
+  await tgCall("setMyDescription", { description: BOT_PROFILE.description });
   return Response.json({ ok: Boolean(hook?.ok), url, webhook: hook?.description || "ok", commands: commands?.ok ? "ok" : commands?.description });
 }
