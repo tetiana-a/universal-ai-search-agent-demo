@@ -286,6 +286,21 @@ export type FindInput = {
 };
 export type PlatformQuery = { platform: Platform; query: string };
 
+// An ordinary text request may name several platforms. The bot need not
+// ask the owner to specify them in a separate form.
+export function inferredSearchPlatforms(input: FindInput): Platform[] {
+  const all: Platform[] = ["telegram", "instagram", "tiktok", "facebook"];
+  if (input.platforms?.length) return [...new Set(input.platforms)].filter((p) => all.includes(p));
+  const text = input.topic.toLowerCase();
+  const matches: Platform[] = all.filter((p) =>
+    ({ telegram: /telegram|телеграм|телегр|телеграмм/,
+       instagram: /instagram|инстаграм|інстаграм|инста\b|insta\b/,
+       tiktok: /tiktok|tik.?tok|тикток|тік.?ток|тик.?ток/,
+       facebook: /facebook|фейсбук|фейсбу|фб\b/ } as Record<Platform, RegExp>)[p].test(text)
+  );
+  return matches.length ? matches : all;
+}
+
 function placeOf(input: FindInput) {
   return [input.city, input.country].filter(Boolean).join(", ");
 }
@@ -294,12 +309,11 @@ function placeOf(input: FindInput) {
 // This prevents a slow or blocked Telegram search from starving Instagram and
 // TikTok results. We never use API access to users' private accounts.
 export function platformSearchQueries(input: FindInput): PlatformQuery[] {
-  const requested: Platform[] = (input.platforms?.length ? input.platforms : (["telegram", "instagram", "tiktok", "facebook"] as Platform[]))
-    .filter((p, i, a) => (["telegram", "instagram", "tiktok", "facebook"] as Platform[]).includes(p) && a.indexOf(p) === i);
+  const requested = inferredSearchPlatforms(input);
   const geo = placeOf(input);
   const polish = /поль|poland|polska|polsce|polski/i.test(geo);
   const es = /испан|spain|españa|espa|valencia|валенси|barcelona|барселон/i.test(geo);
-  const topic = input.topic.trim().slice(0, 160);
+  const topic = input.topic.trim().replace(/(?:telegram|телеграм\w*|instagram|инстаграм\w*|інстаграм\w*|tiktok|tik.?tok|тикток\w*|тік.?ток\w*|facebook|фейсбук\w*)/giu, " ").replace(/\s+/g, " ").trim().slice(0, 160) || input.topic.trim().slice(0, 160);
   // Common multilingual variations; other topics still use the exact owner
   // keyword and the upstream LLM's approved translated campaign queries.
   const realEstate = /недвиж|квартир|жиль|inmobil|apartam|pisos?|real estate|property|mieszkan/i.test(topic);
@@ -346,7 +360,7 @@ export type FindOutcome = { found: GroupCard[]; added: number; checked: number; 
 
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
-  const selected: Platform[] = input.platforms?.length ? [...new Set(input.platforms)] : ["telegram", "instagram", "tiktok", "facebook"];
+  const selected = inferredSearchPlatforms(input);
   const descriptors = platformSearchQueries({ ...input, platforms: selected });
   const queries = descriptors.map((q) => q.query);
   const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
