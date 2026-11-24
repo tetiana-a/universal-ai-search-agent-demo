@@ -808,7 +808,23 @@ export async function outreachDrafts(card: GroupCard, lang: OLang = "ru") {
     .replace(/\{group\}/g, card.name)
     .replace(/\{bot\}/g, bot);
   const set = OUTREACH[lang] || OUTREACH.ru;
-  return { free: fill(set.free), exchange: fill(set.exchange), paid: fill(set.paid), contactUrl: contactUrl(card) };
+  const add = addBotUrl(card);
+  const tail = "\n\n" + (INVITE[lang] || INVITE.ru)[card.platform === "telegram" ? "telegram" : "other"] + " " + add;
+  return { free: fill(set.free) + tail, exchange: fill(set.exchange) + tail, paid: fill(set.paid) + tail, contactUrl: contactUrl(card), addBotUrl: add };
+}
+
+const INVITE: Record<OLang, Record<"telegram" | "other", string>> = {
+  ru: { telegram: "➕ Добавить бота в одно нажатие (только публикация, убрать можно в любой момент):", other: "🤝 Подключиться к публикациям и согласовать частоту:" },
+  en: { telegram: "➕ Add the bot in one tap (posting only, remove it any time):", other: "🤝 Join as a partner and set the frequency:" },
+  es: { telegram: "➕ Añada el bot con un toque (solo publicar, puede quitarlo cuando quiera):", other: "🤝 Únase como socio y fije la frecuencia:" },
+};
+
+// One-tap link for the group's own admin: Telegram opens "add to group/channel" with posting rights pre-ticked.
+// Other networks have no bots in groups, so the admin gets the partner sign-up (consent + limits) instead.
+export function addBotUrl(card: Pick<GroupCard, "platform" | "kind">) {
+  const base = "https://t.me/" + botHandle().replace(/^@/, "");
+  if (card.platform !== "telegram") return base + "?start=partner";
+  return card.kind === "channel" ? base + "?startchannel=true&admin=post_messages" : base + "?startgroup=true&admin=post_messages";
 }
 
 export function contactUrl(card: GroupCard) {

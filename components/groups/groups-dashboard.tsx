@@ -86,7 +86,7 @@ export default function GroupsDashboard() {
   // The last search's own results, shown instead of the whole base until the user asks for everything.
   const [lastFound, setLastFound] = useState<{ message: string; ids: string[] } | null>(null);
   const [tab, setTab] = useState<"all" | "telegram" | "facebook" | "instagram" | "tiktok">("all");
-  const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string } } | null>(null);
+  const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string; addBotUrl?: string } } | null>(null);
 
   useEffect(() => {
     try {
@@ -301,6 +301,7 @@ export default function GroupsDashboard() {
                     setToast(ok ? "Скопировано. Вставьте в чат с админом." : "Не удалось скопировать");
                   }}><Copy size={12} />Копировать</Button>
                   <Button href={outreach.drafts.contactUrl}><ExternalLink size={12} />Написать админу</Button>
+                  {outreach.drafts.addBotUrl && <Button href={outreach.drafts.addBotUrl}><ExternalLink size={12} />{outreach.group.platform === "telegram" ? "Ссылка «Добавить бота»" : "Ссылка для партнёра"}</Button>}
                 </div>
               </div>
             ))}

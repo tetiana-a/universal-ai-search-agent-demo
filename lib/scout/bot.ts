@@ -11,7 +11,7 @@ import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingC
 import { answerCallback, controlIds, editMessage, isOpenGroup, isOwnersGroupAdmin, reportChatId, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
-import { fullExportXlsx, groupsCsv, handleMyChatMember, listGroups, registerOwnedTelegramGroup } from "@/lib/scout/groups";
+import { addBotUrl, fullExportXlsx, groupsCsv, handleMyChatMember, listGroups, registerOwnedTelegramGroup } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, campaignSummary, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer, partnerInviteLink, promptNewCampaign } from "@/lib/scout/campaigns-bot";
 import { ADVISOR_COMMANDS, advisorMode, handleAdvisorCallback, handleAdvisorCommand, handleAdvisorText, handleAdvisorVoice } from "@/lib/scout/advisor-bot";
@@ -54,6 +54,8 @@ const HELP = [
   "/cstop all — остановить всё",
   "",
   "🤝 Ссылка для админов-партнёров: " + partnerInviteLink(),
+  "➕ Добавить бота в группу: " + addBotUrl({ platform: "telegram", kind: "group" }),
+  "➕ Добавить бота в канал: " + addBotUrl({ platform: "telegram", kind: "channel" }),
   "Всё остальное — кнопками в /panel.",
 ].join("\n");
 
