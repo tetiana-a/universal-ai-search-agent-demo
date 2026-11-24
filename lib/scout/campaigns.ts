@@ -1,7 +1,7 @@
 import { runStructuredExtraction } from "@/lib/free-ai";
 import { geminiTranscribe } from "@/lib/gemini-audio";
 import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
-import { DEFAULT_DAILY_LIMIT, findGroups, listGroups, refreshActivity, telegramFeed, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
+import { canonicalCommunityUrl, DEFAULT_DAILY_LIMIT, detectAdsPolicy, detectAdminContact, findGroups, listGroups, refreshActivity, telegramFeed, telegramLiveness, upsertGroups, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
 import { claimOnce, getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
 import { botToken, controlIds, reportChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { escapeHtml, nowIso, randomId, stableId } from "@/lib/scout/text";
@@ -46,7 +46,17 @@ export type Campaign = {
   // Authoritative per-campaign audience. Never route a campaign to every group
   // in the global CRM merely because one common keyword happens to match.
   searchGroupIds?: string[];
+  // TZ 1.2 §2 "расписание": publishing hours and weekdays in the campaign time zone, optional end date.
+  schedule?: Schedule;
+  // TZ 1.2 §5 monitoring parameters beyond keywords: object type words and price range.
+  watch?: Watch;
+  // TZ 1.2 §9 completeness: the last check against the client's manual control list.
+  recall?: RecallResult;
 };
+
+export type Schedule = { hours: number[]; days: number[]; until?: string; tz: string };
+export type Watch = { types: string[]; minPrice?: number; maxPrice?: number };
+export type RecallResult = { at: string; control: number; live: number; found: number; percent: number; missing: string[]; dead: string[]; learned: string[] };
 
 export type TaskMode = "bot" | "partner" | "manual";
 export type TaskStatus = "scheduled" | "sent" | "failed" | "notified" | "proof" | "verified" | "skipped" | "cancelled";
@@ -62,13 +72,15 @@ export type CampaignTask = {
   mode: TaskMode;
   status: TaskStatus;
   partnerId?: string;
+  // Local hour (campaign time zone) from which the bot may publish this task.
+  slot?: number;
   link?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;
 };
 
-export type Mention = { id: string; campaignId: string; platform: Platform; url: string; title: string; author?: string; views?: number; at?: string; foundAt: string };
+export type Mention = { id: string; campaignId: string; platform: Platform; url: string; title: string; author?: string; views?: number; reactions?: number; price?: number; at?: string; foundAt: string };
 
 export const DEFAULT_DAILY_TARGET = Number(process.env.DAILY_TARGET || 300) || 300;
 const ALL_PLATFORMS: Platform[] = ["telegram", "facebook", "instagram", "tiktok"];
@@ -80,6 +92,50 @@ export function today() {
 
 function daysBetween(a: string, b: string) {
   return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86_400_000);
+}
+
+// ---- Schedule (TZ 1.2 §2) -------------------------------------------------------------------
+
+export const DEFAULT_TZ = process.env.SCHEDULE_TZ || "Europe/Madrid";
+const DAY_WORDS: Array<[RegExp, number[]]> = [
+  [/ежедневно|каждый день|daily|все дни/i, [1, 2, 3, 4, 5, 6, 7]],
+  [/будни|пн\s*-\s*пт|weekdays|mon\s*-\s*fri/i, [1, 2, 3, 4, 5]],
+  [/выходные|сб\s*-\s*вс|weekend/i, [6, 7]],
+];
+const DAY_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+
+// "9,13,18 будни до 2026-12-15" | "10 14 20 пн,ср,пт" | "off"
+export function parseSchedule(raw: string, tz = DEFAULT_TZ, year = new Date().getUTCFullYear()): Schedule | null {
+  const text = raw.trim().toLowerCase();
+  if (!text || /^(off|нет|выкл|сразу)$/.test(text)) return null;
+  const untilIso = /до\s+(\d{4}-\d{2}-\d{2})|until\s+(\d{4}-\d{2}-\d{2})/.exec(text);
+  const untilDm = /до\s+(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?/.exec(text);
+  const until = untilIso ? untilIso[1] || untilIso[2] : untilDm ? (untilDm[3] || String(year)) + "-" + untilDm[2].padStart(2, "0") + "-" + untilDm[1].padStart(2, "0") : undefined;
+  const body = text.replace(/(до|until)\s+[\d.\-]+/g, " ");
+  const hours = [...new Set([...body.matchAll(/(?<![\d.])(\d{1,2})(?::00)?(?![\d.])/g)].map((m) => Number(m[1])).filter((h) => h >= 0 && h <= 23))].sort((a, b) => a - b);
+  let days = DAY_WORDS.find(([re]) => re.test(body))?.[1];
+  if (!days) { const named = DAY_SHORT.map((d, i) => (new RegExp("(^|[^а-я])" + d + "([^а-я]|$)").test(body) ? i + 1 : 0)).filter(Boolean); days = named.length ? named : [1, 2, 3, 4, 5, 6, 7]; }
+  return { hours: hours.length ? hours : [9], days, until, tz };
+}
+
+export function scheduleText(s?: Schedule) {
+  if (!s) return "сразу, раз в день";
+  const days = s.days.length === 7 ? "ежедневно" : s.days.map((d) => DAY_SHORT[d - 1]).join(",");
+  return s.hours.map((h) => String(h).padStart(2, "0") + ":00").join(", ") + " · " + days + (s.until ? " · до " + s.until : "") + " (" + s.tz + ")";
+}
+
+// Local date / hour / ISO weekday in a time zone.
+export function localClock(tz = DEFAULT_TZ, at = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(at).map((p) => [p.type, p.value]));
+  const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(parts.weekday) + 1;
+  return { day: parts.year + "-" + parts.month + "-" + parts.day, hour: Number(parts.hour), weekday };
+}
+
+export function scheduleAllows(s: Schedule | undefined, day: string) {
+  if (!s) return true;
+  if (s.until && day > s.until) return false;
+  const weekday = ((new Date(day + "T12:00:00Z").getUTCDay() + 6) % 7) + 1;
+  return s.days.includes(weekday);
 }
 
 // ---- Task → campaign (AI with a rule-based fallback) ------------------------------------
@@ -145,6 +201,9 @@ const SCHEMA = {
     translations: { type: "array", items: { type: "object", properties: { lang: { type: "string" }, text: { type: "string" } } }, description: "the ad text adapted to each target language (ISO 639-1)" },
     platforms: { type: "array", items: { type: "string", enum: ALL_PLATFORMS } },
     daily_target: { type: "number" },
+    schedule_hours: { type: "array", items: { type: "number" }, description: "local hours 0-23 to publish at, if the owner named a schedule; empty otherwise" },
+    schedule_days: { type: "array", items: { type: "number" }, description: "ISO weekdays 1=Mon..7=Sun if the owner named them; empty otherwise" },
+    schedule_until: { type: "string", description: "YYYY-MM-DD end date if named, else empty" },
   },
   required: ["title", "ad_text", "topic", "region", "languages", "keywords", "platforms"],
 };
@@ -177,6 +236,12 @@ export async function parseCampaign(text: string, deadlineAt = Date.now() + 70_0
     translations: Object.fromEntries((Array.isArray(p.translations) ? p.translations : []).filter((t: any) => t?.lang && t?.text).map((t: any) => [String(t.lang).slice(0, 5).toLowerCase(), String(t.text).slice(0, 3500)])),
     platforms: platforms.length ? platforms : base.platforms,
     dailyTarget: Number(p.daily_target) > 0 ? Math.min(2000, Math.round(Number(p.daily_target))) : base.dailyTarget,
+    ...(() => {
+      const hours = (Array.isArray(p.schedule_hours) ? p.schedule_hours : []).map(Number).filter((h: number) => Number.isInteger(h) && h >= 0 && h <= 23);
+      const days = (Array.isArray(p.schedule_days) ? p.schedule_days : []).map(Number).filter((d: number) => Number.isInteger(d) && d >= 1 && d <= 7);
+      const until = /^\d{4}-\d{2}-\d{2}$/.test(String(p.schedule_until || "")) ? String(p.schedule_until) : undefined;
+      return hours.length || days.length || until ? { schedule: { hours: hours.length ? [...new Set<number>(hours)].sort((a, b) => a - b) : [9], days: days.length ? [...new Set<number>(days)].sort() : [1, 2, 3, 4, 5, 6, 7], until, tz: DEFAULT_TZ } } : {};
+    })(),
     ai: true,
   };
 }
@@ -206,7 +271,7 @@ export async function listCampaigns() {
   return (await listAll<Campaign>("campaigns")).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function updateCampaign(id: string, patch: Partial<Pick<Campaign, "title" | "adText" | "keywords" | "adjacent" | "queries" | "exclusions" | "dailyTarget" | "platforms" | "region" | "topic">>) {
+export async function updateCampaign(id: string, patch: Partial<Pick<Campaign, "title" | "adText" | "keywords" | "adjacent" | "queries" | "exclusions" | "dailyTarget" | "platforms" | "region" | "topic">> & { schedule?: Schedule | null; watch?: Watch | null }) {
   const c = await getOne<Campaign>("campaigns", id);
   if (!c) return null;
   const next: Campaign = { ...c, updatedAt: nowIso() };
@@ -220,6 +285,8 @@ export async function updateCampaign(id: string, patch: Partial<Pick<Campaign, "
   if (Array.isArray(patch.exclusions)) next.exclusions = cleanKeywords(patch.exclusions, 30);
   if (patch.dailyTarget !== undefined) next.dailyTarget = Math.max(1, Math.min(2000, Math.round(Number(patch.dailyTarget) || DEFAULT_DAILY_TARGET)));
   if (Array.isArray(patch.platforms)) { const p = patch.platforms.filter((x) => ALL_PLATFORMS.includes(x)); if (p.length) next.platforms = p; }
+  if (patch.schedule !== undefined) next.schedule = patch.schedule || undefined;
+  if (patch.watch !== undefined) next.watch = patch.watch || undefined;
   await putOne("campaigns", next);
   return next;
 }
@@ -348,6 +415,7 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
   const ids = new Set(existing.map((t) => t.id));
   const out: CampaignTask[] = [];
   for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x) && (x.found?.total || 0) > 0 && (x.searchGroupIds?.length || 0) > 0)) {
+    if (!scheduleAllows(c.schedule, day)) continue;
     const eligible = new Set(c.searchGroupIds);
     let count = live.filter((t) => t.campaignId === c.id && t.day === day).length;
     for (const g of groups) {
@@ -360,7 +428,9 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
       if ((dayLoad.get(g.id) || 0) >= (g.dailyLimit ?? DEFAULT_DAILY_LIMIT)) continue;
       const last = lastDay.get(g.id);
       if (last && daysBetween(last, day) < (g.minDaysBetween || 1)) continue;
-      out.push({ id, campaignId: c.id, campaignTitle: c.title, groupId: g.id, groupName: g.name, platform: g.platform, url: g.url, day, mode, status: "scheduled", partnerId: mode === "partner" ? g.partnerTelegramId : undefined, createdAt: now, updatedAt: now });
+      // Spread the day's volume evenly over the campaign's publishing hours.
+      const slot = c.schedule?.hours.length ? c.schedule.hours[count % c.schedule.hours.length] : undefined;
+      out.push({ id, campaignId: c.id, campaignTitle: c.title, groupId: g.id, groupName: g.name, platform: g.platform, url: g.url, day, mode, status: "scheduled", partnerId: mode === "partner" ? g.partnerTelegramId : undefined, ...(slot !== undefined ? { slot } : {}), createdAt: now, updatedAt: now });
       ids.add(id);
       dayLoad.set(g.id, (dayLoad.get(g.id) || 0) + 1);
       count += 1;
@@ -398,10 +468,12 @@ export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 
   const tasks = (await listAll<CampaignTask>("campaign_tasks")).filter((t) => t.day === day && t.mode === "bot" && t.status === "scheduled");
   let sent = 0, failed = 0, left = 0;
   for (const [index, task] of tasks.entries()) {
-    if (Date.now() > deadlineAt) { left = tasks.length - index; break; }
+    if (Date.now() > deadlineAt) { left += tasks.length - index; break; }
     const campaign = await activeCampaign(task.campaignId);
     const group = await getOne<GroupCard>("groups", task.groupId);
     if (!campaign || !group?.botConnected || !group.postingEnabled || !group.chatId) { await putOne("campaign_tasks", { ...task, status: "cancelled", updatedAt: nowIso() }); continue; }
+    // Not yet its hour: stays scheduled for the next dispatch wave (hourly scheduler).
+    if (task.slot !== undefined && localClock(campaign.schedule?.tz || DEFAULT_TZ).hour < task.slot) { left += 1; continue; }
     // Two cron workers may overlap. A distributed NX lock prevents duplicate
     // sends for the same scheduled campaign/group/day item.
     if (!(await claimOnce("campaign-dispatch:" + task.id, 60 * 60))) continue;
@@ -531,6 +603,10 @@ export async function digestText(day = today()) {
     "\nРазмещено: <b>" + cap.verified + "</b> · отклонено " + rejected.length + " · ошибок " + (failed.length - blocked.length - rejected.length) + " · удалили бота / блокировки " + blocked.length +
     "\nОтклики партнёров (прислали ссылку): " + tasks.filter((t) => t.status === "proof" || (t.mode === "partner" && t.status === "verified")).length +
     "\nНайдено публикаций мониторингом: " + mentions.filter((m) => m.foundAt.startsWith(day)).length +
+    (() => {
+      const top = mentions.filter((m) => m.foundAt.startsWith(day) && engagement(m) > 0).sort((a, b) => engagement(b) - engagement(a)).slice(0, 5);
+      return top.length ? "\n<b>Самые вовлекающие</b>\n" + top.map((m) => "• <a href=\"" + escapeHtml(m.url) + "\">" + escapeHtml((m.title || m.url).slice(0, 60)) + "</a>" + (m.author ? " — " + escapeHtml(m.author) : "") + (m.reactions ? " · ❤️ " + m.reactions : "") + (m.views ? " · 👁 " + m.views.toLocaleString("ru-RU") : "") + (m.price ? " · " + m.price.toLocaleString("ru-RU") : "")).join("\n") : "";
+    })() +
     "\n\n" + (lines.join("\n") || "Нет запущенных кампаний.") + "\n\n" + capacityText(cap);
 }
 
@@ -548,10 +624,55 @@ export function looksLikePost(url: string): Platform | null {
   return null;
 }
 
-export function matchesPost(text: string, c: Pick<Campaign, "keywords" | "topic" | "region">) {
+// First price in a post: "250 000 €", "€250,000", "1.200 EUR", "95000$", "300 000 руб".
+export function parsePrice(text: string): number | undefined {
+  const cur = "(?:€|eur|euro|евро|\\$|usd|долл\\w*|zł|pln|руб\\w*|₽|грн|uah)";
+  const m = new RegExp("(\\d[\\d\\s.,\\u00a0\\u202f]{0,14}\\d|\\d)\\s*(k|к|тыс\\.?)?\\s*" + cur, "i").exec(text) || new RegExp(cur + "\\s*(\\d[\\d\\s.,\\u00a0\\u202f]{0,14}\\d|\\d)\\s*(k|к|тыс\\.?)?", "i").exec(text);
+  if (!m) return undefined;
+  let digits = m[1].replace(/[\s\u00a0\u202f]/g, "");
+  // 250.000 / 250,000 → thousands separators; 1,5 → decimal
+  digits = /^\d{1,3}([.,]\d{3})+$/.test(digits) ? digits.replace(/[.,]/g, "") : digits.replace(",", ".");
+  const value = Number(digits) * (m[2] ? 1000 : 1);
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : undefined;
+}
+
+export function matchesPost(text: string, c: Pick<Campaign, "keywords" | "topic" | "region"> & { watch?: Watch }) {
   const t = text.toLowerCase();
   const stems = cleanKeywords([c.topic, ...c.keywords], 40).map((k) => k.toLowerCase().slice(0, Math.max(4, Math.min(7, k.length - 1))));
-  return stems.some((k) => k.length >= 3 && t.includes(k));
+  if (!stems.some((k) => k.length >= 3 && t.includes(k))) return false;
+  const w = c.watch;
+  if (!w) return true;
+  if (w.types.length && !w.types.some((x) => t.includes(x.toLowerCase().slice(0, Math.max(4, x.length - 1))))) return false;
+  if (w.minPrice !== undefined || w.maxPrice !== undefined) {
+    // With a price filter set, a post without a recognisable price is not a match.
+    const price = parsePrice(text);
+    if (price === undefined || (w.minPrice !== undefined && price < w.minPrice) || (w.maxPrice !== undefined && price > w.maxPrice)) return false;
+  }
+  return true;
+}
+
+// "/cwatch <id> квартира, дом 100000-300000" → types + price range; "off" clears.
+export function parseWatch(raw: string): Watch | null {
+  const text = raw.trim();
+  if (!text || /^(off|нет|выкл)$/i.test(text)) return null;
+  const range = /(\d[\d\s.]*)\s*(?:-|–|до)\s*(\d[\d\s.]*)/.exec(text);
+  const from = /(?:от|from|min)\s*(\d[\d\s.]*)/i.exec(text);
+  const to = /(?:до|to|max)\s*(\d[\d\s.]*)/i.exec(text);
+  const num = (v?: string) => (v ? Number(v.replace(/[\s.]/g, "")) || undefined : undefined);
+  const minPrice = range ? num(range[1]) : num(from?.[1]);
+  const maxPrice = range ? num(range[2]) : num(to?.[1]);
+  const types = cleanKeywords(text.replace(/(?:от|до|from|to|min|max)?\s*\d[\d\s.]*(?:\s*(?:-|–|до)\s*\d[\d\s.]*)?\s*(€|eur|евро|\$)?/gi, " ").split(/[,;]/).map((x) => x.trim()), 10);
+  return { types, ...(minPrice !== undefined ? { minPrice } : {}), ...(maxPrice !== undefined ? { maxPrice } : {}) };
+}
+
+export function watchText(w?: Watch) {
+  if (!w) return "только ключевые слова";
+  return [w.types.length ? "тип: " + w.types.join(", ") : "", w.minPrice !== undefined || w.maxPrice !== undefined ? "цена " + (w.minPrice ?? 0).toLocaleString("ru-RU") + " – " + (w.maxPrice !== undefined ? w.maxPrice.toLocaleString("ru-RU") : "∞") : ""].filter(Boolean).join(" · ") || "только ключевые слова";
+}
+
+// Engagement score: reactions weigh more than views (views are passive).
+export function engagement(m: Pick<Mention, "views" | "reactions">) {
+  return (m.reactions || 0) * 20 + (m.views || 0);
 }
 
 // Monitoring (TZ §5): posts on the campaign's keywords inside the found public communities
@@ -572,7 +693,7 @@ export async function monitorCampaign(id: string, deadlineAt = Date.now() + 200_
   const channels = (await listGroups()).filter((g) => g.platform === "telegram" && g.activity !== "inactive" && g.url && !g.url.includes("/+") && matchesCampaign(g, c)).slice(0, 40);
   for (let i = 0; i < channels.length && Date.now() < deadlineAt; i += 8) {
     const feeds = await Promise.all(channels.slice(i, i + 8).map(async (g) => ({ g, posts: await telegramFeed(g.url) })));
-    for (const { g, posts } of feeds) for (const post of posts) if (matchesPost(post.text, c)) add({ platform: "telegram", url: post.url, title: post.text.slice(0, 200), author: g.name, views: post.views, at: post.at });
+    for (const { g, posts } of feeds) for (const post of posts) if (matchesPost(post.text, c)) add({ platform: "telegram", url: post.url, title: post.text.slice(0, 200), author: g.name, views: post.views, reactions: post.reactions, price: parsePrice(post.text), at: post.at });
   }
   let limited = "";
   if (geminiSearchKey() && Date.now() < deadlineAt - 25_000) {
@@ -580,11 +701,66 @@ export async function monitorCampaign(id: string, deadlineAt = Date.now() + 200_
     const queries = c.platforms.filter((p) => p !== "telegram").map((p) => ({ facebook: "facebook.com", instagram: "instagram.com", tiktok: "tiktok.com" } as Record<string, string>)[p] + " " + terms + " " + c.region);
     const outcomes = await Promise.all(queries.slice(0, 3).map((q) => geminiSearch(q, c.languages[0] || "en")));
     limited = outcomes.find((o) => !o.ok)?.message || "";
-    for (const hit of outcomes.flatMap((o) => o.hits)) { const platform = looksLikePost(hit.url); if (platform) add({ platform, url: hit.url, title: hit.title.slice(0, 200) }); }
+    for (const hit of outcomes.flatMap((o) => o.hits)) { const platform = looksLikePost(hit.url); if (platform && (!c.watch || matchesPost(hit.title + " " + (hit.snippet || ""), c))) add({ platform, url: hit.url, title: hit.title.slice(0, 200), price: parsePrice(hit.title + " " + (hit.snippet || "")) }); }
   }
   await putMany("mentions", fresh);
-  const top = (await listAll<Mention>("mentions")).filter((m) => m.campaignId === c.id).sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 10);
+  const top = (await listAll<Mention>("mentions")).filter((m) => m.campaignId === c.id).sort((a, b) => engagement(b) - engagement(a)).slice(0, 10);
   return { ok: true, found, added: fresh.length, top, message: "Найдено публикаций: " + found + " (новых " + fresh.length + "). Проверено каналов Telegram: " + channels.length + ". Facebook, Instagram и TikTok — только то, что видно в поиске; закрытые группы не видны." + (limited ? " " + limited : "") };
+}
+
+// ---- Completeness check against the client's manual control list (TZ 1.2 §9) ----------------
+// The client finds communities by hand for the same topic and region and sends the links.
+// Recall = live control communities the bot already had / all live control communities.
+// Dead or missing pages do not count (the criterion is about LIVE communities).
+// Every miss is added to the campaign base and its name becomes a new search query,
+// so the next search learns where the bot was blind.
+export async function recallCheck(id: string, links: string[], deadlineAt = Date.now() + 200_000) {
+  const c = await getOne<Campaign>("campaigns", id);
+  if (!c) return null;
+  const control = [...new Map(links.map((l) => canonicalCommunityUrl(l)).filter(Boolean).map((x) => [x!.url.toLowerCase(), x!])).values()].slice(0, 300);
+  const base = new Set<string>();
+  for (const gid of c.searchGroupIds || []) { const g = await getOne<GroupCard>("groups", gid); if (g?.url) base.add(canonicalCommunityUrl(g.url)?.url.toLowerCase() || g.url.toLowerCase()); }
+  const now = nowIso();
+  const place = splitRegion(c.region);
+  const dead: string[] = [];
+  const missing: string[] = [];
+  const learnedNames: string[] = [];
+  const addCards: GroupCard[] = [];
+  let found = 0;
+  for (const item of control) {
+    const key = item.url.toLowerCase();
+    let name = item.url.split("/").pop() || item.url;
+    let card: Partial<GroupCard> = { activity: "unknown" };
+    if (item.platform === "telegram" && Date.now() < deadlineAt) {
+      const live = await telegramLiveness(item.url).catch(() => null);
+      if (live && (live.status === "missing" || live.status === "inactive")) { dead.push(item.url); continue; }
+      if (live?.preview) { name = live.preview.title; card = { ...live.live, activityCheckedAt: now, kind: live.preview.kind, members: live.preview.members, description: live.preview.description.slice(0, 600), ads: detectAdsPolicy(live.preview.description), adminContact: detectAdminContact(live.preview.description, item.url) }; }
+    }
+    if (base.has(key)) { found += 1; continue; }
+    missing.push(item.url);
+    learnedNames.push(name);
+    addCards.push({ ads: "unknown", ...card, id: stableId("grp", key), platform: item.platform, url: item.url, name, status: "new", relevance: "core", foundBy: "контрольный список заказчика", topic: c.topic, city: place.city || undefined, country: place.country || undefined, verification: item.platform === "telegram" ? "public_page" : "indexed_candidate", foundAt: now, updatedAt: now } as GroupCard);
+  }
+  const live = control.length - dead.length;
+  const percent = live ? Math.round((found / live) * 1000) / 10 : 0;
+  if (addCards.length) await upsertGroups(addCards);
+  // Learning: names of missed communities become campaign queries for the next search.
+  const learned = cleanKeywords(learnedNames.map((n) => n.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 4).join(" ")).filter((n) => n.length >= 4 && !/[_\d]/.test(n)), 20)
+    .filter((q) => !c.queries.some((x) => x.toLowerCase() === q.toLowerCase()));
+  const recall: RecallResult = { at: now, control: control.length, live, found, percent, missing: missing.slice(0, 100), dead: dead.slice(0, 100), learned };
+  const fresh = (await getOne<Campaign>("campaigns", id)) || c;
+  await putOne("campaigns", { ...fresh, recall, queries: cleanKeywords([...fresh.queries, ...learned], 20), searchGroupIds: [...new Set([...(fresh.searchGroupIds || []), ...addCards.map((g) => g.id)])], updatedAt: now });
+  await logAction({ actor: "agent", action: "campaign.recall", detail: c.title + ": " + found + "/" + live + " = " + percent + "% (контроль " + control.length + ", мёртвых " + dead.length + ")" });
+  return recall;
+}
+
+export function recallText(r: RecallResult) {
+  const ok = r.percent >= 90;
+  return (ok ? "✅" : "⚠️") + " <b>Полнота поиска: " + r.percent + "%</b> (цель — 90%)\nВ контрольном списке: " + r.control + " · живых: " + r.live + " · бот уже нашёл: " + r.found +
+    (r.dead.length ? "\n💤 Неактивные или удалённые (не считаются): " + r.dead.length : "") +
+    (r.missing.length ? "\n\n<b>Бот не нашёл (" + r.missing.length + ")</b> — добавлены в базу кампании:\n" + r.missing.slice(0, 15).map((u) => "• " + escapeHtml(u)).join("\n") : "") +
+    (r.learned.length ? "\n\n🧠 Новые запросы для следующего поиска: " + escapeHtml(r.learned.join(", ")) : "") +
+    (ok ? "" : "\n\nНажмите «🔎 Искать ещё», затем пришлите тот же список снова, чтобы перепроверить.");
 }
 
 // ---- Voice → text (free Gemini) ----------------------------------------------------------------
@@ -609,7 +785,13 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
   await refreshActivity(30).catch(() => 0);
   const plan = await planDay(day);
   const partners = await notifyPartners(day);
-  const bot = await dispatchBotTasks(day, deadlineAt - 15_000);
+  const bot = await dispatchBotTasks(day, deadlineAt - 90_000);
+  // Daily monitoring of running campaigns (TZ 1.2 §5), within the remaining time budget.
+  const running = (await listCampaigns()).filter((c) => c.status === "approved");
+  for (const c of running) {
+    if (Date.now() > deadlineAt - 40_000) break;
+    await monitorCampaign(c.id, Math.min(deadlineAt - 30_000, Date.now() + 60_000)).catch(() => null);
+  }
   const chat = await reportChatId();
   if (chat) await sendMessage(chat, await digestText(day));
   // Instagram is scheduled in Postiz; one daily check tracks actual external
