@@ -7,7 +7,7 @@ import { runKeylessSearch } from "@/lib/keyless-search";
 import { restrictedTopic } from "@/lib/scout/restricted";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
-import { getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, removeMany, setValue } from "@/lib/scout/store";
+import { claimOnce, getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, removeMany, setValue } from "@/lib/scout/store";
 import { botToken, resolveChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { detectLang, nowIso, randomId, stableId } from "@/lib/scout/text";
 import { styleSheet } from "@/lib/xlsx-style";
@@ -889,12 +889,30 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+export function botPostingAllowed(g: GroupCard) {
+  return g.platform === "telegram" && Boolean(g.botConnected && g.postingEnabled && g.chatId) &&
+    permissionConfirmed(g) && g.ads !== "forbidden" && g.activity !== "inactive" &&
+    !isAdult(g.name + " " + (g.description || ""));
+}
+
 export async function postingTargets() {
-  return (await listGroups()).filter((g) => g.platform === "telegram" && g.botConnected && g.postingEnabled && g.chatId);
+  return (await listGroups()).filter(botPostingAllowed);
+}
+
+// Shared by dashboard and campaign workers. Reserve before sending, atomically.
+// Keep a reservation on ambiguous failures: retrying must not exceed the agreed cap.
+export async function reservePostingSlot(card: GroupCard, day: string) {
+  const limit = Math.max(0, Math.min(10, card.dailyLimit ?? DEFAULT_DAILY_LIMIT));
+  const sent = await readCounter("grp-post:" + card.id + ":" + day);
+  for (let slot = sent; slot < limit; slot += 1) {
+    if (await claimOnce("grp-slot:" + card.id + ":" + day + ":" + slot, 3 * 24 * 3600)) return true;
+  }
+  return false;
 }
 
 export async function sendPhoto(chatId: string, photo: string, caption: string) {
-  return tgCall("sendPhoto", { chat_id: await resolveChatId(chatId), photo, caption: caption.slice(0, 1024) });
+  if (caption.length > 1024) return { ok: false, description: "Текст с фото превышает 1024 символа. Сократите подпись или отправьте объявление без фото." };
+  return tgCall("sendPhoto", { chat_id: await resolveChatId(chatId), photo, caption });
 }
 
 export function messageLink(card: GroupCard, messageId?: number) {
@@ -915,8 +933,8 @@ export async function postViaBot(text: string, photo?: string, by = "dashboard",
   for (const [index, card] of targets.entries()) {
     if (Date.now() > deadlineAt) { skipped += targets.length - index; break; }
     const key = "grp-post:" + card.id + ":" + today();
-    const limit = card.dailyLimit ?? DEFAULT_DAILY_LIMIT;
-    if ((await readCounter(key)) >= limit) { skipped += 1; continue; }
+    const current = await getOne<GroupCard>("groups", card.id);
+    if (!current || !botPostingAllowed(current) || !(await reservePostingSlot(current, today()))) { skipped += 1; continue; }
     const result = photo ? await sendPhoto(card.chatId!, photo, body) : await sendMessage(card.chatId!, body).then((r) => ({ ok: r.ok, result: { message_id: r.messageId }, description: r.error }));
     const entry: PostLog = { id: randomId("post"), at: nowIso(), groupId: card.id, groupName: card.name, platform: "telegram", mode: "bot", status: result?.ok ? "sent" : "failed", text: body.slice(0, 300), by };
     if (result?.ok) { sent += 1; await increment(key, 2 * 24 * 3600); entry.link = messageLink(card, result?.result?.message_id); }
@@ -985,7 +1003,7 @@ export async function postingSummary() {
   const queue = await listQueue();
   return {
     today: { bot: count((p) => p.mode === "bot" && p.status === "sent"), manual: count((p) => p.mode === "manual" && p.status === "published"), failed: count((p) => p.status === "failed") },
-    groups: { total: groups.length, telegram: groups.filter((g) => g.platform === "telegram").length, facebook: groups.filter((g) => g.platform === "facebook").length, botReady: groups.filter((g) => g.botConnected && g.postingEnabled).length, paid: groups.filter((g) => g.status === "paid").length },
+    groups: { total: groups.length, telegram: groups.filter((g) => g.platform === "telegram").length, facebook: groups.filter((g) => g.platform === "facebook").length, botReady: groups.filter(botPostingAllowed).length, paid: groups.filter((g) => g.status === "paid").length },
     queuePending: queue.filter((q) => q.status === "pending").length,
   };
 }
