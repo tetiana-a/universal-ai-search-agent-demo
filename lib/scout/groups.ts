@@ -4,6 +4,7 @@ import { dataForSeoEnabled, dataForSeoSearch } from "@/lib/scout/dataforseo-grou
 import { apifyEnabled, apifySearch } from "@/lib/scout/apify-search";
 import { tgStatEnabled, tgStatSearch } from "@/lib/scout/tgstat";
 import { runKeylessSearch } from "@/lib/keyless-search";
+import { restrictedTopic } from "@/lib/scout/restricted";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
 import { getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, removeMany, setValue } from "@/lib/scout/store";
@@ -409,7 +410,13 @@ export type FindOutcome = { found: GroupCard[]; added: number; checked: number; 
 
 // Adult and escort communities never belong in a client's ad base, whatever the topic or place.
 // NFKC turns decorative letters (𝐒𝐥𝐮𝐭) into plain ones before matching.
-export const isAdult = (text: string) => /18\s*\+|\bxxx\b|porn|порн|nsfw|onlyfans|escort|эскорт|интим|\bsex|секс|\borgi[ae]s?\b|\borg(y|ies)\b|оргия|оргии|slut|шлюх|проститут|nude|naked|голые|erotic|эрот|hentai|хентай|camgirl|fetish|фетиш|bdsm|бдсм|interracial|milf|public agent/i.test(text.normalize("NFKC"));
+const ADULT = [
+  /18\s*\+|\bxxx\b|porn|порн|nsfw|onlyfans|escort|эскорт|интим/i,
+  /\bsex|секс|\borgi[ae]s?\b|\borg(y|ies)\b|оргия|оргии|slut|шлюх|проститут/i,
+  /nude|naked|голые|erotic|эрот|hentai|хентай|camgirl/i,
+  /fetish|фетиш|bdsm|бдсм|interracial|milf|public agent/i,
+];
+export const isAdult = (text: string) => { const t = text.normalize("NFKC"); return ADULT.some((re) => re.test(t)); };
 
 // True when the text mentions any topic word (short stems, so word forms match: вино → винные). No topic = everything is on topic.
 export function onTopic(topic: string, text: string) {
@@ -522,7 +529,12 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const topicWords = ((broad ? "" : input.topic) + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
   const relevant = (text: string) => { const t = text.toLowerCase(); return topicWords.some((w) => t.includes(w)); };
   const base = { country: input.country || undefined, city: input.city || undefined, topic: broad ? "разные тематики" : input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
-  const excluded = (text: string) => { const t = text.toLowerCase(); return isAdult(t) || (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase())); };
+  let adultHidden = 0;
+  const excluded = (text: string) => {
+    const t = text.toLowerCase();
+    if (isAdult(t)) { adultHidden++; return true; }
+    return (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase()));
+  };
 
   const th = await activityThreshold();
   const tgList = [...telegram.entries()].slice(0, 60);
@@ -573,6 +585,9 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   // Search engines match the city alone too: a card that never mentions the topic is kept, but as adjacent (🟡), below the on-topic ones.
   for (const g of found) if (!onTopic(broad ? "" : input.topic, g.name + " " + (g.description || ""))) g.relevance = "adjacent";
   const saved = await upsertGroups(found);
+  if (adultHidden) notes.push("Скрыто 18+: " + adultHidden + ".");
+  const restricted = found.filter((g) => restrictedTopic(g.name + " " + (g.description || ""))).length;
+  if (restricted) notes.push("⚠️ С ограниченной рекламой (алкоголь, табак, ставки и т. п.): " + restricted + " — сначала проверьте правила группы и закон страны.");
   if (!found.length && !notes.length) notes.push("Поиск не вернул публичных групп. Попробуйте другую формулировку темы или город на местном языке.");
   await logAction({ actor: "agent", action: "groups.find", detail: input.topic + " · " + placeOf(input) + " → " + found.length + " (новых " + saved.added + ")" });
   saved.cards.sort((a, b) => Number(a.relevance === "adjacent") - Number(b.relevance === "adjacent") || (b.members || 0) - (a.members || 0));
@@ -668,6 +683,11 @@ export async function upsertGroups(cards: GroupCard[]) {
 export async function listGroups() {
   // Adult cards saved before the filter existed never reach the page, exports or posting.
   return (await listAll<GroupCard>("groups")).filter((g) => !isAdult(g.name + " " + (g.description || ""))).sort((a, b) => Number(Boolean(b.botConnected)) - Number(Boolean(a.botConnected)) || (b.members || 0) - (a.members || 0));
+}
+
+// How many saved communities the 18+ filter hides from the page, exports and posting.
+export async function adultHiddenCount() {
+  return (await listAll<GroupCard>("groups")).filter((g) => isAdult(g.name + " " + (g.description || ""))).length;
 }
 
 const STATUSES = new Set<GroupStatus>(["new", "contacted", "free", "exchange", "paid", "declined"]);

@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
-import { findGroups, listGroups, listPosts, listQueue, markQueued, outreachDrafts, postViaBot, postingSummary, postingTargets, queueManual, updateGroup, type GroupCard } from "@/lib/scout/groups";
+import { adultHiddenCount, findGroups, listGroups, listPosts, listQueue, markQueued, outreachDrafts, postViaBot, postingSummary, postingTargets, queueManual, updateGroup, type GroupCard } from "@/lib/scout/groups";
 import { runProfileBatch } from "@/lib/scout/client-profile";
 import { getOne, removeMany } from "@/lib/scout/store";
 import { botHandle } from "@/lib/scout/config";
@@ -22,8 +22,8 @@ function photoUrl(value: unknown) {
 
 export async function GET(request: Request) {
   if (!isAuthorized(request)) return unauthorized();
-  const [groups, queue, posts, summary] = await Promise.all([listGroups(), listQueue(), listPosts(200), postingSummary()]);
-  return Response.json({ ok: true, groups, queue: queue.filter((q) => q.status === "pending"), posts, summary, bot: botHandle() });
+  const [groups, queue, posts, summary, hiddenAdult] = await Promise.all([listGroups(), listQueue(), listPosts(200), postingSummary(), adultHiddenCount()]);
+  return Response.json({ ok: true, groups, hiddenAdult, queue: queue.filter((q) => q.status === "pending"), posts, summary, bot: botHandle() });
 }
 
 export async function POST(request: Request) {
