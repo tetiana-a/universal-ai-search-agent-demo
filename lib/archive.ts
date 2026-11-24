@@ -95,6 +95,13 @@ export async function syncArchive(): Promise<SyncResult> {
   }
 }
 
+// Duplicates merged away in Redis must not linger in the archive either.
+export async function removeFromArchive(collection: string, ids: string[]) {
+  if (!archiveConfigured() || !ids.length || !/^[a-z_]+$/.test(collection)) return;
+  const list = ids.map((id) => '"' + id.replace(/["\\]/g, "") + '"').join(",");
+  await rest("aurelius_archive?collection=eq." + collection + "&id=in.(" + encodeURIComponent(list) + ")", { method: "DELETE" });
+}
+
 export async function lastSync() {
   return getValue<SyncResult>(LAST_KEY);
 }
