@@ -6,7 +6,7 @@ import { tgStatEnabled, tgStatSearch } from "@/lib/scout/tgstat";
 import { runKeylessSearch } from "@/lib/keyless-search";
 import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
-import { getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, setValue } from "@/lib/scout/store";
+import { getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, removeMany, setValue } from "@/lib/scout/store";
 import { botToken, resolveChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { detectLang, nowIso, randomId, stableId } from "@/lib/scout/text";
 import { styleSheet } from "@/lib/xlsx-style";
@@ -106,7 +106,8 @@ export function normalizeTelegramUrl(raw: string): string {
   if (!name.startsWith("+") && !/^joinchat\//i.test(name)) {
     if (TG_RESERVED.has(name.toLowerCase()) || /bot$/i.test(name)) return "";
   }
-  return "https://t.me/" + name;
+  // t.me/joinchat/X and t.me/+X are the same invite link.
+  return "https://t.me/" + name.replace(/^joinchat\//i, "+");
 }
 
 export function normalizeFacebookGroupUrl(raw: string): string {
@@ -561,17 +562,66 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   return { found: saved.cards.sort((a, b) => (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
 }
 
+// The same community found twice: once by its public @username and once by an invite link
+// (t.me/+…), or by two invite links. Same platform, same title and the same member count
+// (±1%) means one community.
+export function sameCommunity(a: GroupCard, b: GroupCard) {
+  if (a.id === b.id || a.platform !== b.platform) return false;
+  if (a.url.toLowerCase() === b.url.toLowerCase()) return true;
+  const key = (g: GroupCard) => g.name.toLowerCase().replace(/\s+/g, " ").trim();
+  if (key(a).length < 4 || key(a) !== key(b)) return false;
+  if (!a.members || !b.members) return false;
+  return Math.abs(a.members - b.members) <= Math.max(2, 0.01 * Math.max(a.members, b.members));
+}
+
+const isInvite = (url: string) => /t\.me\/\+/i.test(url);
+
+// Which twin survives: the one the owner already worked with, then the public link, then the oldest.
+function survivorRank(g: GroupCard) {
+  return (g.botConnected ? 8 : 0) + (g.status && g.status !== "new" ? 4 : 0) + (isInvite(g.url) ? 0 : 2);
+}
+
+// Collapses twins: keeps one card per community, carries over the owner's fields, returns the ids to drop.
+export function collapseTwins(cards: GroupCard[]) {
+  const keep: GroupCard[] = [];
+  const dropped: string[] = [];
+  const ordered = [...cards].sort((a, b) => survivorRank(b) - survivorRank(a) || String(a.foundAt || "").localeCompare(String(b.foundAt || "")));
+  for (const card of ordered) {
+    const twin = keep.find((k) => sameCommunity(k, card));
+    if (!twin) { keep.push(card); continue; }
+    dropped.push(card.id);
+    twin.adminContact = twin.adminContact || card.adminContact;
+    twin.members = Math.max(twin.members || 0, card.members || 0) || twin.members;
+    if (twin.relevance !== "core" && card.relevance === "core") twin.relevance = "core";
+  }
+  return { keep, dropped };
+}
+
 // Keeps what the user already filled in (status, price, notes, posting switch, bot link).
 export async function upsertGroups(cards: GroupCard[]) {
+  const existing = await listAll<GroupCard>("groups");
+  const byId = new Map(existing.map((g) => [g.id, g]));
   let added = 0;
-  const out: GroupCard[] = [];
+  const merged: GroupCard[] = [];
   for (const card of cards) {
-    const prev = await getOne<GroupCard>("groups", card.id);
-    if (!prev) added += 1;
-    out.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
+    const prev = byId.get(card.id);
+    const twin = prev ? undefined : existing.find((g) => sameCommunity(g, card));
+    if (!prev && !twin) added += 1;
+    merged.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
   }
-  await putMany("groups", out);
-  return { cards: out, added };
+  const incoming = new Set(merged.map((g) => g.id));
+  const { keep, dropped } = collapseTwins([...merged, ...existing.filter((g) => !incoming.has(g.id))]);
+  const keptIds = new Set(keep.map((g) => g.id));
+  await putMany("groups", keep.filter((g) => incoming.has(g.id) || dropped.length));
+  if (dropped.length) {
+    await removeMany("groups", dropped);
+    await logAction({ actor: "agent", action: "groups.dedupe", detail: "убраны дубли: " + dropped.length });
+    const archive = await import("@/lib/archive");
+    await archive.removeFromArchive("groups", dropped).catch(() => null);
+  }
+  // Return the surviving card for every incoming one (a twin keeps its existing record).
+  const out = merged.map((card) => (keptIds.has(card.id) ? keep.find((g) => g.id === card.id)! : keep.find((g) => sameCommunity(g, card)) || card));
+  return { cards: [...new Map(out.map((g) => [g.id, g])).values()], added };
 }
 
 export async function listGroups() {

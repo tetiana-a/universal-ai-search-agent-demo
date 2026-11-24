@@ -1,3 +1,4 @@
+import { upsertGroups } from "@/lib/scout/groups";
 import { archiveConfigured, archiveSheets, lastSync, readArchive, syncArchive, ARCHIVE_LABEL } from "@/lib/archive";
 import { isAuthorized, isCronRequest, unauthorized } from "@/lib/scout/auth";
 import { logAction } from "@/lib/scout/store";
@@ -42,6 +43,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!isAuthorized(request) && !isCronRequest(request)) return unauthorized();
   if (!archiveConfigured()) return Response.json({ ok: false, error: "Supabase не подключён: добавьте SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY в Vercel." }, { status: 400 });
+  await upsertGroups([]).catch(() => null); // merge duplicate communities before they reach the archive
   const result = await syncArchive();
   await logAction({ actor: "human", action: "archive.sync", detail: result.ok ? result.total + " записей" : "ошибка: " + result.error });
   return Response.json(result, { status: result.ok ? 200 : 502 });

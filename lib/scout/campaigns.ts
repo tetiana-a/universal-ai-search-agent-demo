@@ -814,6 +814,7 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
     const rows = recent.map((j) => j.channelName + " · " + j.status + (j.releaseURL ? " · " + j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
     await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n" + rows.join("\n"));
   }
+  await step("дубли сообществ", () => upsertGroups([]));
   // Daily archive to Supabase (when connected): the long-term history outside Redis.
   const archive = await import("@/lib/archive");
   if (archive.archiveConfigured()) {
