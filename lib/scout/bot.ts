@@ -361,7 +361,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       posts ??=await listInstagramJobs();
       const rows=posts.slice(0,8).map(p=>"<code>"+escapeHtml(p.id)+"</code> · "+escapeHtml(p.channelName)+" · "+
         (p.status==="published" ? "✅ опубликовано" : p.status==="scheduled" ? "🗓 в расписании" : p.status==="cancelled" ? "⏹ отменено" : "⚠️ не подтверждено")+
-        "\n"+escapeHtml(p.scheduledAt)+(p.releaseURL ? "\n"+escapeHtml(p.releaseURL) : "")).join("\n\n");
+        "\n"+escapeHtml(p.scheduledAt)+(p.releaseURL ? "\n"+escapeHtml(p.releaseURL) : "")+(p.error ? "\nПричина: "+escapeHtml(p.error) : "")).join("\n\n");
       await sendMessage(chatId,"📊 <b>Instagram / Postiz</b>"+(stale?"\n⚠️ API статистики недоступен, показан журнал AURELIUS.":"")+
         "\n\n"+(rows||"Очередь пуста. /ighelp"));
       return {};

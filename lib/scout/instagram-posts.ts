@@ -43,14 +43,14 @@ export function validateInstagramRequest(args: InstagramRequest): string | null 
   if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(args.scheduledAt)) return "TIMEZONE_REQUIRED";
   return null;
 }
-async function postizRequest(path: string, init: RequestInit) {
+async function postizRequest(path: string, init: RequestInit, timeoutMs = 25_000) {
   const key = String(process.env.POSTIZ_API_KEY || "").trim();
   if (!key) throw new Error("POSTIZ_NOT_CONFIGURED");
   const res = await fetch(BASE + path, {
     ...init, headers: { Authorization: key, ...init.headers },
-    signal: AbortSignal.timeout(25_000), cache: "no-store",
+    signal: AbortSignal.timeout(timeoutMs), cache: "no-store",
   });
-  if (!res.ok) throw new Error("POSTIZ_HTTP_" + res.status);
+  if (!res.ok) throw new Error("POSTIZ_HTTP_" + res.status + " " + (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 160));
   return res.json();
 }
 async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: string}> {
@@ -72,7 +72,7 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
     const path = String(file.result.file_path);
     if (!(video ? /^[\w/-]+\.mp4$/i : /^[\w/-]+\.(jpe?g|png)$/i).test(path) || path.includes("..")) throw new Error(video ? "UNSUPPORTED_TELEGRAM_VIDEO" : "UNSUPPORTED_TELEGRAM_IMAGE");
     const response = await fetch("https://api.telegram.org/file/bot" + token + "/" + path, {
-      signal: AbortSignal.timeout(20_000), cache: "no-store",
+      signal: AbortSignal.timeout(video ? 60_000 : 20_000), cache: "no-store",
     });
     if (!response.ok || Number(response.headers.get("content-length") || 0) > max) throw new Error("TELEGRAM_DOWNLOAD_FAILED");
     const bytes = await response.arrayBuffer();
@@ -80,7 +80,8 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
     const form = new FormData();
     const [mime, name] = mediaType(video, path);
     form.append("file", new Blob([bytes], { type: mime }), name);
-    result = await postizRequest("/upload", { method: "POST", body: form });
+    // A 20 MB video takes longer to reach Postiz than a photo.
+    result = await postizRequest("/upload", { method: "POST", body: form }, video ? 90_000 : 25_000);
   }
   if (typeof result?.id !== "string" || typeof result?.path !== "string" ||
     !result.path.startsWith("https://")) throw new Error("POSTIZ_UPLOAD_INVALID_RESPONSE");
