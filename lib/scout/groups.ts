@@ -574,7 +574,8 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const saved = await upsertGroups(found);
   if (!found.length && !notes.length) notes.push("Поиск не вернул публичных групп. Попробуйте другую формулировку темы или город на местном языке.");
   await logAction({ actor: "agent", action: "groups.find", detail: input.topic + " · " + placeOf(input) + " → " + found.length + " (новых " + saved.added + ")" });
-  return { found: saved.cards.sort((a, b) => Number(a.relevance === "adjacent") - Number(b.relevance === "adjacent") || (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
+  saved.cards.sort((a, b) => Number(a.relevance === "adjacent") - Number(b.relevance === "adjacent") || (b.members || 0) - (a.members || 0));
+  return { found: saved.cards, added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
 }
 
 // The same community found twice: once by its public @username and once by an invite link
