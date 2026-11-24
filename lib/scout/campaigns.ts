@@ -780,28 +780,43 @@ export async function transcribeTelegramVoice(fileId: string) {
 
 // ---- One daily run (cron) ----------------------------------------------------------------------
 
+// Each step runs on its own: one failing step (a provider down, the database busy) does not
+// stop the rest, and the owner gets one alert with what failed instead of a silent night.
 export async function runDaily(deadlineAt = Date.now() + 270_000) {
   const day = today();
-  await refreshActivity(30).catch(() => 0);
-  const plan = await planDay(day);
-  const partners = await notifyPartners(day);
-  const bot = await dispatchBotTasks(day, deadlineAt - 90_000);
+  const errors: string[] = [];
+  const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+    try { return await fn(); } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(name + ": " + message);
+      console.error("[daily] " + name + " failed: " + message);
+      return null;
+    }
+  };
+  await step("проверка активности", () => refreshActivity(30));
+  const plan = await step("план дня", () => planDay(day));
+  const partners = await step("задания партнёрам", () => notifyPartners(day));
+  const bot = await step("публикации бота", () => dispatchBotTasks(day, deadlineAt - 90_000));
   // Daily monitoring of running campaigns (TZ 1.2 §5), within the remaining time budget.
-  const running = (await listCampaigns()).filter((c) => c.status === "approved");
+  const running = (await step("список кампаний", () => listCampaigns()))?.filter((c) => c.status === "approved") || [];
   for (const c of running) {
     if (Date.now() > deadlineAt - 40_000) break;
-    await monitorCampaign(c.id, Math.min(deadlineAt - 30_000, Date.now() + 60_000)).catch(() => null);
+    await step("мониторинг «" + c.title + "»", () => monitorCampaign(c.id, Math.min(deadlineAt - 30_000, Date.now() + 60_000)));
   }
   const chat = await reportChatId();
-  if (chat) await sendMessage(chat, await digestText(day));
+  const digest = await step("отчёт", () => digestText(day));
+  if (chat && digest) await sendMessage(chat, digest);
   // Instagram is scheduled in Postiz; one daily check tracks actual external
   // links without claiming success merely because Postiz accepted a schedule.
-  const instagram = await import("@/lib/scout/instagram-posts").then(m=>m.refreshInstagramJobs()).catch(()=>null);
+  const instagram = await step("Instagram / Postiz", () => import("@/lib/scout/instagram-posts").then((m) => m.refreshInstagramJobs()));
   if (chat && instagram?.length) {
     const recent = instagram.slice(0, 6);
-    const rows = recent.map(j=>j.channelName+" · "+j.status+
-      (j.releaseURL ? " · "+j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
-    await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n"+rows.join("\n"));
+    const rows = recent.map((j) => j.channelName + " · " + j.status + (j.releaseURL ? " · " + j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
+    await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n" + rows.join("\n"));
   }
-  return { plan, partners, bot };
+  if (errors.length) {
+    await logAction({ actor: "agent", action: "daily.errors", detail: errors.join(" | ").slice(0, 900) }).catch(() => null);
+    if (chat) await sendMessage(chat, "⚠️ <b>Ежедневный запуск: ошибки</b>\n" + errors.map((e) => "• " + escapeHtml(e.slice(0, 200))).join("\n") + "\n\nОстальные шаги выполнены. Следующий запуск — завтра автоматически.");
+  }
+  return { plan, partners, bot, errors };
 }

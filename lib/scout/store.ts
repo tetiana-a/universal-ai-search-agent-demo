@@ -1,4 +1,4 @@
-import { persistentMemoryConfigured, redisCommand, redisPipeline } from "@/lib/memory";
+import { persistentMemoryConfigured, redisCommand, redisCommandStrict, redisPipeline } from "@/lib/memory";
 import type { LogEntry } from "@/lib/scout/types";
 
 // Scout CRM storage. Uses the same Upstash Redis REST database as source memory
@@ -51,7 +51,9 @@ function parse<T>(raw: unknown): T | null {
 
 export async function listAll<T>(collection: Collection): Promise<T[]> {
   if (storeIsPersistent()) {
-    const flat = await redisCommand<string[]>("HGETALL", [hashKey(collection)]);
+    // Strict: an unreachable database must not look like an empty list (the planner would
+    // then re-create already published tasks and post twice into the same group).
+    const flat = await redisCommandStrict<string[]>("HGETALL", [hashKey(collection)]);
     const out: T[] = [];
     if (Array.isArray(flat)) for (let i = 1; i < flat.length; i += 2) { const item = parse<T>(flat[i]); if (item) out.push(item); }
     return out;
@@ -73,7 +75,7 @@ export async function putMany<T extends { id: string }>(collection: Collection, 
     for (let i = 0; i < items.length; i += 50) {
       const args: string[] = [hashKey(collection)];
       for (const item of items.slice(i, i + 50)) args.push(item.id, JSON.stringify(item));
-      await redisCommand("HSET", args);
+      await redisCommandStrict("HSET", args);
     }
     return;
   }
@@ -89,7 +91,7 @@ export async function putOne<T extends { id: string }>(collection: Collection, i
 
 export async function removeMany(collection: Collection, ids: string[]) {
   if (!ids.length) return;
-  if (storeIsPersistent()) { await redisCommand("HDEL", [hashKey(collection), ...ids]); return; }
+  if (storeIsPersistent()) { await redisCommandStrict("HDEL", [hashKey(collection), ...ids]); return; }
   const hash = memory().hashes.get(collection);
   for (const id of ids) hash?.delete(id);
 }

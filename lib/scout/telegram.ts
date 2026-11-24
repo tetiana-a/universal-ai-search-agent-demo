@@ -79,9 +79,13 @@ export async function reportChatId() {
   return configured ? resolveChatId(configured) : "";
 }
 
-export async function tgCall(method: string, body: Record<string, unknown>) {
+// Telegram Bot API call. Flood control (429) answers with retry_after: wait and retry, up to
+// 2 times if the wait is short (≤ 30 s), so a big posting wave slows down instead of losing posts.
+// Network errors and 5xx get one quick retry. Everything else returns Telegram's answer as is.
+export async function tgCall(method: string, body: Record<string, unknown>, attempt = 0): Promise<any> {
   const token = botToken();
   if (!token) return { ok: false, description: "TELEGRAM_BOT_TOKEN is not set" } as any;
+  let data: any;
   try {
     const response = await fetch("https://api.telegram.org/bot" + token + "/" + method, {
       method: "POST",
@@ -90,10 +94,23 @@ export async function tgCall(method: string, body: Record<string, unknown>) {
       signal: AbortSignal.timeout(12000),
       cache: "no-store",
     });
-    return (await response.json().catch(() => ({ ok: false, description: "HTTP " + response.status }))) as any;
+    data = await response.json().catch(() => ({ ok: false, error_code: response.status, description: "HTTP " + response.status }));
   } catch (error) {
-    return { ok: false, description: error instanceof Error ? error.message : "network error" } as any;
+    data = { ok: false, error_code: 0, description: error instanceof Error ? error.message : "network error" };
   }
+  if (data?.ok || attempt >= 2) return data;
+  const wait = Number(data?.parameters?.retry_after);
+  const code = Number(data?.error_code);
+  if (code === 429 && wait > 0 && wait <= 30) {
+    await new Promise((r) => setTimeout(r, wait * 1000 + 250));
+    return tgCall(method, body, attempt + 1);
+  }
+  if ((code === 0 || code >= 500) && attempt === 0) {
+    await new Promise((r) => setTimeout(r, 1000));
+    return tgCall(method, body, 1);
+  }
+  if (code === 429 || code >= 500 || code === 0) console.error("[telegram] " + method + " failed: " + (data?.description || code));
+  return data;
 }
 
 export const TG_LIMIT = 3900;

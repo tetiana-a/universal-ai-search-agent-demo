@@ -9,6 +9,7 @@ import { botHandle, loadSettings } from "@/lib/scout/config";
 import { getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, setValue } from "@/lib/scout/store";
 import { botToken, resolveChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { detectLang, nowIso, randomId, stableId } from "@/lib/scout/text";
+import { styleSheet } from "@/lib/xlsx-style";
 
 // Group finder and compliant posting.
 // - Finds public Telegram and Facebook groups/channels for a place and topic, using
@@ -877,35 +878,57 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = [], tas
   const wb = new ExcelJS.Workbook();
   wb.creator = "AURELIUS";
   const safe = (v: unknown) => { const s = String(v ?? ""); return /^[=+\-@]/.test(s) ? "'" + s : s; };
+  // Summary first: what is in the file and how to read it.
+  const sum = wb.addWorksheet("Сводка", { views: [{ showGridLines: false }] });
+  sum.columns = [{ key: "k", width: 34 }, { key: "v", width: 70 }];
+  const count = (f: (g: GroupCard) => boolean) => groups.filter(f).length;
+  const summaryRows: Array<[string, string | number]> = [
+    ["AURELIUS · база сообществ", "выгружено " + new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC"],
+    ["Сообществ всего", groups.length],
+    ...(["telegram", "facebook", "instagram", "tiktok"] as Platform[]).map((p): [string, number] => ["  " + PLATFORM_LABEL[p], count((g) => g.platform === p)]),
+    ["Профильных / смежных", count((g) => g.relevance !== "adjacent") + " / " + count((g) => g.relevance === "adjacent")],
+    ["Активных / неактивных / не проверено", count((g) => g.activity === "active") + " / " + count((g) => g.activity === "inactive") + " / " + count((g) => !g.activity || g.activity === "unknown")],
+    ["Реклама разрешена / через админа / платно / запрещена", count((g) => g.ads === "allowed") + " / " + count((g) => g.ads === "admin") + " / " + count((g) => g.ads === "paid") + " / " + count((g) => g.ads === "forbidden")],
+    ["Бот подключён (публикует сам)", count((g) => Boolean(g.botConnected && g.postingEnabled))],
+    ["Записей в журнале публикаций", posts.length],
+    ["Размещений кампаний", tasks.length],
+    ["", ""],
+    ["Как читать", "Лист «Группы» — база. Фильтр стоит на каждом столбце (стрелка в заголовке)."],
+    ["Цвета", "Зелёный — можно / активно / опубликовано. Жёлтый — нужно согласование или не проверено. Красный — нельзя, неактивно или ошибка."],
+    ["Неактивные", "Исключены из размещения автоматически. «Не проверено» — у группы нет публичной ленты (закрытые группы, Facebook, Instagram, TikTok)."],
+  ];
+  for (const [k, v] of summaryRows) sum.addRow({ k, v: String(v) });
+  sum.pageSetup = { fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+  sum.getRow(1).font = { bold: true, size: 14 };
+  sum.eachRow((row: any, n: number) => { if (n > 1) { row.getCell(1).font = { bold: true, size: 10 }; row.getCell(2).alignment = { wrapText: true, vertical: "top" }; } });
   const ws = wb.addWorksheet("Группы");
+  // TZ 1.2 §3 order: what it is, where, how alive, ad rules, then our work fields.
   ws.columns = [
-    { header: "Платформа", key: "platform", width: 11 }, { header: "Тип", key: "kind", width: 9 }, { header: "Название", key: "name", width: 36 }, { header: "Ссылка", key: "url", width: 42 },
-    { header: "Участники", key: "members", width: 11 }, { header: "Реклама по правилам", key: "ads", width: 20 }, { header: "Контакт админа", key: "admin", width: 24 },
-    { header: "Страна", key: "country", width: 12 }, { header: "Город", key: "city", width: 14 }, { header: "Тема", key: "topic", width: 18 },
-    { header: "Статус", key: "status", width: 16 }, { header: "Цена поста", key: "price", width: 11 }, { header: "Валюта", key: "currency", width: 8 },
-    { header: "Бот в группе", key: "bot", width: 12 }, { header: "Заметки", key: "notes", width: 30 },
-    { header: "Язык", key: "language", width: 7 }, { header: "Релевантность", key: "relevance", width: 13 }, { header: "Найдено по запросу", key: "foundBy", width: 28 },
-    { header: "Активность", key: "activity", width: 12 }, { header: "Последний пост", key: "lastPost", width: 14 }, { header: "Постов в неделю", key: "perWeek", width: 10 },
+    { header: "Платформа", key: "platform", width: 13 }, { header: "Название", key: "name", width: 34 }, { header: "Ссылка", key: "url", width: 36 },
+    { header: "Тип", key: "kind", width: 10 }, { header: "Язык", key: "language", width: 9 }, { header: "Страна", key: "country", width: 13 }, { header: "Город", key: "city", width: 14 },
+    { header: "Участники", key: "members", width: 13, style: { numFmt: "#,##0" } }, { header: "Активность", key: "activity", width: 22 }, { header: "Последний пост", key: "lastPost", width: 15 }, { header: "Постов в неделю", key: "perWeek", width: 12 },
+    { header: "Реклама по правилам", key: "ads", width: 16 }, { header: "Контакт админа", key: "admin", width: 20 },
+    { header: "Релевантность", key: "relevance", width: 16 }, { header: "Найдено по запросу", key: "foundBy", width: 28 }, { header: "Тема", key: "topic", width: 18 },
+    { header: "Статус работы", key: "status", width: 16 }, { header: "Бот в группе", key: "bot", width: 13 }, { header: "Цена поста", key: "price", width: 11 }, { header: "Валюта", key: "currency", width: 10 },
+    { header: "Заметки", key: "notes", width: 30 },
   ];
   for (const g of groups) ws.addRow({ platform: PLATFORM_LABEL[g.platform], kind: g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль" : g.kind === "page" ? "страница" : "группа", name: safe(g.name), url: g.url ? { text: g.url, hyperlink: g.url } : "", members: g.members ?? "", ads: ADS_LABEL[g.ads], admin: safe(g.adminContact || ""), country: safe(g.country || ""), city: safe(g.city || ""), topic: safe(g.topic || ""), status: STATUS_LABEL[g.status] || g.status, price: g.price ?? "", currency: g.currency || (g.price ? "EUR" : ""), bot: g.botConnected ? (g.postingEnabled ? "да, постинг вкл." : "да") : "", notes: safe(g.notes || ""),
     language: g.language || "", relevance: g.relevance === "adjacent" ? "смежное" : g.relevance === "core" ? "профильное" : "", foundBy: safe(g.foundBy || ""),
     activity: ACTIVITY_LABEL[g.activity || "unknown"], lastPost: (g.lastPostAt || "").slice(0, 10), perWeek: g.postsPerWeek ?? "" });
-  ws.getRow(1).font = { bold: true };
-  ws.views = [{ state: "frozen", ySplit: 1 }];
-  ws.autoFilter = { from: "A1", to: "U1" };
+  styleSheet(ws, { statusColumns: ["ads", "status", "relevance", "activity", "bot"], title: "база сообществ" });
   if (posts.length) {
     const log = wb.addWorksheet("Журнал публикаций");
-    log.columns = [{ header: "Время (UTC)", key: "at", width: 20 }, { header: "Группа", key: "group", width: 32 }, { header: "Платформа", key: "platform", width: 11 }, { header: "Способ", key: "mode", width: 14 }, { header: "Статус", key: "status", width: 12 }, { header: "Ссылка", key: "link", width: 36 }, { header: "Текст", key: "text", width: 50 }, { header: "Ошибка", key: "error", width: 30 }];
+    log.columns = [{ header: "Время (UTC)", key: "at", width: 20 }, { header: "Группа", key: "group", width: 32 }, { header: "Платформа", key: "platform", width: 11 }, { header: "Способ", key: "mode", width: 14 }, { header: "Статус", key: "status", width: 12 }, { header: "Ссылка", key: "link", width: 36 }, { header: "Текст", key: "text", width: 60 }, { header: "Ошибка", key: "error", width: 30 }];
     for (const p of posts) log.addRow({ at: p.at.replace("T", " ").slice(0, 19), group: safe(p.groupName), platform: p.platform, mode: p.mode === "bot" ? "бот" : "вручную", status: { sent: "отправлено", failed: "ошибка", published: "опубликовано", skipped: "пропущено" }[p.status], link: p.link || "", text: safe(p.text), error: safe(p.error || "") });
-    log.getRow(1).font = { bold: true };
+    styleSheet(log, { statusColumns: ["status"], title: "журнал публикаций" });
   }
   if (tasks.length) {
     const ct = wb.addWorksheet("Размещения кампаний");
     ct.columns = [{ header: "День", key: "day", width: 11 }, { header: "Кампания", key: "campaign", width: 30 }, { header: "Площадка", key: "group", width: 32 }, { header: "Платформа", key: "platform", width: 11 }, { header: "Способ", key: "mode", width: 12 }, { header: "Статус", key: "status", width: 14 }, { header: "Ссылка на пост", key: "proof", width: 40 }, { header: "Ссылка на площадку", key: "url", width: 40 }];
     const MODE: Record<string, string> = { bot: "бот", partner: "админ-партнёр", manual: "вручную" };
-    for (const t of [...tasks].sort((a, b) => b.day.localeCompare(a.day))) ct.addRow({ day: t.day, campaign: safe(t.campaignTitle), group: safe(t.groupName), platform: PLATFORM_LABEL[t.platform] || t.platform, mode: MODE[t.mode] || t.mode, status: t.status, proof: t.link || "", url: t.url || "" });
-    ct.getRow(1).font = { bold: true };
-    ct.views = [{ state: "frozen", ySplit: 1 }];
+    const TASK_STATUS: Record<string, string> = { scheduled: "запланировано", sent: "опубликовано ботом", failed: "ошибка", notified: "ждёт партнёра", proof: "ждёт проверки", verified: "засчитано", skipped: "пропущено", cancelled: "отменено" };
+    for (const t of [...tasks].sort((a, b) => b.day.localeCompare(a.day))) ct.addRow({ day: t.day, campaign: safe(t.campaignTitle), group: safe(t.groupName), platform: PLATFORM_LABEL[t.platform] || t.platform, mode: MODE[t.mode] || t.mode, status: TASK_STATUS[t.status] || t.status, proof: t.link || "", url: t.url || "" });
+    styleSheet(ct, { statusColumns: ["status"], title: "размещения кампаний" });
   }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

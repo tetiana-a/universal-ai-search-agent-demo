@@ -63,48 +63,55 @@ export function persistentMemoryConfigured() {
   return Boolean(redisUrl() && redisToken());
 }
 
-export async function redisCommand<T = any>(command: string, args: Array<string | number> = []): Promise<T | null> {
+// Upstash REST call with retries: network errors, 5xx and 429 are transient, so up to 3 attempts
+// with a short backoff. Anything else (bad command, 4xx) fails at once. Throws when it gives up.
+async function redisFetch(path: string, body: unknown, timeoutMs: number) {
   const base = redisUrl();
   const token = redisToken();
-  if (!base || !token) return null;
+  let last = "";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise((r) => setTimeout(r, 300 * 3 ** (attempt - 1)));
+    try {
+      const response = await fetch(base + path, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+        cache: "no-store",
+      });
+      if (response.ok) return await response.json();
+      last = "HTTP " + response.status;
+      if (response.status < 500 && response.status !== 429) break;
+    } catch (error) {
+      last = error instanceof Error ? error.message : "network error";
+    }
+  }
+  console.error("[redis] " + (path || "command") + " failed: " + last);
+  throw new Error("База данных недоступна (" + last + ")");
+}
 
+// Strict: throws when the database is unreachable. Use it where a silent empty answer
+// would corrupt data (reading a list before overwriting it, writing records).
+export async function redisCommandStrict<T = any>(command: string, args: Array<string | number> = []): Promise<T | null> {
+  if (!redisUrl() || !redisToken()) return null;
+  const payload = await redisFetch("", [command, ...args], 7000);
+  if (payload?.error) throw new Error("Redis " + command + ": " + payload.error);
+  return payload?.result ?? null;
+}
+
+// Lenient: null when unreachable (caches, counters, optional memory).
+export async function redisCommand<T = any>(command: string, args: Array<string | number> = []): Promise<T | null> {
   try {
-    const response = await fetch(base, {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + token,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify([command, ...args]),
-      signal: AbortSignal.timeout(7000),
-      cache: "no-store",
-    });
-    if (!response.ok) return null;
-    const payload = await response.json().catch(() => null);
-    return payload?.result ?? null;
+    return await redisCommandStrict<T>(command, args);
   } catch {
     return null;
   }
 }
 
 export async function redisPipeline(commands: Array<[string, ...Array<string | number>]>): Promise<any[]> {
-  const base = redisUrl();
-  const token = redisToken();
-  if (!base || !token || !commands.length) return [];
-
+  if (!redisUrl() || !redisToken() || !commands.length) return [];
   try {
-    const response = await fetch(base + "/pipeline", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + token,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(commands),
-      signal: AbortSignal.timeout(9000),
-      cache: "no-store",
-    });
-    if (!response.ok) return [];
-    const payload = await response.json().catch(() => []);
+    const payload = await redisFetch("/pipeline", commands, 9000);
     return Array.isArray(payload) ? payload.map((item) => item?.result) : [];
   } catch {
     return [];
