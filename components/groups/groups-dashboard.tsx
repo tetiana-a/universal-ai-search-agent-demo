@@ -27,12 +27,12 @@ function kindLabel(g: GroupCard) {
   return g.verification === "indexed_candidate" ? "кандидат · требует проверки" : "";
 }
 
-function RestrictedMark({ g }: { g: GroupCard }) {
+function RestrictedMark({ g }: Readonly<{ g: GroupCard }>) {
   const r = restrictedOf(g);
   return r ? <span title={"Реклама ограничена законом и правилами площадки: " + r}> ⚠️ <span className="text-[10.5px] text-[var(--text-muted)]">{r}</span></span> : null;
 }
 
-function FilterNotes({ cards, hiddenAdult }: { cards: GroupCard[]; hiddenAdult: number }) {
+function FilterNotes({ cards, hiddenAdult }: Readonly<{ cards: GroupCard[]; hiddenAdult: number }>) {
   const restricted = cards.filter((g) => restrictedOf(g)).length;
   if (!restricted && !hiddenAdult) return null;
   return <p className="mb-3 text-[11.5px] text-[var(--text-muted)]">
