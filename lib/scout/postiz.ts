@@ -72,7 +72,7 @@ export function makePostizDraftPayload(channel: PostizChannel, text: string, med
   };
 }
 // Postiz rejects Instagram/TikTok drafts without these fields; the owner can change them in Postiz before posting.
-function extraSettings(identifier: string) {
+export function extraSettings(identifier: string) {
   if (identifier === "instagram" || identifier === "instagram-standalone") return { post_type: "post" };
   if (identifier.startsWith("tiktok")) return { privacy_level: "PUBLIC_TO_EVERYONE", duet: false, stitch: false, comment: true, autoAddMusic: "no", brand_content_toggle: false, brand_organic_toggle: false, content_posting_method: "DIRECT_POST" };
   return {};

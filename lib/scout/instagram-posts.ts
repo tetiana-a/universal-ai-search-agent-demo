@@ -1,9 +1,10 @@
 import { claimOnce, getOne, listAll, logAction, putOne } from "@/lib/scout/store";
-import { listPostizChannels, listRecentPostizPosts } from "@/lib/scout/postiz";
+import { extraSettings, listPostizChannels, listRecentPostizPosts } from "@/lib/scout/postiz";
 import { botToken, tgCall } from "@/lib/scout/telegram";
 
 const BASE = "https://api.postiz.com/public/v1";
 const LIMIT = 10 * 1024 * 1024;
+const VIDEO_LIMIT = 20 * 1024 * 1024; // Telegram bots can download files up to 20 MB
 const IG = new Set(["instagram", "instagram-standalone"]);
 
 export type InstagramJob = {
@@ -15,7 +16,12 @@ export type InstagramJob = {
 export type InstagramRequest = {
   requestId: string; ownerId: string; integrationId?: string;
   caption: string; scheduledAt: string; mediaUrl?: string; telegramFileId?: string;
+  platform?: "instagram" | "tiktok";
 };
+/** "сейчас" / "now" → in 6 minutes (Postiz needs a little lead time); anything else is passed through. */
+export function resolveWhen(value: string) {
+  return /^(сейчас|now|зараз)$/i.test(value.trim()) ? new Date(Date.now() + 6 * 60_000).toISOString() : value.trim();
+}
 export function instagramSchedulingEnabled() {
   return process.env.POSTIZ_ENABLE_SCHEDULE === "on" && process.env.INSTAGRAM_AUTOPOST === "on";
 }
@@ -59,18 +65,20 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
     if (!token) throw new Error("TELEGRAM_NOT_CONFIGURED");
     const file: any = await tgCall("getFile", { file_id: args.telegramFileId });
     if (!file?.ok || !file?.result?.file_path) throw new Error("TELEGRAM_FILE_UNAVAILABLE");
-    if (Number(file.result.file_size || 0) > LIMIT) throw new Error("MEDIA_TOO_LARGE");
+    const video = args.platform === "tiktok";
+    const max = video ? VIDEO_LIMIT : LIMIT;
+    if (Number(file.result.file_size || 0) > max) throw new Error("MEDIA_TOO_LARGE");
     const path = String(file.result.file_path);
-    if (!/^[\w/-]+\.(jpe?g|png)$/i.test(path) || path.includes("..")) throw new Error("UNSUPPORTED_TELEGRAM_IMAGE");
+    if (!(video ? /^[\w/-]+\.mp4$/i : /^[\w/-]+\.(jpe?g|png)$/i).test(path) || path.includes("..")) throw new Error(video ? "UNSUPPORTED_TELEGRAM_VIDEO" : "UNSUPPORTED_TELEGRAM_IMAGE");
     const response = await fetch("https://api.telegram.org/file/bot" + token + "/" + path, {
       signal: AbortSignal.timeout(20_000), cache: "no-store",
     });
-    if (!response.ok || Number(response.headers.get("content-length") || 0) > LIMIT) throw new Error("TELEGRAM_DOWNLOAD_FAILED");
+    if (!response.ok || Number(response.headers.get("content-length") || 0) > max) throw new Error("TELEGRAM_DOWNLOAD_FAILED");
     const bytes = await response.arrayBuffer();
-    if (!bytes.byteLength || bytes.byteLength > LIMIT) throw new Error("MEDIA_TOO_LARGE");
+    if (!bytes.byteLength || bytes.byteLength > max) throw new Error("MEDIA_TOO_LARGE");
     const form = new FormData();
-    const mime = /\.png$/i.test(path) ? "image/png" : "image/jpeg";
-    form.append("file", new Blob([bytes], { type: mime }), mime === "image/png" ? "image.png" : "image.jpg");
+    const mime = video ? "video/mp4" : /\.png$/i.test(path) ? "image/png" : "image/jpeg";
+    form.append("file", new Blob([bytes], { type: mime }), video ? "video.mp4" : mime === "image/png" ? "image.png" : "image.jpg");
     result = await postizRequest("/upload", { method: "POST", body: form });
   }
   if (typeof result?.id !== "string" || typeof result?.path !== "string" ||
@@ -80,17 +88,19 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
 
 export async function scheduleInstagram(args: InstagramRequest): Promise<{ok: boolean; error?: string; job?: InstagramJob}> {
   if (!instagramSchedulingEnabled()) return { ok: false, error: "INSTAGRAM_AUTOPOST_DISABLED" };
+  args = { ...args, scheduledAt: resolveWhen(args.scheduledAt) };
   const problem = validateInstagramRequest(args);
   if (problem) return {ok:false,error:problem};
-  const channels = (await listPostizChannels()).filter(x => IG.has(x.identifier) && !x.disabled);
+  const tiktok = args.platform === "tiktok";
+  const channels = (await listPostizChannels()).filter(x => (tiktok ? x.identifier.startsWith("tiktok") : IG.has(x.identifier)) && !x.disabled);
   const channel = args.integrationId
     ? channels.find(x => x.id === args.integrationId)
     : channels.length === 1 ? channels[0] : undefined;
-  if (!channel) return {ok:false,error:"SELECT_CONNECTED_INSTAGRAM_ACCOUNT"};
+  if (!channel) return {ok:false,error:tiktok ? "SELECT_CONNECTED_TIKTOK_ACCOUNT" : "SELECT_CONNECTED_INSTAGRAM_ACCOUNT"};
   // Do not allow posting to a different customer's channel by accident.
-  const allow = String(process.env.INSTAGRAM_ALLOWED_CHANNEL_IDS || "").split(",").map(x=>x.trim()).filter(Boolean);
+  const allow = String((tiktok ? process.env.TIKTOK_ALLOWED_CHANNEL_IDS : process.env.INSTAGRAM_ALLOWED_CHANNEL_IDS) || "").split(",").map(x=>x.trim()).filter(Boolean);
   if (allow.length && !allow.includes(channel.id)) return {ok:false,error:"ACCOUNT_NOT_ALLOWLISTED"};
-  const id = "ig-" + args.requestId;
+  const id = (tiktok ? "tt-" : "ig-") + args.requestId;
   const existing = await getOne<InstagramJob>("instagram_posts", id);
   if (existing) return {ok:true,job:existing};
   if (!(await claimOnce("instagram-schedule:" + args.requestId, 86400 * 7))) return {ok:false,error:"ALREADY_PROCESSING"};
@@ -102,7 +112,7 @@ export async function scheduleInstagram(args: InstagramRequest): Promise<{ok: bo
       posts: [{
         integration: {id:channel.id},
         value: [{ content:args.caption.trim(), image:[media] }],
-        settings: { __type:channel.identifier, post_type:"post", is_trial_reel:false, collaborators:[] },
+        settings: tiktok ? { __type:channel.identifier, ...extraSettings(channel.identifier) } : { __type:channel.identifier, post_type:"post", is_trial_reel:false, collaborators:[] },
       }],
     };
     const response: any = await postizRequest("/posts", {
@@ -116,7 +126,7 @@ export async function scheduleInstagram(args: InstagramRequest): Promise<{ok: bo
       createdAt:now, updatedAt:now, status:"scheduled",
     };
     await putOne("instagram_posts", job);
-    await logAction({actor:"human",action:"instagram.scheduled",detail:id+" · "+channel.name+" · "+body.date});
+    await logAction({actor:"human",action:(tiktok ? "tiktok" : "instagram")+".scheduled",detail:id+" · "+channel.name+" · "+body.date});
     return {ok:true,job};
   } catch (error) {
     // Postiz may already have accepted a timed-out POST. Do not auto-retry,
