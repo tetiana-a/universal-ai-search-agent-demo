@@ -99,4 +99,24 @@ describe("Instagram automatic owner-approved publication",()=>{
     expect(second.job?.status).toBe("unknown");
     expect(calls.filter(c=>c.url.endsWith("/posts"))).toHaveLength(1);
   });
+
+  it("schedules a TikTok video on the owner's TikTok channel, 'сейчас' = in a few minutes",async()=>{
+    vi.stubEnv("INSTAGRAM_AUTOPOST","on");
+    const tiktok={id:"apulia-tt",name:"Apulia Olive Oil CZ",identifier:"tiktok-business",disabled:false};
+    let posted:any;
+    mockFetch([{
+      match:url=>url.startsWith(ROOT),
+      respond:(url,init)=>{
+        if(url.endsWith("/integrations"))return json([account,tiktok]);
+        if(url.endsWith("/upload-from-url"))return json({id:"vid-1",path:"https://uploads.postiz.com/clip.mp4"});
+        if(url.endsWith("/posts")&&init?.method==="POST"){posted=JSON.parse(String(init.body));return json([{postId:"post-tt-1"}]);}
+        return json({});
+      },
+    }]);
+    const result=await scheduleInstagram({platform:"tiktok",requestId:"owner-tt-0001",ownerId:"tg-owner",caption:"Бізнес з Італією #b2b",mediaUrl:"https://cdn.example.com/clip.mp4",scheduledAt:"сейчас"});
+    expect(result).toMatchObject({ok:true,job:{id:"tt-owner-tt-0001",channelName:"Apulia Olive Oil CZ",postId:"post-tt-1"}});
+    expect(posted.posts[0].integration.id).toBe("apulia-tt");
+    expect(posted.posts[0].settings).toMatchObject({__type:"tiktok-business",privacy_level:"PUBLIC_TO_EVERYONE"});
+    expect(Date.parse(posted.date)-Date.now()).toBeGreaterThan(5*60_000);
+  });
 });

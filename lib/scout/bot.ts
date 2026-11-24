@@ -53,11 +53,20 @@ const HELP = [
   "/recall — проверка полноты по ручному списку · /activity — порог активности",
   "/cstop all — остановить всё",
   "",
+  "/ttqueue — видео в TikTok сам (подпись к видео: /ttqueue сейчас | текст) · /igqueue — фото в Instagram",
   "🤝 Ссылка для админов-партнёров: " + partnerInviteLink(),
   "➕ Добавить бота в группу: " + addBotUrl({ platform: "telegram", kind: "group" }),
   "➕ Добавить бота в канал: " + addBotUrl({ platform: "telegram", kind: "channel" }),
   "Всё остальное — кнопками в /panel.",
 ].join("\n");
+
+const TT_HELP = "🎬 <b>Автопубликация в TikTok (ваш аккаунт через Postiz)</b>\n\nПришлите ВИДЕО (mp4, до 20 МБ) с подписью:\n<code>/ttqueue сейчас | Текст и #хештеги</code>\nили со временем:\n<code>/ttqueue 2026-11-25T19:00:00+01:00 | Текст</code>\n\nБот загрузит видео в Postiz, и пост выйдет сам в указанное время, без подтверждения на сайте. Проверить: /igstatus · отменить: /igcancel ID";
+
+function ttResultText(result: { ok: boolean; error?: string; job?: { channelName: string; scheduledAt: string; id: string } }) {
+  return result.ok && result.job
+    ? "✅ <b>TikTok запланирован</b>\nАккаунт: " + escapeHtml(result.job.channelName) + "\nВремя: " + escapeHtml(result.job.scheduledAt) + "\nID: <code>" + escapeHtml(result.job.id) + "</code>\nPostiz опубликует сам. Проверить: /igstatus"
+    : "⚠️ TikTok не запланирован: " + escapeHtml(result.error || "ошибка") + "\nПодсказка: /tthelp";
+}
 
 function commandOf(text: string) {
   const m = /^\/([a-z_]+)(?:@\w+)?\s*([\s\S]*)$/i.exec(text.trim());
@@ -323,6 +332,22 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
         ? "✅ <b>Instagram запланирован автоматически</b>\nАккаунт: "+escapeHtml(result.job.channelName)+"\nДата: "+escapeHtml(result.job.scheduledAt)+"\nID: <code>"+escapeHtml(result.job.id)+"</code>\nЭто расписание, а не доказательство публикации. Проверить: /igstatus"
         : "⚠️ Instagram не запланирован: "+escapeHtml(result.error||"неизвестная ошибка")+"\nПроверьте /ighelp и настройки INSTAGRAM_AUTOPOST.");
       return {};
+    }
+    case "ttqueue": {
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId,"⛔ TikTok доступен только владельцу и админам группы."); return {};
+      }
+      const parts=args.split("|").map(x=>x.trim());
+      if (parts.length < 3) { await sendMessage(chatId,TT_HELP); return {}; }
+      const [scheduledAt,mediaUrl,...caption]=parts;
+      await sendMessage(chatId,"⏳ Ставлю видео в расписание TikTok через Postiz…");
+      const result=await scheduleInstagram({ platform:"tiktok", requestId:"tgtt-"+userId+"-"+Date.now().toString(36), ownerId:userId, mediaUrl, caption:caption.join(" | "), scheduledAt })
+        .catch(()=>({ok:false,error:"TIKTOK_API_UNAVAILABLE",job:undefined}));
+      await sendMessage(chatId,ttResultText(result));
+      return {};
+    }
+    case "tthelp": {
+      await sendMessage(chatId,TT_HELP); return {};
     }
     case "igstatus": {
       if (!(await isControl(chatId, userId))) {
@@ -825,6 +850,23 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     return handleVoice(chatId, voice.file_id, userId);
   }
   // Telegram owner photo with explicit time + caption -> Postiz media upload and
+  // A video (or mp4 file) captioned /ttqueue TIME | text: scheduled on the owner's own TikTok via Postiz.
+  const ttVideo = message?.video || (/^video\/mp4$/i.test(String(message?.document?.mime_type || "")) ? message.document : null);
+  if (ttVideo && /^\/ttqueue(?:@\w+)?\s/i.test(String(message.caption || "")) && !message.from?.is_bot) {
+    const chatId=String(message.chat?.id||"");
+    const userId=String(message.from?.id||"");
+    if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
+    const parts=String(message.caption).replace(/^\/ttqueue(?:@\w+)?\s*/i,"").split("|").map((x:string)=>x.trim());
+    if(parts.length<2){ await sendMessage(chatId,TT_HELP); return {}; }
+    const requestId="tgtt-"+userId+"-"+String(message.message_id||Date.now());
+    await sendMessage(chatId,"⏳ Загружаю видео в Postiz и ставлю публикацию в TikTok…");
+    return { background:async()=>{
+      const result=await scheduleInstagram({platform:"tiktok",requestId,ownerId:userId,telegramFileId:String(ttVideo.file_id||""),scheduledAt:parts[0],caption:parts.slice(1).join(" | ")})
+        .catch(()=>({ok:false,error:"TIKTOK_API_UNAVAILABLE",job:undefined}));
+      await sendMessage(chatId,ttResultText(result));
+    }};
+  }
+
   // one scheduled Instagram feed post. Does not require an additional n8n cron.
   if (message?.photo && /^\/igqueue(?:@\w+)?\s/i.test(String(message.caption || "")) && !message.from?.is_bot) {
     const chatId=String(message.chat?.id||"");
