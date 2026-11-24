@@ -122,3 +122,15 @@ it("a card that never mentions the topic is not on topic", () => {
   expect(onTopic("недвижимость", "Недвижимость Валенсии: продажа")).toBe(true);
   expect(onTopic("", "anything")).toBe(true);
 });
+
+it("marks communities whose advertising is restricted by law", async () => {
+  const { restrictedTopic } = await import("@/lib/scout/restricted");
+  expect(restrictedTopic("Вино и сыр Прага")).toBe("алкоголь");
+  expect(restrictedTopic("Importerzy wina Polska")).toBe("алкоголь");
+  expect(restrictedTopic("Craft BEER lovers")).toBe("алкоголь");
+  expect(restrictedTopic("Казино и покер")).toBe("азартные игры");
+  expect(restrictedTopic("Вейпы Варшава")).toBe("табак, вейпы");
+  expect(restrictedTopic("Виноград и сад")).toBe("");
+  expect(restrictedTopic("Недвижимость Валенсия")).toBe("");
+  expect(restrictedTopic("Romantic dinner")).toBe("");
+});
