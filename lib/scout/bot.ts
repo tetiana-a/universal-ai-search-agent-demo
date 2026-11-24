@@ -62,10 +62,13 @@ const HELP = [
 
 const TT_HELP = "🎬 <b>Автопубликация в TikTok (ваш аккаунт через Postiz)</b>\n\nПришлите ВИДЕО (mp4, до 20 МБ) с подписью:\n<code>/ttqueue сейчас | Текст и #хештеги</code>\nили со временем:\n<code>/ttqueue 2026-11-25T19:00:00+01:00 | Текст</code>\n\nБот загрузит видео в Postiz, и пост выйдет сам в указанное время, без подтверждения на сайте. Проверить: /igstatus · отменить: /igcancel ID";
 
+const TT_TOO_BIG = "⚠️ Видео больше 20 МБ — Telegram не отдаёт боту такие файлы.\nСожмите его (CapCut → Экспорт → 720p) или пришлите ссылку:\n<code>/ttqueue сейчас | https://…/video.mp4 | текст</code>";
+
 function ttResultText(result: { ok: boolean; error?: string; job?: { channelName: string; scheduledAt: string; id: string } }) {
-  return result.ok && result.job
-    ? "✅ <b>TikTok запланирован</b>\nАккаунт: " + escapeHtml(result.job.channelName) + "\nВремя: " + escapeHtml(result.job.scheduledAt) + "\nID: <code>" + escapeHtml(result.job.id) + "</code>\nPostiz опубликует сам. Проверить: /igstatus"
-    : "⚠️ TikTok не запланирован: " + escapeHtml(result.error || "ошибка") + "\nПодсказка: /tthelp";
+  if (result.ok && result.job)
+    return "✅ <b>TikTok запланирован</b>\nАккаунт: " + escapeHtml(result.job.channelName) + "\nВремя: " + escapeHtml(result.job.scheduledAt) + "\nID: <code>" + escapeHtml(result.job.id) + "</code>\nPostiz опубликует сам. Проверить: /igstatus";
+  if (result.error === "MEDIA_TOO_LARGE") return TT_TOO_BIG;
+  return "⚠️ TikTok не запланирован: " + escapeHtml(result.error || "ошибка") + "\nПодсказка: /tthelp";
 }
 
 function commandOf(text: string) {
@@ -858,6 +861,7 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
     const parts=String(message.caption).replace(/^\/ttqueue(?:@\w+)?\s*/i,"").split("|").map((x:string)=>x.trim());
     if(parts.length<2){ await sendMessage(chatId,TT_HELP); return {}; }
+    if(Number(ttVideo.file_size||0)>20*1024*1024){ await sendMessage(chatId,TT_TOO_BIG); return {}; }
     const requestId="tgtt-"+userId+"-"+String(message.message_id||Date.now());
     await sendMessage(chatId,"⏳ Загружаю видео в Postiz и ставлю публикацию в TikTok…");
     return { background:async()=>{
