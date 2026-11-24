@@ -77,8 +77,8 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
     const bytes = await response.arrayBuffer();
     if (!bytes.byteLength || bytes.byteLength > max) throw new Error("MEDIA_TOO_LARGE");
     const form = new FormData();
-    const mime = video ? "video/mp4" : /\.png$/i.test(path) ? "image/png" : "image/jpeg";
-    form.append("file", new Blob([bytes], { type: mime }), video ? "video.mp4" : mime === "image/png" ? "image.png" : "image.jpg");
+    const [mime, name] = mediaType(video, path);
+    form.append("file", new Blob([bytes], { type: mime }), name);
     result = await postizRequest("/upload", { method: "POST", body: form });
   }
   if (typeof result?.id !== "string" || typeof result?.path !== "string" ||
@@ -86,20 +86,31 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
   return { id: result.id, path: result.path };
 }
 
+function mediaType(video: boolean, path: string): [string, string] {
+  if (video) return ["video/mp4", "video.mp4"];
+  return /\.png$/i.test(path) ? ["image/png", "image.png"] : ["image/jpeg", "image.jpg"];
+}
+// The owner's connected Postiz channel for this platform, limited by the optional allowlist.
+async function pickChannel(args: InstagramRequest): Promise<{ channel?: Awaited<ReturnType<typeof listPostizChannels>>[number]; error?: string }> {
+  const tiktok = args.platform === "tiktok";
+  const channels = (await listPostizChannels()).filter(x => (tiktok ? x.identifier.startsWith("tiktok") : IG.has(x.identifier)) && !x.disabled);
+  const single = channels.length === 1 ? channels[0] : undefined;
+  const channel = args.integrationId ? channels.find(x => x.id === args.integrationId) : single;
+  if (!channel) return { error: tiktok ? "SELECT_CONNECTED_TIKTOK_ACCOUNT" : "SELECT_CONNECTED_INSTAGRAM_ACCOUNT" };
+  // Do not allow posting to a different customer's channel by accident.
+  const allow = String((tiktok ? process.env.TIKTOK_ALLOWED_CHANNEL_IDS : process.env.INSTAGRAM_ALLOWED_CHANNEL_IDS) || "").split(",").map(x=>x.trim()).filter(Boolean);
+  if (allow.length && !allow.includes(channel.id)) return { error: "ACCOUNT_NOT_ALLOWLISTED" };
+  return { channel };
+}
 export async function scheduleInstagram(args: InstagramRequest): Promise<{ok: boolean; error?: string; job?: InstagramJob}> {
   if (!instagramSchedulingEnabled()) return { ok: false, error: "INSTAGRAM_AUTOPOST_DISABLED" };
   args = { ...args, scheduledAt: resolveWhen(args.scheduledAt) };
   const problem = validateInstagramRequest(args);
   if (problem) return {ok:false,error:problem};
   const tiktok = args.platform === "tiktok";
-  const channels = (await listPostizChannels()).filter(x => (tiktok ? x.identifier.startsWith("tiktok") : IG.has(x.identifier)) && !x.disabled);
-  const channel = args.integrationId
-    ? channels.find(x => x.id === args.integrationId)
-    : channels.length === 1 ? channels[0] : undefined;
-  if (!channel) return {ok:false,error:tiktok ? "SELECT_CONNECTED_TIKTOK_ACCOUNT" : "SELECT_CONNECTED_INSTAGRAM_ACCOUNT"};
-  // Do not allow posting to a different customer's channel by accident.
-  const allow = String((tiktok ? process.env.TIKTOK_ALLOWED_CHANNEL_IDS : process.env.INSTAGRAM_ALLOWED_CHANNEL_IDS) || "").split(",").map(x=>x.trim()).filter(Boolean);
-  if (allow.length && !allow.includes(channel.id)) return {ok:false,error:"ACCOUNT_NOT_ALLOWLISTED"};
+  const picked = await pickChannel(args);
+  if (!picked.channel) return { ok: false, error: picked.error };
+  const channel = picked.channel;
   const id = (tiktok ? "tt-" : "ig-") + args.requestId;
   const existing = await getOne<InstagramJob>("instagram_posts", id);
   if (existing) return {ok:true,job:existing};
