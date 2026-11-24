@@ -224,7 +224,10 @@ export async function handleCampaignCommand(chatId: string, userId: string, cmd:
       const list = first === "all" ? (await listCampaigns()).filter((c) => c.status !== "stopped") : [await byId()].filter(Boolean) as Campaign[];
       if (!list.length) { await sendMessage(chatId, "Формат: <code>/cstop cmp_xxxx</code> или <code>/cstop all</code>"); return {}; }
       for (const c of list) await setCampaignStatus(c.id, "stopped");
-      await sendMessage(chatId, "⏹ Остановлено кампаний: " + list.length + ". Неопубликованные задания отменены, партнёры предупреждены.");
+      // "all" is the kill switch: also every future post already scheduled in Postiz (Instagram, own pages).
+      const pz = first === "all" ? await import("@/lib/scout/instagram-posts").then((m) => m.cancelScheduledPostiz()).catch(() => ({ cancelled: 0, failed: ["Postiz недоступен"] })) : { cancelled: 0, failed: [] as string[] };
+      await sendMessage(chatId, "⏹ Остановлено кампаний: " + list.length + ". Неопубликованные задания отменены, партнёры предупреждены." +
+        (first === "all" ? "\nPostiz: отменено запланированных постов — " + pz.cancelled + (pz.failed.length ? ". ⚠️ Не удалось отменить: " + escapeHtml(pz.failed.slice(0, 5).join(", ")) + " — удалите их в Postiz вручную." : ".") : ""));
       return {};
     }
     case "schedule": {

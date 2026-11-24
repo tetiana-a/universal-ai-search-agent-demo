@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 const now = new Date().toISOString();
-const group = (id: string, over: Partial<GroupCard> = {}): GroupCard => ({ id, platform: "telegram", url: "https://t.me/" + id, name: id, ads: "unknown", status: "free", foundAt: now, updatedAt: now, ...over });
+const group = (id: string, over: Partial<GroupCard> = {}): GroupCard => ({ id, platform: "telegram", url: "https://t.me/" + id, name: id, ads: "unknown", status: "free", permissionConfirmedAt: now, foundAt: now, updatedAt: now, ...over });
 const campaign = (over: Partial<Campaign> = {}): Campaign => ({ id: "c1", title: "Квартира Валенсия", adText: "Продаю квартиру", topic: "недвижимость", region: "Валенсия, Испания", languages: ["ru"], keywords: ["квартира"], adjacent: [], queries: [], exclusions: [], questions: [], translations: {}, platforms: ["telegram", "facebook", "instagram", "tiktok"], dailyTarget: 300, status: "approved", source: "text", createdAt: now, updatedAt: now, ...over });
 
 const readyCampaign = (groups: GroupCard[], over: Partial<Campaign> = {}): Campaign => campaign({

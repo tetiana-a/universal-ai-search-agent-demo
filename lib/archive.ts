@@ -8,7 +8,7 @@ import { stableId } from "@/lib/scout/text";
 // (the journal in Redis keeps only the latest 5000 entries). Only the server key touches it.
 
 export type ArchiveRow = { collection: string; id: string; day: string | null; data: Record<string, unknown> };
-export type SyncResult = { ok: boolean; at: string; total: number; byCollection: Record<string, number>; error?: string };
+export type SyncResult = { ok: boolean; at: string; total: number; byCollection: Record<string, number>; error?: string; mode?: "full" | "incremental"; scanned?: number; fullAt?: string };
 
 const TABLE = "aurelius_archive";
 const LAST_KEY = "archive:last";
@@ -74,23 +74,37 @@ export async function collectRows(): Promise<ArchiveRow[]> {
   return rows;
 }
 
-// Upsert everything in batches of 500 (merge-duplicates on the primary key).
-export async function syncArchive(): Promise<SyncResult> {
+// Newest timestamp a record carries: changed records have a fresh updatedAt, new ones a fresh at/createdAt.
+export function changedAt(r: Record<string, unknown>): string | null {
+  let best = "";
+  for (const k of ["updatedAt", "at", "createdAt", "foundAt"]) { const v = String(r[k] ?? ""); if (/^\d{4}-\d{2}-\d{2}T/.test(v) && v > best) best = v; }
+  return best || null;
+}
+const FULL_EVERY_MS = 7 * 86_400_000;
+
+// Incremental: only records changed since the last good sync (minus an hour of margin) and records with
+// no timestamp; a full pass once a week (or on demand) catches anything missed. Upserted in batches of 500.
+export async function syncArchive(opts: { full?: boolean } = {}): Promise<SyncResult> {
   const at = new Date().toISOString();
   const byCollection: Record<string, number> = {};
   try {
-    const rows = await collectRows();
+    const prevGood = await getValue<SyncResult>(LAST_KEY).catch(() => null);
+    const full = Boolean(opts.full || !prevGood?.fullAt || Date.parse(at) - Date.parse(prevGood.fullAt) > FULL_EVERY_MS);
+    const since = full ? "" : new Date(Date.parse(prevGood!.at) - 3_600_000).toISOString();
+    const all = await collectRows();
+    const rows = full ? all : all.filter((r) => { const t = changedAt(r.data); return !t || t >= since; });
     for (let i = 0; i < rows.length; i += 500) {
       const batch = rows.slice(i, i + 500).map((r) => ({ ...r, synced_at: at }));
       await rest(TABLE + "?on_conflict=collection,id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(batch) });
     }
     for (const r of rows) byCollection[r.collection] = (byCollection[r.collection] || 0) + 1;
-    const result: SyncResult = { ok: true, at, total: rows.length, byCollection };
+    const result: SyncResult = { ok: true, at, total: rows.length, byCollection, mode: full ? "full" : "incremental", scanned: all.length, fullAt: full ? at : prevGood?.fullAt };
     await setValue(LAST_KEY, result);
     return result;
   } catch (error) {
     const result: SyncResult = { ok: false, at, total: 0, byCollection, error: error instanceof Error ? error.message : String(error) };
-    await setValue(LAST_KEY, result).catch(() => null);
+    // A failed run must not move the "since" point, so the last good result stays stored.
+    await setValue(LAST_KEY + ":error", result).catch(() => null);
     return result;
   }
 }
@@ -102,8 +116,10 @@ export async function removeFromArchive(collection: string, ids: string[]) {
   await rest("aurelius_archive?collection=eq." + collection + "&id=in.(" + encodeURIComponent(list) + ")", { method: "DELETE" });
 }
 
+// For the panel: the latest attempt, good or failed.
 export async function lastSync() {
-  return getValue<SyncResult>(LAST_KEY);
+  const [good, bad] = await Promise.all([getValue<SyncResult>(LAST_KEY), getValue<SyncResult>(LAST_KEY + ":error")]);
+  return bad && (!good || bad.at > good.at) ? bad : good;
 }
 
 // Read back for download: period by the record's own day, optional collections. Paged 1000 at a time.

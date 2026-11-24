@@ -9,7 +9,7 @@ const IG = new Set(["instagram", "instagram-standalone"]);
 export type InstagramJob = {
   id: string; createdAt: string; updatedAt: string;
   ownerId: string; integrationId: string; channelName: string;
-  caption: string; scheduledAt: string; postId?: string; releaseURL?: string;
+  caption: string; scheduledAt: string; postId?: string; releaseURL?: string; campaignId?: string;
   status: "scheduled" | "published" | "unknown" | "cancelled"; error?: string;
 };
 export type InstagramRequest = {
@@ -150,6 +150,16 @@ export async function refreshInstagramJobs() {
     }
   }
   return jobs;
+}
+// Kill switch: deletes every still-future scheduled Postiz post (all, or one campaign's).
+export async function cancelScheduledPostiz(campaignId?: string) {
+  const jobs = (await listInstagramJobs()).filter((j) => j.status === "scheduled" && j.postId && Date.parse(j.scheduledAt) > Date.now() && (!campaignId || j.campaignId === campaignId));
+  let cancelled = 0; const failed: string[] = [];
+  for (const j of jobs) {
+    const r = await cancelInstagramJob(j.id).catch(() => ({ ok: false }));
+    if (r.ok) cancelled += 1; else failed.push(j.channelName || j.id);
+  }
+  return { cancelled, failed };
 }
 export async function cancelInstagramJob(jobId:string) {
   const job = await getOne<InstagramJob>("instagram_posts",jobId);

@@ -48,7 +48,7 @@ function CampaignEditor({ c, act, busy }: Readonly<{ c: Campaign; act: (a: strin
   const [excl, setExcl] = useState(c.exclusions.join(", "));
   const [target, setTarget] = useState(String(c.dailyTarget));
   const dirty = kw !== c.keywords.join(", ") || adj !== c.adjacent.join(", ") || queries !== c.queries.join(", ") || excl !== c.exclusions.join(", ") || target !== String(c.dailyTarget);
-  const verifiedTargets = Boolean(c.found?.total && c.searchGroupIds?.length);
+  const verifiedTargets = Boolean(c.found?.total && (c.searchGroupIds?.length || c.controlGroupIds?.length));
   const blockedWine = isPolishWineCampaign(c);
   const displayedStatus = blockedWine ? "B2B-поиск · публичная реклама вина запрещена"
     : c.status === "approved" && !verifiedTargets ? "размещение заблокировано — нет подтверждённых целей"
@@ -183,7 +183,7 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
           <input className={inputClass} placeholder="Telegram ID админа-партнёра" value={place.partnerTelegramId} onChange={(e) => setPlace({ ...place, partnerTelegramId: e.target.value })} />
           <input className={inputClass} placeholder="Постов/день" type="number" value={place.dailyLimit} onChange={(e) => setPlace({ ...place, dailyLimit: e.target.value })} />
           <input className={inputClass} placeholder="Раз в N дней" type="number" value={place.minDaysBetween} onChange={(e) => setPlace({ ...place, minDaysBetween: e.target.value })} />
-          <input className={inputClass} placeholder="Чем подтверждено согласие (переписка, договор)" value={place.permissionNote} onChange={(e) => setPlace({ ...place, permissionNote: e.target.value })} />
+          <input className={inputClass} placeholder="Чем подтверждено согласие (переписка, договор) — без этого постов не будет" value={place.permissionNote} onChange={(e) => setPlace({ ...place, permissionNote: e.target.value })} />
           <Btn variant="spectrum" disabled={!place.url.trim()} onClick={async () => { const d = await act("addPlace", place); if (d?.ok) setPlace({ url: "", partnerTelegramId: "", dailyLimit: "", minDaysBetween: "", permissionNote: "" }); }}>Добавить</Btn>
         </div>
         <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Партнёр (админ группы или владелец страницы) открывает бота, нажимает Start и присылает /id — это его Telegram ID. Бот будет присылать ему задания, он публикует сам и отвечает /proof со ссылкой, а вы засчитываете.</p>

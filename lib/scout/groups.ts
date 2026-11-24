@@ -53,6 +53,9 @@ export type GroupCard = {
   // Minimum days between two posts in this group, as the admin allowed (default 1).
   minDaysBetween?: number;
   permissionNote?: string;
+  // Who recorded the admin's agreement and when; without it an "agreed" status gets no manual/partner tasks.
+  permissionConfirmedAt?: string;
+  permissionConfirmedBy?: string;
   // TZ 1.2: language, relevance (core topic or adjacent audience), which query found it, liveness.
   language?: string;
   relevance?: "core" | "adjacent";
@@ -565,10 +568,12 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
 // The same community found twice: once by its public @username and once by an invite link
 // (t.me/+…), or by two invite links. Same platform, same title and the same member count
 // (±1%) means one community.
+const twinName = (g: GroupCard) => String(g.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+
 export function sameCommunity(a: GroupCard, b: GroupCard) {
   if (a.id === b.id || a.platform !== b.platform) return false;
   if (a.url.toLowerCase() === b.url.toLowerCase()) return true;
-  const key = (g: GroupCard) => g.name.toLowerCase().replace(/\s+/g, " ").trim();
+  const key = twinName;
   if (key(a).length < 4 || key(a) !== key(b)) return false;
   if (!a.members || !b.members) return false;
   return Math.abs(a.members - b.members) <= Math.max(2, 0.01 * Math.max(a.members, b.members));
@@ -582,19 +587,40 @@ function survivorRank(g: GroupCard) {
 }
 
 // Collapses twins: keeps one card per community, carries over the owner's fields, returns the ids to drop.
+// Twins share a platform and either a URL or a title, so only cards in the same bucket are compared
+// (linear in the number of groups, not quadratic).
 export function collapseTwins(cards: GroupCard[]) {
   const keep: GroupCard[] = [];
   const dropped: string[] = [];
+  const survivorOf: Record<string, string> = {};
+  const buckets = new Map<string, GroupCard[]>();
+  const keysOf = (g: GroupCard) => [g.platform + "|u|" + g.url.toLowerCase(), g.platform + "|n|" + twinName(g)];
   const ordered = [...cards].sort((a, b) => survivorRank(b) - survivorRank(a) || String(a.foundAt || "").localeCompare(String(b.foundAt || "")));
   for (const card of ordered) {
-    const twin = keep.find((k) => sameCommunity(k, card));
-    if (!twin) { keep.push(card); continue; }
+    const twin = keysOf(card).flatMap((k) => buckets.get(k) || []).find((k) => sameCommunity(k, card));
+    if (!twin) { keep.push(card); for (const k of keysOf(card)) buckets.set(k, [...(buckets.get(k) || []), card]); continue; }
     dropped.push(card.id);
+    survivorOf[card.id] = twin.id;
+    if (!twin.permissionConfirmedAt && card.permissionConfirmedAt) Object.assign(twin, { status: card.status, permissionConfirmedAt: card.permissionConfirmedAt, permissionConfirmedBy: card.permissionConfirmedBy, permissionNote: twin.permissionNote || card.permissionNote, partnerTelegramId: twin.partnerTelegramId || card.partnerTelegramId });
     twin.adminContact = twin.adminContact || card.adminContact;
     twin.members = Math.max(twin.members || 0, card.members || 0) || twin.members;
     if (twin.relevance !== "core" && card.relevance === "core") twin.relevance = "core";
   }
-  return { keep, dropped };
+  return { keep, dropped, survivorOf };
+}
+
+// Campaign audiences, tasks, the posting log and the manual queue point at group ids: move them to the survivor,
+// so a merged-away twin never leaves a campaign without targets or a task without its group.
+async function repointGroupIds(survivorOf: Record<string, string>) {
+  const to = (id: string) => survivorOf[id] || id;
+  const lists = (ids?: string[]) => (ids ? [...new Set(ids.map(to))] : ids);
+  const campaigns = await listAll<{ id: string; searchGroupIds?: string[]; controlGroupIds?: string[] }>("campaigns");
+  const touched = campaigns.filter((c) => [...(c.searchGroupIds || []), ...(c.controlGroupIds || [])].some((id) => survivorOf[id]));
+  if (touched.length) await putMany("campaigns", touched.map((c) => ({ ...c, searchGroupIds: lists(c.searchGroupIds), controlGroupIds: lists(c.controlGroupIds) })));
+  for (const col of ["campaign_tasks", "group_posts", "group_queue"] as const) {
+    const rows = (await listAll<{ id: string; groupId?: string }>(col)).filter((r) => r.groupId && survivorOf[r.groupId]);
+    if (rows.length) await putMany(col, rows.map((r) => ({ ...r, groupId: to(r.groupId!) })));
+  }
 }
 
 // Keeps what the user already filled in (status, price, notes, posting switch, bot link).
@@ -607,13 +633,14 @@ export async function upsertGroups(cards: GroupCard[]) {
     const prev = byId.get(card.id);
     const twin = prev ? undefined : existing.find((g) => sameCommunity(g, card));
     if (!prev && !twin) added += 1;
-    merged.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
+    merged.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, permissionConfirmedAt: prev.permissionConfirmedAt, permissionConfirmedBy: prev.permissionConfirmedBy, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
   }
   const incoming = new Set(merged.map((g) => g.id));
-  const { keep, dropped } = collapseTwins([...merged, ...existing.filter((g) => !incoming.has(g.id))]);
+  const { keep, dropped, survivorOf } = collapseTwins([...merged, ...existing.filter((g) => !incoming.has(g.id))]);
   const keptIds = new Set(keep.map((g) => g.id));
   await putMany("groups", keep.filter((g) => incoming.has(g.id) || dropped.length));
   if (dropped.length) {
+    await repointGroupIds(survivorOf);
     await removeMany("groups", dropped);
     await logAction({ actor: "agent", action: "groups.dedupe", detail: "убраны дубли: " + dropped.length });
     const archive = await import("@/lib/archive");
@@ -629,12 +656,22 @@ export async function listGroups() {
 }
 
 const STATUSES = new Set<GroupStatus>(["new", "contacted", "free", "exchange", "paid", "declined"]);
+const AGREED = new Set<GroupStatus>(["free", "exchange", "paid"]);
 
-export async function updateGroup(id: string, patch: Partial<Pick<GroupCard, "status" | "price" | "currency" | "notes" | "adminContact" | "postingEnabled" | "dailyLimit" | "partnerTelegramId" | "minDaysBetween" | "permissionNote">>) {
+// An admin's consent is on record: the bot was added by the chat, or someone confirmed the agreement.
+export function permissionConfirmed(g: GroupCard) {
+  return AGREED.has(g.status) && Boolean(g.botConnected || g.permissionConfirmedAt || g.permissionNote);
+}
+
+export async function updateGroup(id: string, patch: Partial<Pick<GroupCard, "status" | "price" | "currency" | "notes" | "adminContact" | "postingEnabled" | "dailyLimit" | "partnerTelegramId" | "minDaysBetween" | "permissionNote">>, by = "owner") {
   const card = await getOne<GroupCard>("groups", id);
   if (!card) return null;
   const next: GroupCard = { ...card, updatedAt: nowIso() };
-  if (patch.status && STATUSES.has(patch.status)) next.status = patch.status;
+  if (patch.status && STATUSES.has(patch.status)) {
+    next.status = patch.status;
+    if (!AGREED.has(patch.status)) { next.permissionConfirmedAt = undefined; next.permissionConfirmedBy = undefined; }
+    else if (!AGREED.has(card.status) || !card.permissionConfirmedAt) { next.permissionConfirmedAt = next.updatedAt; next.permissionConfirmedBy = String(by).slice(0, 80); }
+  }
   if (patch.price !== undefined) next.price = Number(patch.price) > 0 ? Number(patch.price) : undefined;
   if (patch.currency !== undefined) next.currency = String(patch.currency).slice(0, 6) || undefined;
   if (patch.notes !== undefined) next.notes = String(patch.notes).slice(0, 500);
@@ -684,7 +721,7 @@ export async function telegramLiveness(url: string) {
 }
 
 // A placement added by hand: an Instagram/TikTok/Facebook partner or a Telegram chat the admin agreed on.
-export async function addGroupManually(input: { url: string; pending?: boolean; name?: string; partnerTelegramId?: string; dailyLimit?: number; minDaysBetween?: number; permissionNote?: string; topic?: string; city?: string; country?: string }) {
+export async function addGroupManually(input: { url: string; pending?: boolean; by?: string; name?: string; partnerTelegramId?: string; dailyLimit?: number; minDaysBetween?: number; permissionNote?: string; topic?: string; city?: string; country?: string }) {
   const found = platformOfUrl(input.url);
   if (!found) return null;
   const now = nowIso();
@@ -692,8 +729,11 @@ export async function addGroupManually(input: { url: string; pending?: boolean; 
   const prev = await getOne<GroupCard>("groups", id);
   const card: GroupCard = { ...(prev || { id, platform: found.platform, url: found.url, name: input.name || found.url.split("/").pop() || found.url, ads: "allowed", status: "free", foundAt: now }), updatedAt: now } as GroupCard;
   if (input.name) card.name = input.name.slice(0, 120);
-  // Self-registered partner: nothing goes there until the owner confirms (status → free).
-  if (input.pending && (!prev || ["new", "contacted", "declined"].includes(prev.status))) { card.status = "contacted"; card.ads = "unknown"; }
+  const note = String(input.permissionNote || "").trim();
+  // Self-registered partner, or added without a note of the admin's consent: nothing goes there until
+  // someone records the agreement (status → free on the card, or re-add with "как договорились").
+  if ((input.pending || !note) && (!prev || ["new", "contacted", "declined"].includes(prev.status))) { card.status = "contacted"; card.ads = "unknown"; }
+  else if (!input.pending && note && !card.permissionConfirmedAt) { card.permissionConfirmedAt = now; card.permissionConfirmedBy = String(input.by || "owner").slice(0, 80); }
   for (const k of ["topic", "city", "country"] as const) if (input[k]) card[k] = String(input[k]).slice(0, 80);
   await putOne("groups", card);
   return updateGroup(id, { partnerTelegramId: input.partnerTelegramId, dailyLimit: input.dailyLimit, minDaysBetween: input.minDaysBetween, permissionNote: input.permissionNote });
@@ -766,6 +806,7 @@ export async function handleMyChatMember(update: any) {
     id, kind: chat.type === "channel" ? "channel" : "group", name: chat.title || prev?.name || chatId, chatId,
     botConnected: connected, postingEnabled: connected ? (prev?.postingEnabled ?? adderIsAdmin) : false,
     status: connected && (!prev || prev.status === "new" || prev.status === "contacted") ? "free" : prev?.status || "free",
+    ...(connected && adderIsAdmin && !prev?.permissionConfirmedAt ? { permissionConfirmedAt: now, permissionConfirmedBy: "админ добавил бота" } : {}),
     updatedAt: now,
   } as GroupCard;
   await putOne("groups", card);
@@ -868,7 +909,7 @@ export async function queueManual(text: string, groupIds: string[] | "all", phot
   const groups = (await listGroups()).filter((g) =>
     (groupIds === "all" || groupIds.includes(g.id)) &&
     !(g.botConnected && g.postingEnabled) &&
-    ["free", "exchange", "paid"].includes(g.status) &&
+    permissionConfirmed(g) &&
     g.ads !== "forbidden"
   );
   const now = nowIso();
