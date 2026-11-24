@@ -2,7 +2,7 @@ import { buildAnalytics, searchTotals } from "@/lib/analytics";
 import { loadAllSources, readRun, readSearchHistory } from "@/lib/memory";
 import { safeFilenamePart } from "@/lib/research-report";
 import { createCsvBuffer, createJsonBuffer, createXlsxBuffer, neutralizeFormula } from "@/lib/server-exporters";
-import { fitWidth, headerLabel, styleSheet } from "@/lib/xlsx-style";
+import { recordsWorkbook } from "@/lib/xlsx-style";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
 import { listAll, logAction, readLog } from "@/lib/scout/store";
 
@@ -22,21 +22,6 @@ function csv(rows: Record<string, unknown>[]) {
   return "﻿" + [cols.join(","), ...rows.map((r) => cols.map((c) => cell(r[c])).join(","))].join("\r\n");
 }
 
-async function workbook(sheets: Record<string, Record<string, unknown>[]>) {
-  const mod: any = await import("exceljs");
-  const ExcelJS: any = mod.default || mod;
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "AURELIUS";
-  for (const [name, rows] of Object.entries(sheets)) {
-    const ws = wb.addWorksheet(name);
-    const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
-    const flat = (v: unknown) => (Array.isArray(v) && v.every((x) => typeof x !== "object") ? v.join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : v);
-    ws.columns = cols.map((c) => ({ header: headerLabel(c), key: c, width: fitWidth(headerLabel(c), rows.map((r) => flat(r[c]))) }));
-    for (const r of rows) ws.addRow(Object.fromEntries(cols.map((c) => { const v = flat(r[c]); return [c, typeof v === "string" ? neutralizeFormula(v) : v ?? ""]; })));
-    styleSheet(ws, { statusColumns: cols.filter((c) => ["status", "activity", "ads", "level", "уровень"].includes(c)), title: name });
-  }
-  return Buffer.from(await wb.xlsx.writeBuffer());
-}
 
 // GET ?view=summary — public totals for the home page (no personal data).
 // Everything else needs the dashboard key: full analytics, one saved search, downloads.
@@ -76,7 +61,7 @@ export async function GET(request: Request) {
     ]);
     if (format === "xlsx") {
       const insights = analytics.insights.map((i) => ({ уровень: i.level, вывод: i.title, детали: i.detail }));
-      return file(new Uint8Array(await workbook({ Выводы: insights, Поиски: runs, Журнал: journal, Источники: sources as any, Сообщества: groups, Публикации: posts, Кампании: campaigns, "Задачи кампаний": tasks })), "aurelius-all-" + stamp + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      return file(new Uint8Array(await recordsWorkbook({ Выводы: insights, Поиски: runs, Журнал: journal, Источники: sources as any, Сообщества: groups, Публикации: posts, Кампании: campaigns, "Задачи кампаний": tasks })), "aurelius-all-" + stamp + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }
     return file(JSON.stringify({ analytics, searches: runs, journal, sources, groups, posts, campaigns, campaignTasks: tasks }, null, 2), "aurelius-all-" + stamp + ".json", "application/json");
   }

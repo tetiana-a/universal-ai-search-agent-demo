@@ -25,6 +25,8 @@ export type Collection =
   | "instagram_posts"
   | "mentions";
 
+export const COLLECTIONS: Collection[] = ["objects", "investors", "agencies", "sources", "watch", "drafts", "leads", "matches", "meetings", "stoplist", "research_tasks", "groups", "group_posts", "group_queue", "campaigns", "campaign_tasks", "instagram_posts", "mentions"];
+
 const PREFIX = "aurelius:scout:v1:";
 const LOG_KEY = PREFIX + "log";
 const LOG_LIMIT = 5000;

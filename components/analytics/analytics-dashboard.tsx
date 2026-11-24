@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BarChart3, CheckCircle2, Compass, Download, Lightbulb, RefreshCw, Search, ShieldAlert, X } from "lucide-react";
 import { Atmosphere } from "@/components/site-chrome";
+import { ArchivePanel } from "@/components/analytics/archive-panel";
 
 // Analytics: every saved search and journal entry, platform metrics, the system's own
 // conclusions, and downloads. Same access key as /groups, /scout and /advisor.
@@ -123,6 +124,7 @@ export default function AnalyticsDashboard() {
           </section>
         )}
         {status && <p className="text-[12px] text-[var(--text-muted)]">{status}</p>}
+        {!needKey && <ArchivePanel auth={auth} />}
         {!a && !needKey && <p className="text-[13px] text-[var(--text-muted)]">Загружаю данные…</p>}
 
         {a && (

@@ -1,3 +1,5 @@
+import { neutralizeFormula } from "@/lib/server-exporters";
+
 // One house style for every Excel sheet AURELIUS produces (same palette as the research report):
 // dark header with white bold text, wrapped text, thin borders, zebra rows, frozen header,
 // filter on every column, print setup. Coloured status cells make the table readable at a glance.
@@ -62,4 +64,21 @@ export function headerLabel(key: string) {
 export function fitWidth(header: string, values: unknown[]) {
   const longest = values.slice(0, 200).reduce<number>((m, v) => Math.max(m, String(v ?? "").length), 0);
   return Math.min(60, Math.max(10, header.length + 2, Math.min(longest, 60) + 2));
+}
+
+// Any set of records → one styled sheet per name, Russian headers, widths from content.
+export async function recordsWorkbook(sheets: Record<string, Record<string, unknown>[]>) {
+  const mod: any = await import("exceljs");
+  const ExcelJS: any = mod.default || mod;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "AURELIUS";
+  for (const [name, rows] of Object.entries(sheets)) {
+    const ws = wb.addWorksheet(name.slice(0, 31));
+    const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
+    const flat = (v: unknown) => (Array.isArray(v) && v.every((x) => typeof x !== "object") ? v.join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : v);
+    ws.columns = cols.map((c) => ({ header: headerLabel(c), key: c, width: fitWidth(headerLabel(c), rows.map((r) => flat(r[c]))) }));
+    for (const r of rows) ws.addRow(Object.fromEntries(cols.map((c) => { const v = flat(r[c]); return [c, typeof v === "string" ? neutralizeFormula(v) : v ?? ""]; })));
+    styleSheet(ws, { statusColumns: cols.filter((c) => ["status", "activity", "ads", "level", "уровень"].includes(c)), title: name });
+  }
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
