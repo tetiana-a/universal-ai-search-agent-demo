@@ -113,6 +113,23 @@ describe("Gemini 404 and billable search opt-in", () => {
     expect(sent[0].depth).toBe(10);
     expect(mapDataForSeoResponse({ status_code: 40100, tasks: [] }).ok).toBe(false);
   });
+
+  it("retries DataForSEO once after its transient 'Internal SE Server Error'", async () => {
+    vi.stubEnv("DATAFORSEO_LOGIN", "login");
+    vi.stubEnv("DATAFORSEO_PASSWORD", "password");
+    vi.stubEnv("DATAFORSEO_GROUP_SEARCH", "on");
+    let n = 0;
+    const calls = mockFetch([{
+      match: (u) => u.includes("api.dataforseo.com"),
+      respond: () => ++n === 1
+        ? json({ status_code: 20000, tasks: [{ status_code: 50000, status_message: "Internal SE Server Error." }] })
+        : json({ status_code: 20000, tasks: [{ status_code: 20000, result: [{ items: [{ type: "organic", url: "https://t.me/wifi_au", title: "WiFi AU" }] }] }] }),
+    }]);
+    const result = await dataForSeoSearch("ремонт wifi Австралия", "Австралия", "en");
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(String(calls[1].init?.body))[0].location_name).toBe("Australia");
+  });
 });
 
 it("DataForSEO gets its own location names for countries and cities", () => {
@@ -122,4 +139,9 @@ it("DataForSEO gets its own location names for countries and cities", () => {
   expect(dataForSeoRegion("Кипр")).toBe("Cyprus");
   expect(dataForSeoRegion("Барселона")).toBe("Spain");
   expect(dataForSeoRegion("Дубай")).toBe("United Arab Emirates");
+  expect(dataForSeoRegion("Австралия")).toBe("Australia");
+  expect(dataForSeoRegion("Перт")).toBe("Australia");
+  expect(dataForSeoRegion("Канада")).toBe("Canada");
+  expect(dataForSeoRegion("Гоа")).toBe("India");
+  expect(dataForSeoRegion("Нидерланды")).toBe("Netherlands");
 });

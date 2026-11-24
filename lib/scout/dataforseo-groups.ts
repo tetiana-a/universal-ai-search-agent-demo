@@ -55,6 +55,31 @@ const REGIONS: Array<[RegExp, string]> = [
   [/румын|romania|бухарест|bucharest/i, "Romania"],
   [/украин|україн|ukraine|киев|київ|kyiv/i, "Ukraine"],
   [/казах|kazakhstan|алмат|almaty/i, "Kazakhstan"],
+  [/австрал|australia|сидне|sydney|мельбурн|melbourne|брисбен|brisbane|перт|perth/i, "Australia"],
+  [/нов.{0,3}зеланд|new zealand|окленд|auckland/i, "New Zealand"],
+  [/канад|canada|торонто|toronto|ванкувер|vancouver|монреал|montreal/i, "Canada"],
+  [/ирланд|ireland|дублин|dublin/i, "Ireland"],
+  [/швеци|sweden|стокгольм|stockholm/i, "Sweden"],
+  [/норвег|norway|осло|oslo/i, "Norway"],
+  [/дани|denmark|копенгаген|copenhagen/i, "Denmark"],
+  [/финлянд|finland|хельсинк|helsinki/i, "Finland"],
+  [/эстони|estonia|таллин|tallinn/i, "Estonia"],
+  [/латви|latvia|рига|riga/i, "Latvia"],
+  [/литв|lithuania|вильнюс|vilnius/i, "Lithuania"],
+  [/молдов|moldova|кишин|chisinau/i, "Moldova"],
+  [/армени|armenia|ереван|yerevan/i, "Armenia"],
+  [/азербайдж|azerbaijan|баку|baku/i, "Azerbaijan"],
+  [/узбек|uzbekistan|ташкент|tashkent/i, "Uzbekistan"],
+  [/египет|egypt|хургад|hurghada|шарм|sharm/i, "Egypt"],
+  [/вьетнам|vietnam|нячанг|nha trang|ханой|hanoi/i, "Vietnam"],
+  [/малайзи|malaysia|куала|kuala lumpur/i, "Malaysia"],
+  [/сингапур|singapore/i, "Singapore"],
+  [/инди[яи]|india|гоа|\bgoa\b|дели|delhi|мумба|mumbai/i, "India"],
+  [/япони|japan|токио|tokyo/i, "Japan"],
+  [/бразил|brazil|сан.?паулу|sao paulo/i, "Brazil"],
+  [/мексик|mexico|канкун|cancun/i, "Mexico"],
+  [/аргентин|argentina|буэнос|buenos aires/i, "Argentina"],
+  [/юар|south africa|кейптаун|cape town/i, "South Africa"],
   [/сша|америк|usa|united states|нью.?йорк|new york|майами|miami/i, "United States"],
 ];
 
@@ -85,7 +110,7 @@ export function mapDataForSeoResponse(body: any): DataForSeoResult {
 }
 
 // Live Advanced SERP usually answers in 6–30 s; 12 s was too short in production.
-export async function dataForSeoSearch(query: string, country: string, language = "pl", budgetMs = 40_000): Promise<DataForSeoResult> {
+export async function dataForSeoSearch(query: string, country: string, language = "pl", budgetMs = 40_000, attempt = 0): Promise<DataForSeoResult> {
   if (!dataForSeoEnabled()) return { ok: false, hits: [], message: "DataForSEO group search is not configured." };
   // The API charges 5x for Google's site: and other search operators.
   // We deliberately use ordinary keywords and limit results to depth=10.
@@ -111,7 +136,10 @@ export async function dataForSeoSearch(query: string, country: string, language 
       return { ok: false, hits: [], httpStatus: response.status, message: "DataForSEO: баланс исчерпан, поиск на паузе до завтра." };
     }
     if (!response.ok) return { ok: false, hits: [], httpStatus: response.status, message: "DataForSEO HTTP " + response.status };
-    return mapDataForSeoResponse(body);
+    const mapped = mapDataForSeoResponse(body);
+    // "Internal SE Server Error" is a transient error on DataForSEO's side; one retry usually succeeds.
+    if (!mapped.ok && attempt === 0 && /internal se/i.test(mapped.message || "") && budgetMs > 25_000) return dataForSeoSearch(query, country, language, budgetMs - 15_000, 1);
+    return mapped;
   } catch (error) {
     return { ok: false, hits: [], message: error instanceof Error && /timeout|abort/i.test(error.name + error.message)
       ? "DataForSEO timed out." : "DataForSEO request failed." };
