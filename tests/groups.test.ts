@@ -33,7 +33,7 @@ describe("group parsing", () => {
     expect(parseMembers("1.2K members")).toBe(1200);
     expect(parseMembers("3,4 тыс. участников")).toBe(3400);
     expect(detectAdsPolicy("Без рекламы и спама")).toBe("forbidden");
-    expect(detectAdsPolicy("По вопросам рекламы: @bcn_admin")).toBe("paid");
+    expect(detectAdsPolicy("По вопросам рекламы: @bcn_admin")).toBe("admin");
     expect(detectAdsPolicy("Аренда и продажа квартир")).toBe("allowed");
     expect(detectAdminContact("Чат о недвижимости\nПо вопросам рекламы: @bcn_admin", "https://t.me/bcn_chat")).toBe("@bcn_admin");
   });
@@ -60,7 +60,7 @@ describe("findGroups", () => {
     const result = await findGroups({ country: "Испания", city: "Барселона", topic: "недвижимость" });
     expect(result.found.map((g) => g.name).sort()).toEqual(["BCN Pisos", "Pisos Barcelona"]);
     const tg = result.found.find((g) => g.platform === "telegram")!;
-    expect(tg).toMatchObject({ members: 8000, ads: "paid", adminContact: "@owner_bcn" });
+    expect(tg).toMatchObject({ members: 8000, ads: "admin", adminContact: "@owner_bcn" });
     expect(result.found.find((g) => g.platform === "facebook")!.members).toBe(25000);
     expect(await listGroups()).toHaveLength(2);
   });

@@ -201,6 +201,6 @@ describe("campaign flow", () => {
     expect(sent.at(-1).text).toContain("С возвращением");
     expect(JSON.stringify(sent.at(-1).reply_markup)).toContain("menu:fresh");
     await handleUpdate({ update_id: 3, callback_query: { id: "q", from: { id: 8213865630 }, data: "menu:export", message: { message_id: 5, chat: owner } } } as any);
-    expect(docs).toHaveLength(1);
+    expect(docs).toHaveLength(2); // Excel + CSV
   });
 });

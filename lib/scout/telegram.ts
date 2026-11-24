@@ -185,6 +185,8 @@ export const BOT_COMMANDS = [
   { command: "campaigns", description: "Все кампании и прогресс за сегодня" },
   { command: "creport", description: "Отчёт за день" },
   { command: "capacity", description: "Ёмкость сети: сколько размещений в день" },
+  { command: "recall", description: "Проверка полноты поиска по вашему списку" },
+  { command: "cstop", description: "Остановить кампанию или все: /cstop all" },
   { command: "advisor", description: "Советник: разговор текстом или голосом" },
   { command: "client", description: "Подобрать сообщества под клиента" },
   { command: "groups", description: "Найти сообщества: страна, город, тема" },

@@ -19,7 +19,7 @@ type State = {
 
 const KEY_STORAGE = "aurelius-scout-key";
 const inputClass = "scout-input w-full min-h-9 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-1.5 text-[12.5px] text-[var(--text)] outline-none focus:border-[var(--line)]";
-const ADS: Record<string, string> = { allowed: "разрешены", paid: "платно", forbidden: "запрещены", unknown: "—" };
+const ADS: Record<string, string> = { allowed: "разрешена", admin: "через админа", paid: "платно", forbidden: "запрещена", unknown: "—" };
 const STATUS: Record<GroupStatus, string> = { new: "новая", contacted: "написали админу", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
 
 function Button({ children, onClick, variant = "ghost", disabled, href }: Readonly<{ children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum"; disabled?: boolean; href?: string }>) {
@@ -101,15 +101,15 @@ export default function GroupsDashboard() {
   const s = state?.summary;
 
   // Download through an authenticated fetch. Never put access keys in URLs.
-  const downloadGroups = async () => {
+  const downloadGroups = async (format: "" | "csv" | "posts-csv" = "") => {
     try {
-      const response = await fetch("/api/groups/export", { headers: headers(), cache: "no-store" });
+      const response = await fetch("/api/groups/export" + (format ? "?format=" + format : ""), { headers: headers(), cache: "no-store" });
       if (!response.ok) { setToast("Экспорт недоступен: проверьте ключ доступа."); return; }
       const objectUrl = URL.createObjectURL(await response.blob());
       try {
         const link = document.createElement("a");
         link.href = objectUrl;
-        link.download = "aurelius-groups-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+        link.download = "aurelius-" + (format === "posts-csv" ? "posts" : "groups") + "-" + new Date().toISOString().slice(0, 10) + (format ? ".csv" : ".xlsx");
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -170,7 +170,7 @@ export default function GroupsDashboard() {
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Автопоиск: Telegram — группы и каналы; Facebook — группы; Instagram и TikTok — тематические публичные профили. Источник каждого результата виден по наведению на иконку. Профиль из поискового индекса ещё не подтверждает активность, число подписчиков или разрешение на рекламу.</p>
         </Panel>
 
-        <Panel title={"2. База найденных площадок · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button></>}>
+        <Panel title={"2. База найденных площадок · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button><Button onClick={() => { void downloadGroups("csv"); }}><Download size={13} />CSV</Button></>}>
           {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Пока пусто. Запустите поиск выше.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
@@ -224,7 +224,7 @@ export default function GroupsDashboard() {
           )}
         </Panel>
 
-        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button>}>
+        <Panel title="5. Журнал публикаций" icon={ScrollText} color="#64d2ff" actions={<><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button><Button onClick={() => { void downloadGroups("posts-csv"); }}><Download size={13} />CSV</Button></>}>
           {!state?.posts.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Публикаций пока нет.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-[12px]">

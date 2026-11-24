@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
-import { capacity, createCampaign, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, today, updateCampaign, verifyProof, type CampaignTask, type Mention } from "@/lib/scout/campaigns";
+import { parseSchedule, parseWatch, recallCheck, capacity, createCampaign, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, today, updateCampaign, verifyProof, type CampaignTask, type Mention } from "@/lib/scout/campaigns";
 import { partnerInviteLink } from "@/lib/scout/campaigns-bot";
 import { addGroupManually } from "@/lib/scout/groups";
 import { listAll, removeMany } from "@/lib/scout/store";
@@ -38,6 +38,19 @@ export async function POST(request: Request) {
     case "update": {
       const c = await updateCampaign(id, { title: str(body.title, 80) || undefined, adText: str(body.adText) || undefined, region: body.region === undefined ? undefined : str(body.region, 80), dailyTarget: body.dailyTarget, keywords: body.keywords === undefined ? undefined : list(body.keywords), adjacent: body.adjacent === undefined ? undefined : list(body.adjacent), queries: body.queries === undefined ? undefined : list(body.queries), exclusions: body.exclusions === undefined ? undefined : list(body.exclusions) });
       return c ? Response.json({ ok: true, message: "Сохранено" }) : Response.json({ ok: false, error: "not found" }, { status: 404 });
+    }
+    case "schedule": {
+      const c = await updateCampaign(id, { schedule: parseSchedule(str(body.schedule, 200)) });
+      return c ? Response.json({ ok: true, schedule: c.schedule || null }) : Response.json({ ok: false, error: "not found" }, { status: 404 });
+    }
+    case "watch": {
+      const c = await updateCampaign(id, { watch: parseWatch(str(body.watch, 300)) });
+      return c ? Response.json({ ok: true, watch: c.watch || null }) : Response.json({ ok: false, error: "not found" }, { status: 404 });
+    }
+    case "recall": {
+      const links = (Array.isArray(body.links) ? body.links : str(body.links, 30000).split(/[\s,;]+/)).map((x: unknown) => str(x, 300)).filter(Boolean);
+      const r = await recallCheck(id, links);
+      return r ? Response.json({ ok: true, recall: r }) : Response.json({ ok: false, error: "not found" }, { status: 404 });
     }
     case "search":
       after(async () => { await findForCampaign(id); });

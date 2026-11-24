@@ -1,6 +1,6 @@
-import { answerCampaign, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, today, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign, type CampaignTask } from "@/lib/scout/campaigns";
+import { answerCampaign, parseSchedule, parseWatch, recallCheck, recallText, scheduleText, watchText, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, today, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign, type CampaignTask } from "@/lib/scout/campaigns";
 import { dashboardUrl } from "@/lib/scout/config";
-import { addGroupManually, groupsXlsx, PLATFORM_LABEL, platformOfUrl, updateGroup, type GroupCard } from "@/lib/scout/groups";
+import { activityThreshold, setActivityThreshold, addGroupManually, groupsXlsx, PLATFORM_LABEL, platformOfUrl, updateGroup, type GroupCard } from "@/lib/scout/groups";
 import { botHandle } from "@/lib/scout/config";
 import { controlIds, reportChatId } from "@/lib/scout/telegram";
 import { deleteValue, getOne, getValue, listAll, removeMany, setValue } from "@/lib/scout/store";
@@ -15,7 +15,7 @@ import { isPolishWineCampaign, POLISH_WINE_NOTICE } from "@/lib/scout/wine-compl
 //   /proof <task> <link> — from partners (admins who agreed to publish by hand)
 
 type Result = { background?: () => Promise<void> };
-export const CAMPAIGN_COMMANDS = ["campaign", "campaigns", "keywords", "cq", "cx", "cstop", "capacity", "monitor", "creport"];
+export const CAMPAIGN_COMMANDS = ["campaign", "campaigns", "keywords", "cq", "cx", "cstop", "capacity", "monitor", "creport", "schedule", "cwatch", "recall", "activity"];
 
 function pageUrl() {
   return dashboardUrl().replace(/\/scout$/, "/groups");
@@ -55,6 +55,9 @@ export function campaignCard(c: Campaign) {
     "\n🌐 <b>Языки:</b> " + escapeHtml(c.languages.join(", ") || "—") +
     "\n📱 <b>Площадки:</b> " + c.platforms.map((p) => PLATFORM_LABEL[p]).join(", ") +
     "\n📈 <b>Цель:</b> " + c.dailyTarget + " размещений в день" +
+    "\n🗓 <b>Расписание:</b> " + escapeHtml(scheduleText(c.schedule)) +
+    "\n📡 <b>Мониторинг:</b> " + escapeHtml(watchText(c.watch)) +
+    (c.recall ? "\n🎯 <b>Полнота (контроль):</b> " + c.recall.percent + "% · " + c.recall.found + "/" + c.recall.live : "") +
     (c.found ? "\n👥 <b>Найдено:</b> " + c.found.total + " (профильных " + c.found.core + ", смежных " + c.found.adjacent + ", неактивных " + c.found.inactive + ")" : "") +
     "\n\n📝 <b>Объявление</b>\n<blockquote>" + escapeHtml(c.adText.slice(0, 900)) + "</blockquote>" +
     (Object.keys(c.translations || {}).length ? "<i>Переводы: " + Object.keys(c.translations).join(", ") + "</i>\n" : "") +
@@ -64,7 +67,10 @@ export function campaignCard(c: Campaign) {
     (c.queries.length ? "➕ <b>Свои запросы:</b> " + escapeHtml(c.queries.join(", ")) + "\n" : "") +
     (c.exclusions.length ? "🚫 <b>Исключения:</b> " + escapeHtml(c.exclusions.join(", ")) + "\n" : "") +
     (isPolishWineCampaign(c) ? "\n" + escapeHtml(POLISH_WINE_NOTICE) + "\n" : "") +
-    "\n<i>Правка слов:</i> <code>/keywords " + c.id + " +слово -слово</code>";
+    "\n<i>Правка слов:</i> <code>/keywords " + c.id + " +слово -слово</code>" +
+    "\n<i>Расписание:</i> <code>/schedule " + c.id + " 9,13,18 будни до 31.12</code>" +
+    "\n<i>Мониторинг:</i> <code>/cwatch " + c.id + " квартира, дом 100000-300000</code>" +
+    "\n<i>Проверка полноты:</i> <code>/recall " + c.id + " ссылки…</code>";
 }
 
 function draftKeyboard(c: Campaign): Keyboard {
@@ -219,6 +225,34 @@ export async function handleCampaignCommand(chatId: string, userId: string, cmd:
       if (!list.length) { await sendMessage(chatId, "Формат: <code>/cstop cmp_xxxx</code> или <code>/cstop all</code>"); return {}; }
       for (const c of list) await setCampaignStatus(c.id, "stopped");
       await sendMessage(chatId, "⏹ Остановлено кампаний: " + list.length + ". Неопубликованные задания отменены, партнёры предупреждены.");
+      return {};
+    }
+    case "schedule": {
+      const c = await byId();
+      if (!c) { await sendMessage(chatId, "Формат: <code>/schedule cmp_xxxx 9,13,18 будни до 31.12</code>\nЧасы — местное время. Дни: ежедневно, будни, выходные или пн,ср,пт. <code>off</code> — публиковать сразу, раз в день."); return {}; }
+      const next = await updateCampaign(c.id, { schedule: parseSchedule(rest.join(" ")) });
+      await sendMessage(chatId, "🗓 Расписание «" + escapeHtml(c.title) + "»: " + escapeHtml(scheduleText(next?.schedule)) + "\nОбъём дня делится поровну между часами.");
+      return {};
+    }
+    case "cwatch": {
+      const c = await byId();
+      if (!c) { await sendMessage(chatId, "Формат: <code>/cwatch cmp_xxxx квартира, дом 100000-300000</code> · <code>off</code> — только ключевые слова."); return {}; }
+      const next = await updateCampaign(c.id, { watch: parseWatch(rest.join(" ")) });
+      await sendMessage(chatId, "📡 Мониторинг «" + escapeHtml(c.title) + "»: " + escapeHtml(watchText(next?.watch)) + "\nРегион — из кампании. Проверка каждый день, итоги в ежедневном отчёте.");
+      return {};
+    }
+    case "recall": {
+      const c = await byId();
+      const links = rest.join(" ").split(/[\s,;]+/).filter((x) => /t\.me|telegram\.me|facebook\.com|instagram\.com|tiktok\.com/i.test(x));
+      if (!c || !links.length) { await sendMessage(chatId, "Проверка полноты поиска (критерий 90%).\nНайдите сообщества вручную по той же теме и региону и пришлите ссылки:\n<code>/recall cmp_xxxx https://t.me/… https://facebook.com/groups/… …</code>\nБот посчитает, какой процент живых сообществ он уже нашёл, и добавит недостающие."); return {}; }
+      await sendMessage(chatId, "🎯 Проверяю " + links.length + " ссылок: живость и наличие в базе…");
+      return { background: async () => { const r = await recallCheck(c.id, links); if (r) await sendLong(chatId, recallText(r)); } };
+    }
+    case "activity": {
+      const [days, perWeek] = args.split(/\s+/).map((x) => Number(x.replace(",", ".")));
+      if (Number.isFinite(days) && days > 0) { const v = await setActivityThreshold(days, Number.isFinite(perWeek) ? perWeek : 0); await sendMessage(chatId, "✅ Порог активности: последний пост не старше <b>" + v.days + "</b> дн., не реже <b>" + v.minPerWeek + "</b> поста в неделю. Применится при следующей проверке (ежедневно)."); return {}; }
+      const v = await activityThreshold();
+      await sendMessage(chatId, "Порог активности сейчас: последний пост не старше <b>" + v.days + "</b> дн., не реже <b>" + v.minPerWeek + "</b> в неделю.\nИзменить: <code>/activity 30 0.5</code>\nНеактивные сообщества помечаются 💤 и исключаются из размещения. Где ленты нет (закрытые группы, Facebook, Instagram, TikTok) — пометка «не проверено».");
       return {};
     }
     case "capacity":

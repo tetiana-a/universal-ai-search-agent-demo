@@ -11,7 +11,7 @@ import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingC
 import { answerCallback, controlIds, editMessage, isOpenGroup, isOwnersGroupAdmin, reportChatId, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
-import { fullExportXlsx, handleMyChatMember, registerOwnedTelegramGroup } from "@/lib/scout/groups";
+import { fullExportXlsx, groupsCsv, handleMyChatMember, listGroups, registerOwnedTelegramGroup } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, campaignSummary, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer, partnerInviteLink, promptNewCampaign } from "@/lib/scout/campaigns-bot";
 import { ADVISOR_COMMANDS, advisorMode, handleAdvisorCallback, handleAdvisorCommand, handleAdvisorText, handleAdvisorVoice } from "@/lib/scout/advisor-bot";
@@ -49,6 +49,8 @@ const HELP = [
   "<b>Главное</b>",
   "/campaign — новая кампания · /campaigns — все кампании",
   "/capacity — ёмкость сети · /creport — отчёт за день",
+  "/schedule — расписание · /cwatch — параметры мониторинга",
+  "/recall — проверка полноты по ручному списку · /activity — порог активности",
   "/cstop all — остановить всё",
   "",
   "🤝 Ссылка для админов-партнёров: " + partnerInviteLink(),
@@ -196,7 +198,10 @@ async function showWelcome(chatId: string, rawName: string) {
 
 async function sendExport(chatId: string) {
   await sendMessage(chatId, "📥 Готовлю Excel: база сообществ, журнал публикаций, размещения кампаний…");
-  await sendDocument(chatId, "aurelius-" + new Date().toISOString().slice(0, 10) + ".xlsx", await fullExportXlsx(), "📥 AURELIUS · база сообществ, журнал публикаций и размещения кампаний");
+  const day = new Date().toISOString().slice(0, 10);
+  await sendDocument(chatId, "aurelius-" + day + ".xlsx", await fullExportXlsx(), "📥 AURELIUS · база сообществ, журнал публикаций и размещения кампаний");
+  // CSV for Google Sheets (File → Import) and any other tool.
+  await sendDocument(chatId, "aurelius-groups-" + day + ".csv", Buffer.from(groupsCsv(await listGroups())), "📄 База сообществ · CSV (Google Sheets: Файл → Импорт)");
 }
 
 async function showMoreMenu(chatId: string) {
@@ -535,6 +540,10 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "capacity":
     case "monitor":
     case "creport":
+    case "schedule":
+    case "cwatch":
+    case "recall":
+    case "activity":
       return handleCampaignCommand(chatId, userId, cmd, args);
 
     case "groups":
