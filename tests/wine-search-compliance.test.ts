@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
   vi.stubEnv("GEMINI_API_KEY", "");
   vi.stubEnv("GEMINI_SEARCH_FALLBACK_MODEL", "");
+  vi.stubEnv("GROQ_API_KEY", "");
   vi.stubEnv("DATAFORSEO_LOGIN", "");
   vi.stubEnv("DATAFORSEO_PASSWORD", "");
   vi.stubEnv("DATAFORSEO_GROUP_SEARCH", "off");
@@ -87,6 +88,21 @@ describe("Gemini 404 and billable search opt-in", () => {
     const result = await geminiSearch("Polish wine importers");
     expect(result.ok).toBe(true);
     expect(calls.filter((c) => c.url.includes(":generateContent"))).toHaveLength(2);
+  });
+
+  it("falls back to Groq web search when the Gemini quota is used up", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GROQ_API_KEY", "groq-key");
+    mockFetch([
+      { match: (u) => u.includes("generativelanguage"), respond: () => json({ error: { message: "quota" } }, 429) },
+      { match: (u) => u.includes("api.groq.com"), respond: () => json({ choices: [{ message: { content: "Found t.me/invented_link", executed_tools: [{ type: "search", search_results: { results: [
+        { title: "WiFi Sydney", url: "https://t.me/wifi_sydney", content: "Wi-Fi help" },
+        { title: "dup", url: "https://t.me/wifi_sydney" },
+      ] } }] } }] }) },
+    ]);
+    const result = await geminiSearch("wifi repair Sydney");
+    expect(result.ok).toBe(true);
+    expect(result.hits.map((h) => [h.url, h.provider])).toEqual([["https://t.me/wifi_sydney", "groq_search"]]);
   });
 
   it("uses DataForSEO only when explicitly enabled with login/password", async () => {

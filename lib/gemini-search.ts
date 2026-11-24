@@ -7,7 +7,7 @@ import { normalizeResultUrl } from "@/lib/result-quality";
 // Google actually returned (grounding chunks) are used; URLs written by the model
 // itself are ignored, so nothing here is invented.
 
-export type GeminiSearchHit = { title: string; url: string; snippet: string; domain: string; provider: "gemini_search" };
+export type GeminiSearchHit = { title: string; url: string; snippet: string; domain: string; provider: "gemini_search" | "groq_search" };
 export type GeminiSearchOutcome = { ok: boolean; hits: GeminiSearchHit[]; text?: string; httpStatus?: number; status?: "rate_limited" | "error"; message?: string };
 
 const REDIRECT_HOST = "vertexaisearch.cloud.google.com";
@@ -52,12 +52,60 @@ export function snippetsByChunk(supports: Support[] | undefined) {
 // Never silently select a new billable model. Retry only an explicitly configured
 // fallback model, then allow the separate SERP/keyless providers to take over.
 export async function geminiSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
+  const gemini = await geminiOnly(query, language, customPrompt);
+  // Groq's free tier has its own daily limits, so it keeps search alive when Gemini's quota is used up.
+  if (gemini.ok || !groqSearchKey()) return gemini;
+  const groq = await groqSearch(query, language, customPrompt);
+  return groq.ok ? groq : { ...gemini, message: [gemini.message, groq.message].filter(Boolean).join(" ") };
+}
+
+async function geminiOnly(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
   const model = process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash";
   const first = await geminiSearchWith(model, query, language, customPrompt);
   if (first.ok || (first.httpStatus !== 404 && first.status !== "rate_limited")) return first;
   const fallback = String(process.env.GEMINI_SEARCH_FALLBACK_MODEL || "").trim();
   if (!fallback || fallback === "off" || fallback === model) return first;
   return geminiSearchWith(fallback, query, language, customPrompt);
+}
+
+export function groqSearchKey() {
+  if (process.env.GROQ_SEARCH === "off") return "";
+  return String(process.env.GROQ_API_KEY || "").trim();
+}
+
+// Groq Compound runs a real web search and lists what it found in executed_tools;
+// only those result URLs are used, never links written by the model itself.
+export async function groqSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
+  const key = groqSearchKey();
+  if (!key) return { ok: false, hits: [], status: "error", message: "GROQ_API_KEY is not set." };
+  const prompt = (customPrompt || "Search the web for specific primary sources for: ") + query + (language === "ru" ? ". Кратко перечисли найденные источники." : ". Briefly list the sources you found.");
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + key },
+      body: JSON.stringify({ model: process.env.GROQ_SEARCH_MODEL || "groq/compound-mini", messages: [{ role: "user", content: prompt }], temperature: 0 }),
+      signal: AbortSignal.timeout(25000),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const limited = response.status === 429;
+      return { ok: false, hits: [], httpStatus: response.status, status: limited ? "rate_limited" : "error",
+        message: limited ? "Groq search daily free quota is used up (HTTP 429)." : "Groq search failed (HTTP " + response.status + ")." };
+    }
+    const message = (await response.json().catch(() => null))?.choices?.[0]?.message;
+    const tools: any[] = Array.isArray(message?.executed_tools) ? message.executed_tools : [];
+    const hits: GeminiSearchHit[] = [];
+    for (const r of tools.flatMap((t) => Array.isArray(t?.search_results?.results) ? t.search_results.results : [])) {
+      const url = normalizeResultUrl(String(r?.url || ""));
+      if (!url || !isSafePublicUrl(url) || hits.some((h) => h.url === url)) continue;
+      const domain = host(url);
+      hits.push({ title: String(r?.title || domain).slice(0, 300), url, snippet: String(r?.content || "").slice(0, 1400), domain, provider: "groq_search" });
+    }
+    return { ok: true, hits, text: String(message?.content || "").slice(0, 20000) };
+  } catch (error) {
+    const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return { ok: false, hits: [], status: "error", message: timeout ? "Groq search timed out." : "Groq search request failed." };
+  }
 }
 
 async function geminiSearchWith(model: string, query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
