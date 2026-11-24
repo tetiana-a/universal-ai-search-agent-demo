@@ -59,6 +59,8 @@ export default function GroupsDashboard() {
   const broadSearch = !search.topic.trim() || /^(все|любые|all|any|всі|усі)(?:\s|$)/i.test(search.topic.trim());
   const [post, setPost] = useState({ text: "", photoUrl: "" });
   const [filter, setFilter] = useState("");
+  // The last search's own results, shown instead of the whole base until the user asks for everything.
+  const [lastFound, setLastFound] = useState<{ message: string; ids: string[] } | null>(null);
   const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string } } | null>(null);
 
   useEffect(() => {
@@ -85,6 +87,7 @@ export default function GroupsDashboard() {
     try {
       const response = await fetch("/api/groups", { method: "POST", headers: headers(), body: JSON.stringify({ action, ...payload }) });
       const data = await response.json().catch(() => ({}));
+      if (action === "find" && Array.isArray(data.ids)) setLastFound({ message: data.message || "", ids: data.ids });
       if (data.message) setToast(data.message);
       else if (data.error) setToast(data.error);
       await load();
@@ -94,8 +97,9 @@ export default function GroupsDashboard() {
 
   const groups = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return (state?.groups || []).filter((g) => !q || [g.name, g.city, g.country, g.topic, g.adminContact].join(" ").toLowerCase().includes(q));
-  }, [state, filter]);
+    const only = lastFound ? new Set(lastFound.ids) : null;
+    return (state?.groups || []).filter((g) => !only || only.has(g.id)).filter((g) => !q || [g.name, g.city, g.country, g.topic, g.adminContact].join(" ").toLowerCase().includes(q));
+  }, [state, filter, lastFound]);
 
   const saveKey = () => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); };
   const s = state?.summary;
@@ -170,8 +174,9 @@ export default function GroupsDashboard() {
           <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">Автопоиск: Telegram — группы и каналы; Facebook — группы; Instagram и TikTok — тематические публичные профили. Источник каждого результата виден по наведению на иконку. Профиль из поискового индекса ещё не подтверждает активность, число подписчиков или разрешение на рекламу.</p>
         </Panel>
 
-        <Panel title={"2. База найденных площадок · " + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button><Button onClick={() => { void downloadGroups("csv"); }}><Download size={13} />CSV</Button></>}>
-          {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">Пока пусто. Запустите поиск выше.</p> : (
+        <Panel title={(lastFound ? "2. Результаты поиска · " : "2. База найденных площадок · ") + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button><Button onClick={() => { void downloadGroups("csv"); }}><Download size={13} />CSV</Button></>}>
+          {lastFound && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-[var(--surface-2,rgba(10,132,255,.08))] px-3 py-2 text-[12px]"><span>{lastFound.message}</span><Button onClick={() => setLastFound(null)}>Показать всю базу ({state?.groups?.length || 0})</Button></div>}
+          {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">{lastFound ? "Этот поиск ничего не нашёл. Попробуйте другую тему или город." : "Пока пусто. Запустите поиск выше."}</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
                 <thead className="text-[11px] text-[var(--text-muted)]"><tr>{["", "Название", "Участники", "Реклама", "Админ", "Статус", "Цена, €", "Бот / постинг", ""].map((h, i) => <th key={i} className="px-2 py-1.5 font-normal">{h}</th>)}</tr></thead>

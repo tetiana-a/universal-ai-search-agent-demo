@@ -407,6 +407,9 @@ function listPrompt(input: FindInput) {
 
 export type FindOutcome = { found: GroupCard[]; added: number; checked: number; notes: string[] };
 
+// Adult and escort communities never belong in a client's ad base, whatever the topic or place.
+export const isAdult = (text: string) => /18\s*\+|\bxxx\b|porn|порн|nsfw|onlyfans|escort|эскорт|интим|\bsex|секс/i.test(text);
+
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
   const selected = inferredSearchPlatforms(input);
@@ -511,7 +514,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const topicWords = ((broad ? "" : input.topic) + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
   const relevant = (text: string) => { const t = text.toLowerCase(); return topicWords.some((w) => t.includes(w)); };
   const base = { country: input.country || undefined, city: input.city || undefined, topic: broad ? "разные тематики" : input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
-  const excluded = (text: string) => { const t = text.toLowerCase(); return (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase())); };
+  const excluded = (text: string) => { const t = text.toLowerCase(); return isAdult(t) || (input.exclusions || []).some((x) => x && t.includes(x.toLowerCase())); };
 
   const th = await activityThreshold();
   const tgList = [...telegram.entries()].slice(0, 60);
