@@ -911,10 +911,17 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = [], tas
 }
 
 // Everything the TZ asks to export: communities base, publishing log, campaign placements.
+// Spreadsheet-safe CSV cell: neutralises formula injection and quotes separators.
+function csvCell(v: string | number) {
+  const raw = String(v);
+  const s = /^[=+\-@]/.test(raw) ? "'" + raw : raw;
+  return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
 // CSV of the community base (TZ 1.2 §6: CSV / Google Sheets — File → Import in Sheets).
 export function groupsCsv(groups: GroupCard[]) {
   const head = ["Платформа", "Тип", "Название", "Ссылка", "Язык", "Страна", "Город", "Участники", "Активность", "Последний пост", "Постов в неделю", "Реклама по правилам", "Контакт админа", "Релевантность", "Найдено по запросу", "Статус", "Бот в группе"];
-  const cell = (v: unknown) => { let s = String(v ?? ""); if (/^[=+\-@]/.test(s)) s = "'" + s; return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const cell = csvCell;
   const rows = groups.map((g) => [PLATFORM_LABEL[g.platform], g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль" : g.kind === "page" ? "страница" : "группа", g.name, g.url, g.language || "", g.country || "", g.city || "", g.members ?? "",
     ACTIVITY_LABEL[g.activity || "unknown"], (g.lastPostAt || "").slice(0, 10), g.postsPerWeek ?? "", ADS_LABEL[g.ads] || g.ads, g.adminContact || "", g.relevance === "adjacent" ? "смежное" : "профильное", g.foundBy || "", STATUS_LABEL[g.status] || g.status, g.botConnected ? "да" : ""]);
   // BOM so Excel and Google Sheets read Cyrillic correctly.
@@ -922,7 +929,7 @@ export function groupsCsv(groups: GroupCard[]) {
 }
 
 export function postsCsv(posts: PostLog[]) {
-  const cell = (v: unknown) => { let s = String(v ?? ""); if (/^[=+\-@]/.test(s)) s = "'" + s; return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const cell = csvCell;
   const head = ["Время", "Группа", "Площадка", "Способ", "Статус", "Ссылка", "Ошибка", "Кто"];
   return "\uFEFF" + [head, ...posts.map((p) => [p.at, p.groupName, PLATFORM_LABEL[p.platform], p.mode === "bot" ? "бот" : "вручную/партнёр", p.status, p.link || "", p.error || "", p.by || ""])].map((r) => r.map(cell).join(",")).join("\r\n");
 }

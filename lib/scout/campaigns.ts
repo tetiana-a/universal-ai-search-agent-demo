@@ -240,7 +240,7 @@ export async function parseCampaign(text: string, deadlineAt = Date.now() + 70_0
       const hours = (Array.isArray(p.schedule_hours) ? p.schedule_hours : []).map(Number).filter((h: number) => Number.isInteger(h) && h >= 0 && h <= 23);
       const days = (Array.isArray(p.schedule_days) ? p.schedule_days : []).map(Number).filter((d: number) => Number.isInteger(d) && d >= 1 && d <= 7);
       const until = /^\d{4}-\d{2}-\d{2}$/.test(String(p.schedule_until || "")) ? String(p.schedule_until) : undefined;
-      return hours.length || days.length || until ? { schedule: { hours: hours.length ? [...new Set<number>(hours)].sort((a, b) => a - b) : [9], days: days.length ? [...new Set<number>(days)].sort() : [1, 2, 3, 4, 5, 6, 7], until, tz: DEFAULT_TZ } } : {};
+      return hours.length || days.length || until ? { schedule: { hours: hours.length ? [...new Set<number>(hours)].sort((a, b) => a - b) : [9], days: days.length ? [...new Set<number>(days)].sort((a, b) => a - b) : [1, 2, 3, 4, 5, 6, 7], until, tz: DEFAULT_TZ } } : {};
     })(),
     ai: true,
   };
