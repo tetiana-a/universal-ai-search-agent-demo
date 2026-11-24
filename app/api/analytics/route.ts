@@ -2,6 +2,7 @@ import { buildAnalytics, searchTotals } from "@/lib/analytics";
 import { loadAllSources, readRun, readSearchHistory } from "@/lib/memory";
 import { safeFilenamePart } from "@/lib/research-report";
 import { createCsvBuffer, createJsonBuffer, createXlsxBuffer, neutralizeFormula } from "@/lib/server-exporters";
+import { fitWidth, headerLabel, styleSheet } from "@/lib/xlsx-style";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
 import { listAll, logAction, readLog } from "@/lib/scout/store";
 
@@ -29,10 +30,10 @@ async function workbook(sheets: Record<string, Record<string, unknown>[]>) {
   for (const [name, rows] of Object.entries(sheets)) {
     const ws = wb.addWorksheet(name);
     const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
-    ws.columns = cols.map((c) => ({ header: c, key: c, width: Math.min(60, Math.max(12, c.length + 4)) }));
-    for (const r of rows) ws.addRow(Object.fromEntries(cols.map((c) => [c, typeof r[c] === "object" && r[c] !== null ? neutralizeFormula(JSON.stringify(r[c])) : typeof r[c] === "string" ? neutralizeFormula(r[c]) : r[c] ?? ""])));
-    ws.getRow(1).font = { bold: true };
-    ws.views = [{ state: "frozen", ySplit: 1 }];
+    const flat = (v: unknown) => (Array.isArray(v) && v.every((x) => typeof x !== "object") ? v.join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : v);
+    ws.columns = cols.map((c) => ({ header: headerLabel(c), key: c, width: fitWidth(headerLabel(c), rows.map((r) => flat(r[c]))) }));
+    for (const r of rows) ws.addRow(Object.fromEntries(cols.map((c) => { const v = flat(r[c]); return [c, typeof v === "string" ? neutralizeFormula(v) : v ?? ""]; })));
+    styleSheet(ws, { statusColumns: cols.filter((c) => ["status", "activity", "ads", "level", "уровень"].includes(c)), title: name });
   }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
