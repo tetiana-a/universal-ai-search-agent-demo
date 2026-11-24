@@ -1,3 +1,4 @@
+import { recordGroupSearch } from "@/lib/memory";
 import { dashboardUrl } from "@/lib/scout/config";
 import { ADS_LABEL, PLATFORM_LABEL, findGroups, groupsXlsx, listQueue, markQueued, postViaBot, postingSummary, postingTargets, queueManual } from "@/lib/scout/groups";
 import { deleteValue, getValue, setValue } from "@/lib/scout/store";
@@ -37,6 +38,7 @@ export async function handleGroupCommand(chatId: string, cmd: string, args: stri
     return {
       background: async () => {
         const result = await findGroups(input, Date.now() + 200_000);
+        await recordGroupSearch({ query: [input.topic, input.city, input.country].filter(Boolean).join(" · "), origin: "telegram", found: result.found, added: result.added, notes: result.notes }).catch(() => undefined);
         const top = result.found.slice(0, 15).map((g, i) => (i + 1) + ". " + ({ telegram: "✈️ ", facebook: "📘 ", instagram: "📸 ", tiktok: "🎵 " } as Record<string, string>)[g.platform] + "<a href=\"" + escapeHtml(g.url) + "\">" + escapeHtml(g.name.slice(0, 60)) + "</a>" +
           (g.members ? " · " + g.members.toLocaleString("ru-RU") : "") + " · реклама: " + ADS_LABEL[g.ads] + (g.adminContact ? " · " + escapeHtml(g.adminContact) : ""));
         const head = "<b>Найдено публичных площадок: " + result.found.length + "</b> (новых " + result.added + ")" + (result.notes.length ? "\n⚠️ " + escapeHtml(result.notes.join(" ")) : "");

@@ -271,6 +271,32 @@ export async function readSearchHistory(limit = HISTORY_LIMIT): Promise<any[]> {
   return (Array.isArray(rows) ? rows : []).map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
 }
 
+// Community searches (/groups and bot /groups) go into the same history as research
+// runs, with per-platform counts so Analytics can filter by Telegram/Instagram/TikTok/Facebook.
+export async function recordGroupSearch(input: {
+  query: string;
+  origin: "web" | "telegram";
+  found: Array<{ platform: string; url: string; name?: string; description?: string; members?: number }>;
+  added: number;
+  notes?: string[];
+}) {
+  const id = "G-" + Date.now().toString(36).toUpperCase();
+  const byPlatform: Record<string, number> = { telegram: 0, instagram: 0, tiktok: 0, facebook: 0 };
+  for (const g of input.found) byPlatform[g.platform] = (byPlatform[g.platform] || 0) + 1;
+  const entry = {
+    id, kind: "groups", query: input.query, origin: input.origin, createdAt: new Date().toISOString(),
+    results: input.found.length, verified: 0, added: input.added, byPlatform,
+    sourcesFound: Object.values(byPlatform).filter(Boolean).length, notes: (input.notes || []).slice(0, 5),
+    persistent: persistentMemoryConfigured(),
+  };
+  const results = input.found.slice(0, 300).map((g) => ({
+    title: g.name || g.url, url: g.url, status: g.platform,
+    location: (g.description || "").slice(0, 160), contact: g.members ? g.members + " участников" : "",
+  }));
+  await Promise.all([appendSearchHistory(entry), saveRun(id, { ...entry, results })]);
+  return entry;
+}
+
 // Full snapshot of one search (query, counters, results, sources) kept for a year.
 async function saveRun(id: string, run: any) {
   if (!persistentMemoryConfigured()) { localRuns.set(id, run); return; }

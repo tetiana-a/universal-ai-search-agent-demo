@@ -22,6 +22,9 @@ const LEVEL = {
   idea: { icon: Lightbulb, color: "#bf5af2", label: "Рекомендация" },
 } as const;
 
+type Platform = "telegram" | "instagram" | "tiktok" | "facebook";
+const PLATFORMS: Array<[Platform, string, string]> = [["telegram", "Telegram", "✈️"], ["instagram", "Instagram", "📸"], ["tiktok", "TikTok", "🎵"], ["facebook", "Facebook", "📘"]];
+const ORIGIN = (o?: string) => (o === "telegram" ? "Бот" : "Сайт");
 const ACTOR: Record<string, string> = { human: "человек", bot: "бот", agent: "агент", cron: "расписание" };
 const fmt = (v: unknown) => Number(v || 0).toLocaleString("ru-RU");
 const when = (iso: string) => { try { return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
@@ -34,6 +37,7 @@ export default function AnalyticsDashboard() {
   const [tab, setTab] = useState<"searches" | "journal">("searches");
   const [q, setQ] = useState("");
   const [origin, setOrigin] = useState<"all" | "web" | "telegram">("all");
+  const [platform, setPlatform] = useState<"all" | Platform>("all");
   const [kind, setKind] = useState("all");
   const [open, setOpen] = useState<any>(null);
   const [status, setStatus] = useState("");
@@ -74,7 +78,7 @@ export default function AnalyticsDashboard() {
   const a = data?.analytics;
   const t = a?.totals || {};
   const runs: any[] = useMemo(() => (data?.runs || []).filter((r: any) =>
-    (origin === "all" || (r.origin || "web") === origin) && (!q || String(r.query || "").toLowerCase().includes(q.toLowerCase()))), [data, origin, q]);
+    (origin === "all" || (r.origin || "web") === origin) && (platform === "all" || Number(r.byPlatform?.[platform]) > 0) && (!q || String(r.query || "").toLowerCase().includes(q.toLowerCase()))), [data, origin, platform, q]);
   const kinds = useMemo(() => Array.from(new Set((data?.journal || []).map((e: Entry) => e.action.split(".")[0]))).sort((x: any, y: any) => String(x).localeCompare(String(y))) as string[], [data]);
   const journal: Entry[] = useMemo(() => (data?.journal || []).filter((e: Entry) =>
     (kind === "all" || e.action.split(".")[0] === kind) && (!q || (e.action + " " + (e.detail || "")).toLowerCase().includes(q.toLowerCase()))), [data, kind, q]);
@@ -201,19 +205,24 @@ export default function AnalyticsDashboard() {
               {tab === "searches" ? (
                 <>
                   <div className="mb-2 flex flex-wrap items-center gap-1">
-                    {(["all", "web", "telegram"] as const).map((o) => <button key={o} type="button" className={chip(origin === o)} onClick={() => setOrigin(o)}>{o === "all" ? "Все" : o === "web" ? "Сайт" : "Telegram"}</button>)}
+                    <span className="mr-1 text-[11px] text-[var(--text-faint)]">Откуда</span>
+                    {(["all", "web", "telegram"] as const).map((o) => <button key={o} type="button" className={chip(origin === o)} onClick={() => setOrigin(o)}>{o === "all" ? "Все" : o === "web" ? "Сайт" : "Бот"}</button>)}
+                    <span className="ml-3 mr-1 text-[11px] text-[var(--text-faint)]">Площадка</span>
+                    <button type="button" className={chip(platform === "all")} onClick={() => setPlatform("all")}>Все</button>
+                    {PLATFORMS.map(([p, label, icon]) => <button key={p} type="button" className={chip(platform === p)} onClick={() => setPlatform(p)}>{icon} {label}</button>)}
                     <button type="button" onClick={() => void download("export=runs&format=csv", "searches.csv")} className="ml-auto inline-flex items-center gap-1 text-[12px] text-[var(--text-muted)] hover:text-[var(--text)]"><Download size={12} />CSV</button>
                   </div>
                   {!runs.length && <p className="py-6 text-center text-[12.5px] text-[var(--text-muted)]">{data.runs.length ? "Ничего не найдено по фильтру." : "Поисков ещё не было. Запустите поиск на главной или в Telegram."}</p>}
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-left text-[12.5px]">
-                      {!!runs.length && <thead className="text-[11px] text-[var(--text-faint)]"><tr><th className="py-1.5 font-normal">Когда</th><th className="font-normal">Запрос</th><th className="font-normal">Откуда</th><th className="text-right font-normal">Источников</th><th className="text-right font-normal">Результатов</th><th className="text-right font-normal">Подтв.</th></tr></thead>}
+                    <table className="w-full min-w-[760px] text-left text-[12.5px]">
+                      {!!runs.length && <thead className="text-[11px] text-[var(--text-faint)]"><tr><th className="py-1.5 font-normal">Когда</th><th className="font-normal">Запрос</th><th className="font-normal">Откуда</th><th className="font-normal">Площадки</th><th className="text-right font-normal">Источников</th><th className="text-right font-normal">Результатов</th><th className="text-right font-normal">Подтв.</th></tr></thead>}
                       <tbody>
                         {runs.slice(0, 300).map((r) => (
                           <tr key={r.id || r.createdAt} onClick={() => r.id && void openRun(r.id)} className={"border-t border-[var(--line-soft)] " + (r.id ? "cursor-pointer hover:bg-[var(--surface)]" : "")}>
                             <td className="whitespace-nowrap py-2 pr-3 text-[var(--text-muted)]">{when(r.createdAt)}</td>
                             <td className="max-w-[420px] truncate pr-3">{r.query}</td>
-                            <td className="pr-3 text-[var(--text-muted)]">{r.origin === "telegram" ? "Telegram" : "Сайт"}</td>
+                            <td className="pr-3 text-[var(--text-muted)]">{ORIGIN(r.origin)}</td>
+                            <td className="whitespace-nowrap pr-3 text-[var(--text-muted)]">{r.byPlatform ? PLATFORMS.filter(([p]) => r.byPlatform[p]).map(([p, label, icon]) => <span key={p} title={label} className="mr-2">{icon} {r.byPlatform[p]}</span>) : "Сайты"}</td>
                             <td className="text-right tabular-nums">{fmt(r.sourcesFound ?? r.sourceCount)}</td>
                             <td className={"text-right tabular-nums " + (Number(r.results) ? "" : "text-[#ff453a]")}>{fmt(r.results)}</td>
                             <td className="text-right tabular-nums">{fmt(r.verified)}</td>
@@ -254,7 +263,7 @@ export default function AnalyticsDashboard() {
             <div className="mb-3 flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <div className="text-[14px]">{open.query || open.id}</div>
-                {open.createdAt && <div className="text-[11.5px] text-[var(--text-muted)]">{when(open.createdAt)} · {open.origin === "telegram" ? "Telegram" : "Сайт"} · источников {fmt(open.sourcesFound ?? open.sourceCount)} · результатов {fmt(open.results?.length ?? 0)}</div>}
+                {open.createdAt && <div className="text-[11.5px] text-[var(--text-muted)]">{when(open.createdAt)} · {ORIGIN(open.origin)} · источников {fmt(open.sourcesFound ?? open.sourceCount)} · результатов {fmt(open.results?.length ?? 0)}</div>}
               </div>
               <button type="button" onClick={() => setOpen(null)} aria-label="Закрыть" className="text-[var(--text-muted)]"><X size={16} /></button>
             </div>

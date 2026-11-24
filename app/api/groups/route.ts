@@ -4,6 +4,7 @@ import { findGroups, listGroups, listPosts, listQueue, markQueued, outreachDraft
 import { runProfileBatch } from "@/lib/scout/client-profile";
 import { getOne, removeMany } from "@/lib/scout/store";
 import { botHandle } from "@/lib/scout/config";
+import { recordGroupSearch } from "@/lib/memory";
 import { asText } from "@/lib/scout/text";
 
 export const runtime = "nodejs";
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
       const broadPage = Math.max(0, Math.min(7, Math.trunc(Number(body.broadPage) || 0)));
       const requested = Array.isArray(body.platforms) ? body.platforms.filter((p: unknown) => ["telegram", "facebook", "instagram", "tiktok"].includes(String(p))).slice(0, 4) : undefined;
       const result = await findGroups({ topic, country, city, broadPage, platforms: requested?.length ? requested : undefined }, Date.now() + 240_000);
+      await recordGroupSearch({ query: [topic || "все тематики", city, country].filter(Boolean).join(" · "), origin: "web", found: result.found, added: result.added, notes: result.notes }).catch(() => undefined);
       const byPlatform = Object.fromEntries(["telegram", "facebook", "instagram", "tiktok"].map((p) => [p, result.found.filter((g) => g.platform === p).length]));
       return Response.json({ ok: true, added: result.added, total: result.found.length, byPlatform, message: "Найдено публичных площадок: " + result.found.length + " (новых " + result.added + "). Telegram: " + byPlatform.telegram + ", Facebook: " + byPlatform.facebook + ", Instagram: " + byPlatform.instagram + ", TikTok: " + byPlatform.tiktok + "." + (result.notes.length ? " " + result.notes.join(" ") : "") });
     }
