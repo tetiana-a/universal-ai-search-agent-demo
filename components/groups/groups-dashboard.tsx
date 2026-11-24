@@ -61,6 +61,7 @@ export default function GroupsDashboard() {
   const [filter, setFilter] = useState("");
   // The last search's own results, shown instead of the whole base until the user asks for everything.
   const [lastFound, setLastFound] = useState<{ message: string; ids: string[] } | null>(null);
+  const [tab, setTab] = useState<"all" | "telegram" | "facebook" | "instagram" | "tiktok">("all");
   const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string } } | null>(null);
 
   useEffect(() => {
@@ -95,7 +96,7 @@ export default function GroupsDashboard() {
     } finally { setBusy(""); }
   }, [headers, load]);
 
-  const groups = useMemo(() => {
+  const scoped = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const all = state?.groups || [];
     // The last search keeps its own order: on-topic first, then by size.
@@ -103,6 +104,8 @@ export default function GroupsDashboard() {
     const base = lastFound ? lastFound.ids.map((id) => byId.get(id)).filter((g): g is GroupCard => Boolean(g)) : all;
     return base.filter((g) => !q || [g.name, g.city, g.country, g.topic, g.adminContact].join(" ").toLowerCase().includes(q));
   }, [state, filter, lastFound]);
+  const groups = useMemo(() => scoped.filter((g) => tab === "all" || g.platform === tab), [scoped, tab]);
+  const tabs = [["all", "Все"], ["telegram", "✈️ Telegram"], ["facebook", "📘 Facebook"], ["instagram", "📸 Instagram"], ["tiktok", "🎵 TikTok"]] as const;
 
   const saveKey = () => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); };
   const s = state?.summary;
@@ -179,6 +182,7 @@ export default function GroupsDashboard() {
 
         <Panel title={(lastFound ? "2. Результаты поиска · " : "2. База найденных площадок · ") + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button><Button onClick={() => { void downloadGroups("csv"); }}><Download size={13} />CSV</Button></>}>
           {lastFound && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-[var(--surface-2,rgba(10,132,255,.08))] px-3 py-2 text-[12px]"><span>{lastFound.message}</span><Button onClick={() => setLastFound(null)}>Показать всю базу ({state?.groups?.length || 0})</Button></div>}
+          <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Площадка">{tabs.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={"rounded-full border px-3 py-1 text-[12px] " + (tab === id ? "border-[#0a84ff] bg-[#0a84ff]/15" : "border-[var(--border,rgba(127,127,127,.3))] opacity-80 hover:opacity-100")}>{label} · {id === "all" ? scoped.length : scoped.filter((g) => g.platform === id).length}</button>)}</div>
           {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">{lastFound ? "Этот поиск ничего не нашёл. Попробуйте другую тему или город." : "Пока пусто. Запустите поиск выше."}</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
