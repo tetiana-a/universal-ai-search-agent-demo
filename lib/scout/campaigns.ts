@@ -1,8 +1,8 @@
 import { runStructuredExtraction } from "@/lib/free-ai";
 import { geminiTranscribe } from "@/lib/gemini-audio";
 import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
-import { canonicalCommunityUrl, DEFAULT_DAILY_LIMIT, detectAdsPolicy, detectAdminContact, findGroups, listGroups, refreshActivity, telegramFeed, telegramLiveness, upsertGroups, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
-import { claimOnce, getOne, increment, listAll, logAction, putMany, putOne, removeMany } from "@/lib/scout/store";
+import { canonicalCommunityUrl, permissionConfirmed, DEFAULT_DAILY_LIMIT, detectAdsPolicy, detectAdminContact, findGroups, listGroups, refreshActivity, telegramFeed, telegramLiveness, upsertGroups, messageLink, PLATFORM_LABEL, platformOfUrl, sendPhoto, type GroupCard, type Platform, type PostLog, type QueueItem } from "@/lib/scout/groups";
+import { claimOnce, getOne, getValue, increment, listAll, logAction, putMany, putOne, removeMany, setValue } from "@/lib/scout/store";
 import { botToken, controlIds, reportChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
 import { escapeHtml, nowIso, randomId, stableId } from "@/lib/scout/text";
 import { isPolishWineCampaign, POLISH_WINE_B2B_QUERIES } from "@/lib/scout/wine-compliance";
@@ -46,6 +46,11 @@ export type Campaign = {
   // Authoritative per-campaign audience. Never route a campaign to every group
   // in the global CRM merely because one common keyword happens to match.
   searchGroupIds?: string[];
+  // Control-list communities added by /recall: placeable, but kept out of the recall base so recall
+  // measures only what independent search found.
+  controlGroupIds?: string[];
+  // Where the next search continues in the full (keyword × language) list, so all approved keywords get used.
+  searchCursor?: { core: number; adjacent: number };
   // TZ 1.2 §2 "расписание": publishing hours and weekdays in the campaign time zone, optional end date.
   schedule?: Schedule;
   // TZ 1.2 §5 monitoring parameters beyond keywords: object type words and price range.
@@ -57,6 +62,12 @@ export type Campaign = {
 export type Schedule = { hours: number[]; days: number[]; until?: string; tz: string };
 export type Watch = { types: string[]; minPrice?: number; maxPrice?: number };
 export type RecallResult = { at: string; control: number; live: number; found: number; percent: number; missing: string[]; dead: string[]; learned: string[] };
+
+// Groups a campaign may post to: what its own search found plus the client's control list.
+export function audienceIds(c: Pick<Campaign, "searchGroupIds" | "controlGroupIds">) {
+  return [...new Set([...(c.searchGroupIds || []), ...(c.controlGroupIds || [])])];
+}
+const hasTargets = (c: Campaign) => (c.found?.total || 0) > 0 && audienceIds(c).length > 0;
 
 export type TaskMode = "bot" | "partner" | "manual";
 export type TaskStatus = "scheduled" | "sent" | "failed" | "notified" | "proof" | "verified" | "skipped" | "cancelled";
@@ -302,7 +313,7 @@ export async function setCampaignStatus(id: string, status: "approved" | "stoppe
     await logAction({ actor: "agent", action: "campaign.compliance_block", detail: c.title + ": Poland wine public advertising" });
     return null;
   }
-  if (status === "approved" && (!c.found?.total || !c.searchGroupIds?.length)) {
+  if (status === "approved" && !hasTargets(c)) {
     await logAction({ actor: "agent", action: "campaign.no_verified_targets", detail: c.title + ": search/authorization missing" });
     return null;
   }
@@ -313,6 +324,7 @@ export async function setCampaignStatus(id: string, status: "approved" | "stoppe
     const open = (await listAll<CampaignTask>("campaign_tasks")).filter((t) => t.campaignId === id && ["scheduled", "notified"].includes(t.status));
     await putMany("campaign_tasks", open.map((t) => ({ ...t, status: "cancelled" as TaskStatus, updatedAt: nowIso() })));
     await removeMany("group_queue", open.filter((t) => t.mode === "manual").map((t) => t.id));
+    await import("@/lib/scout/instagram-posts").then((m) => m.cancelScheduledPostiz(id)).catch(() => null);
     for (const t of open.filter((x) => x.mode === "partner" && x.status === "notified" && x.partnerId)) await sendMessage(t.partnerId!, "⏹ Задание <code>" + t.id + "</code> отменено владельцем. Публиковать не нужно.");
   }
   await logAction({ actor: "human", action: "campaign." + status, detail: c.title + " — " + by });
@@ -337,12 +349,19 @@ export function searchPlan(c: Campaign, maxRuns = Number(process.env.CAMPAIGN_SE
     ? [...c.queries, ...POLISH_WINE_B2B_QUERIES]
     : [c.topic, ...c.queries, ...c.keywords.filter((k) => !PROMPT_WORDS.has(k.toLowerCase()))], 40);
   const adjacent = restricted ? [] : c.adjacent;
+  // Every keyword in every campaign language; each run takes the next window, so across runs the whole
+  // approved list is covered (40 keywords × 2 languages ≈ 8 daily runs), then it starts over.
+  const langs = c.languages?.length ? c.languages : [undefined];
+  const pairs = (list: string[], relevance: "core" | "adjacent") => list.flatMap((topic) => langs.map((language) => ({ topic, relevance, language })));
+  const window = <T,>(all: T[], from: number, n: number) => all.length <= n ? all : Array.from({ length: n }, (_, i) => all[(from + i) % all.length]);
+  const coreAll = pairs(core, "core");
+  const adjAll = pairs(adjacent, "adjacent");
   // Interleave: most of the budget on the topic, at least a third on adjacent audiences.
-  const adjacentRuns = adjacent.length ? Math.max(1, Math.round(maxRuns / 3)) : 0;
-  const coreList = core.slice(0, maxRuns - Math.min(adjacentRuns, adjacent.length)).map((topic) => ({ topic, relevance: "core" as const }));
-  const adjList = adjacent.slice(0, adjacentRuns).map((topic) => ({ topic, relevance: "adjacent" as const }));
+  const adjacentRuns = adjAll.length ? Math.max(1, Math.round(maxRuns / 3)) : 0;
+  const adjList = window(adjAll, c.searchCursor?.adjacent || 0, Math.min(adjacentRuns, adjAll.length));
+  const coreList = window(coreAll, c.searchCursor?.core || 0, maxRuns - adjList.length);
   // Interleaved (core, core, adjacent, …) so a run cut short by the time limit still covers both kinds.
-  const out: Array<{ topic: string; relevance: "core" | "adjacent" }> = [];
+  const out: Array<{ topic: string; relevance: "core" | "adjacent"; language?: string }> = [];
   while (coreList.length || adjList.length) {
     out.push(...coreList.splice(0, 2));
     out.push(...adjList.splice(0, 1));
@@ -360,21 +379,27 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const seen = new Map<string, GroupCard>();
   const notes = new Set<string>();
   let attempted = 0;
+  const done = { core: 0, adjacent: 0 };
   // One query at a time, preserving the budget and provider rate limits.
   for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 1) {
     attempted += 1;
+    done[plan[i].relevance] += 1;
     const batch = plan.slice(i, i + 1);
-    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: c.languages[0], platforms: c.platforms }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
+    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: q.language || c.languages[0], platforms: c.platforms }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
     for (const r of results) {
       if (!r) continue;
       r.notes.forEach((n) => notes.add(n));
       for (const g of r.found) if (c.platforms.includes(g.platform) && (!seen.has(g.id) || g.relevance === "core")) seen.set(g.id, g);
     }
   }
+  const fresh = (await getOne<Campaign>("campaigns", id)) || c;
+  // Each run searches a slice of the keywords, so the audience is this run plus what earlier runs found.
+  const prevIds = new Set(fresh.searchGroupIds || []);
+  for (const g of prevIds.size ? await listAll<GroupCard>("groups") : []) if (prevIds.has(g.id) && !seen.has(g.id) && c.platforms.includes(g.platform)) seen.set(g.id, g);
   const all = [...seen.values()];
   const found = { notes: [...notes].slice(0, 3), total: all.length, core: all.filter((g) => g.relevance !== "adjacent").length, adjacent: all.filter((g) => g.relevance === "adjacent").length, inactive: all.filter((g) => g.activity === "inactive").length, at: nowIso() };
-  const fresh = (await getOne<Campaign>("campaigns", id)) || c;
-  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : fresh.status === "approved" ? "approved" : "ready", found, searchGroupIds: all.map((g) => g.id), updatedAt: nowIso() };
+  const cursor = { core: (fresh.searchCursor?.core || 0) + done.core, adjacent: (fresh.searchCursor?.adjacent || 0) + done.adjacent };
+  const next: Campaign = { ...fresh, status: fresh.status === "stopped" ? "stopped" : fresh.status === "approved" ? "approved" : "ready", found, searchGroupIds: all.map((g) => g.id), searchCursor: cursor, updatedAt: nowIso() };
   await putOne("campaigns", next);
   await logAction({ actor: "agent", action: "campaign.search", detail: c.title + ": " + found.total + " сообществ (профильных " + found.core + ", смежных " + found.adjacent + ", неактивных " + found.inactive + ")" });
   return { campaign: next, groups: all, notes: [...notes], queries: attempted };
@@ -385,9 +410,9 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
 export function modeFor(g: GroupCard): TaskMode | null {
   if (g.status === "declined" || g.ads === "forbidden" || g.activity === "inactive") return null;
   if (g.platform === "telegram" && g.botConnected && g.postingEnabled && g.chatId) return "bot";
-  const agreed = ["free", "exchange", "paid"].includes(g.status);
+  // Only a recorded agreement (who and when) authorizes partner or manual publication.
+  const agreed = permissionConfirmed(g);
   if (g.partnerTelegramId && agreed) return "partner";
-  // Only explicit agreements authorize partner or manual publication.
   if (agreed) return "manual";
   return null; // no permission yet: outreach first
 }
@@ -414,9 +439,9 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
   }
   const ids = new Set(existing.map((t) => t.id));
   const out: CampaignTask[] = [];
-  for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x) && (x.found?.total || 0) > 0 && (x.searchGroupIds?.length || 0) > 0)) {
+  for (const c of campaigns.filter((x) => x.status === "approved" && !isPolishWineCampaign(x) && hasTargets(x))) {
     if (!scheduleAllows(c.schedule, day)) continue;
-    const eligible = new Set(c.searchGroupIds);
+    const eligible = new Set(audienceIds(c));
     let count = live.filter((t) => t.campaignId === c.id && t.day === day).length;
     for (const g of groups) {
       if (count >= c.dailyTarget) break;
@@ -457,7 +482,14 @@ export async function planDay(day = today()): Promise<PlanResult> {
 
 async function activeCampaign(id: string) {
   const c = await getOne<Campaign>("campaigns", id);
-  return c?.status === "approved" && !isPolishWineCampaign(c) && (c.found?.total || 0) > 0 && (c.searchGroupIds?.length || 0) > 0 ? c : null;
+  return c?.status === "approved" && !isPolishWineCampaign(c) && hasTargets(c) ? c : null;
+}
+
+const SENT_KEY = "campaign-sent:";
+// The post log id comes from the task, so a retried save never writes a second log line.
+async function saveSent(task: CampaignTask, group: GroupCard, campaign: Campaign, link: string | undefined, at: string) {
+  await putOne("campaign_tasks", { ...task, status: "sent", link, error: undefined, updatedAt: nowIso() });
+  await putOne("group_posts", { id: stableId("post", task.id), at, groupId: group.id, groupName: group.name, platform: "telegram", mode: "bot", status: "sent", text: campaign.adText.slice(0, 300), by: "кампания: " + campaign.title, link } satisfies PostLog);
 }
 
 // Bot tasks: only chats where an admin added the bot, ~3 s apart, daily limit shared with /post.
@@ -469,6 +501,13 @@ export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 
   let sent = 0, failed = 0, left = 0;
   for (const [index, task] of tasks.entries()) {
     if (Date.now() > deadlineAt) { left += tasks.length - index; break; }
+    // Already sent in an earlier wave whose save failed: record it, never send twice.
+    const marker = await getValue<{ link?: string; at: string }>(SENT_KEY + task.id);
+    if (marker) {
+      const [c0, g0] = await Promise.all([getOne<Campaign>("campaigns", task.campaignId), getOne<GroupCard>("groups", task.groupId)]);
+      if (c0 && g0) await saveSent(task, g0, c0, marker.link, marker.at).catch(() => null);
+      continue;
+    }
     const campaign = await activeCampaign(task.campaignId);
     const group = await getOne<GroupCard>("groups", task.groupId);
     if (!campaign || !group?.botConnected || !group.postingEnabled || !group.chatId) { await putOne("campaign_tasks", { ...task, status: "cancelled", updatedAt: nowIso() }); continue; }
@@ -481,10 +520,16 @@ export async function dispatchBotTasks(day = today(), deadlineAt = Date.now() + 
     const result = campaign.photo ? await sendPhoto(group.chatId, campaign.photo, text) : await sendMessage(group.chatId, escapeHtml(text)).then((r) => ({ ok: r.ok, result: { message_id: r.messageId }, description: r.error }));
     const link = result?.ok ? messageLink(group, result?.result?.message_id) : undefined;
     const error = result?.ok ? undefined : String(result?.description || "ошибка").slice(0, 200);
-    await putOne("campaign_tasks", { ...task, status: result?.ok ? "sent" : "failed", link, error, updatedAt: nowIso() });
-    await putOne("group_posts", { id: randomId("post"), at: nowIso(), groupId: group.id, groupName: group.name, platform: "telegram", mode: "bot", status: result?.ok ? "sent" : "failed", text: campaign.adText.slice(0, 300), by: "кампания: " + campaign.title, link, error } satisfies PostLog);
-    if (result?.ok) { sent += 1; await increment("grp-post:" + group.id + ":" + day, 2 * 24 * 3600); }
-    else {
+    if (result?.ok) {
+      sent += 1;
+      // Durable "sent" mark first (3 days, outlives the 1 h lock); the records can then be rebuilt from it.
+      const at = nowIso();
+      await setValue(SENT_KEY + task.id, { link, at }, 3 * 24 * 3600).catch(() => null);
+      await saveSent(task, group, campaign, link, at).catch(async () => { await new Promise((r) => setTimeout(r, 1000)); await saveSent(task, group, campaign, link, at).catch(() => null); });
+      await increment("grp-post:" + group.id + ":" + day, 2 * 24 * 3600).catch(() => null);
+    } else {
+      await putOne("campaign_tasks", { ...task, status: "failed", error, updatedAt: nowIso() });
+      await putOne("group_posts", { id: randomId("post"), at: nowIso(), groupId: group.id, groupName: group.name, platform: "telegram", mode: "bot", status: "failed", text: campaign.adText.slice(0, 300), by: "кампания: " + campaign.title, error } satisfies PostLog);
       failed += 1;
       if (/kicked|not a member|chat not found|have no rights|not enough rights/i.test(error || "")) await putOne("groups", { ...group, botConnected: false, postingEnabled: false, updatedAt: nowIso() });
     }
@@ -558,7 +603,7 @@ export function capacityOf(groups: GroupCard[], tasks: CampaignTask[], campaigns
     byMode[mode].sustained += limit / Math.max(1, g.minDaysBetween || 1);
   }
   const todays = tasks.filter((t) => t.day === day);
-  const target = campaigns.filter((c) => c.status === "approved" && !isPolishWineCampaign(c) && (c.found?.total || 0) > 0 && (c.searchGroupIds?.length || 0) > 0).reduce((s, c) => s + c.dailyTarget, 0);
+  const target = campaigns.filter((c) => c.status === "approved" && !isPolishWineCampaign(c) && hasTargets(c)).reduce((s, c) => s + c.dailyTarget, 0);
   const sum = (k: "places" | "peak" | "sustained") => Math.round(byMode.bot[k] + byMode.partner[k] + byMode.manual[k]);
   return {
     day,
@@ -699,7 +744,9 @@ export async function monitorCampaign(id: string, deadlineAt = Date.now() + 200_
   if (geminiSearchKey() && Date.now() < deadlineAt - 25_000) {
     const terms = [c.topic, ...c.keywords.slice(0, 2)].join(" ");
     const queries = c.platforms.filter((p) => p !== "telegram").map((p) => ({ facebook: "facebook.com", instagram: "instagram.com", tiktok: "tiktok.com" } as Record<string, string>)[p] + " " + terms + " " + c.region);
-    const outcomes = await Promise.all(queries.slice(0, 3).map((q) => geminiSearch(q, c.languages[0] || "en")));
+    // One language per day in turn, so a multi-language campaign is monitored in all of them without extra requests.
+    const lang = c.languages.length ? c.languages[Math.floor(Date.now() / 86_400_000) % c.languages.length] : "en";
+    const outcomes = await Promise.all(queries.slice(0, 3).map((q) => geminiSearch(q, lang)));
     limited = outcomes.find((o) => !o.ok)?.message || "";
     for (const hit of outcomes.flatMap((o) => o.hits)) { const platform = looksLikePost(hit.url); if (platform && (!c.watch || matchesPost(hit.title + " " + (hit.snippet || ""), c))) add({ platform, url: hit.url, title: hit.title.slice(0, 200), price: parsePrice(hit.title + " " + (hit.snippet || "")) }); }
   }
@@ -712,8 +759,8 @@ export async function monitorCampaign(id: string, deadlineAt = Date.now() + 200_
 // The client finds communities by hand for the same topic and region and sends the links.
 // Recall = live control communities the bot already had / all live control communities.
 // Dead or missing pages do not count (the criterion is about LIVE communities).
-// Every miss is added to the campaign base and its name becomes a new search query,
-// so the next search learns where the bot was blind.
+// Every miss is added to the campaign's control audience (placeable, but never counted as "found"
+// in the next check) and its name becomes a new search query, so the next search learns where the bot was blind.
 export async function recallCheck(id: string, links: string[], deadlineAt = Date.now() + 200_000) {
   const c = await getOne<Campaign>("campaigns", id);
   if (!c) return null;
@@ -749,7 +796,7 @@ export async function recallCheck(id: string, links: string[], deadlineAt = Date
     .filter((q) => !c.queries.some((x) => x.toLowerCase() === q.toLowerCase()));
   const recall: RecallResult = { at: now, control: control.length, live, found, percent, missing: missing.slice(0, 100), dead: dead.slice(0, 100), learned };
   const fresh = (await getOne<Campaign>("campaigns", id)) || c;
-  await putOne("campaigns", { ...fresh, recall, queries: cleanKeywords([...fresh.queries, ...learned], 20), searchGroupIds: [...new Set([...(fresh.searchGroupIds || []), ...addCards.map((g) => g.id)])], updatedAt: now });
+  await putOne("campaigns", { ...fresh, recall, queries: cleanKeywords([...fresh.queries, ...learned], 20), controlGroupIds: [...new Set([...(fresh.controlGroupIds || []), ...addCards.map((g) => g.id)])], updatedAt: now });
   await logAction({ actor: "agent", action: "campaign.recall", detail: c.title + ": " + found + "/" + live + " = " + percent + "% (контроль " + control.length + ", мёртвых " + dead.length + ")" });
   return recall;
 }

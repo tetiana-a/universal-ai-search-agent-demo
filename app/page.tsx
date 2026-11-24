@@ -1908,7 +1908,7 @@ export default function Home() {
               <SettingSection
                 title={t.acquisition}
                 icon={<Globe size={18} />}
-                description={lang === "ru" ? "Fallback ladder: HTTP → Jina → Firecrawl → Playwright → licensed provider → manual review." : "Fallback ladder: HTTP → Jina → Firecrawl → Playwright → licensed provider → manual review."}
+                description="Fallback ladder: HTTP → Jina → Firecrawl → Playwright → licensed provider → manual review."
               >
                 {[
                   ["httpxEnabled", "httpx", settings.httpxEnabled],
@@ -1916,7 +1916,7 @@ export default function Home() {
                   ["firecrawlEnabled", "Firecrawl", settings.firecrawlEnabled],
                   ["playwrightEnabled", "Playwright", settings.playwrightEnabled],
                   ["licensedProviderEnabled", lang === "ru" ? "Лицензированный provider" : "Licensed provider", settings.licensedProviderEnabled],
-                  ["manualReviewEnabled", lang === "ru" ? "Manual review" : "Manual review", settings.manualReviewEnabled],
+                  ["manualReviewEnabled", "Manual review", settings.manualReviewEnabled],
                 ].map(([key, name, value]) => (
                   <SettingToggle
                     key={String(key)}

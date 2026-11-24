@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 const now = new Date().toISOString();
-const group = (id: string, over: Partial<GroupCard> = {}): GroupCard => ({ id, platform: "telegram", url: "https://t.me/" + id, name: id, ads: "allowed", status: "free", foundAt: now, updatedAt: now, ...over });
+const group = (id: string, over: Partial<GroupCard> = {}): GroupCard => ({ id, platform: "telegram", url: "https://t.me/" + id, name: id, ads: "allowed", status: "free", permissionConfirmedAt: now, foundAt: now, updatedAt: now, ...over });
 const campaign = (over: Partial<Campaign> = {}): Campaign => ({ id: "c1", title: "Квартира", adText: "Продаю квартиру", topic: "недвижимость", region: "Валенсия, Испания", languages: ["ru"], keywords: ["квартира"], adjacent: [], queries: [], exclusions: [], questions: [], translations: {}, platforms: ["telegram"], dailyTarget: 300, status: "approved", source: "text", createdAt: now, updatedAt: now, ...over });
 
 describe("schedule", () => {
@@ -98,9 +98,11 @@ describe("completeness check against a manual control list", () => {
     expect(r!.missing).toEqual(["https://t.me/missed_group"]);
     expect(r!.learned).toContain("Аренда Валенсия Русские");
     const c = await getOne<Campaign>("campaigns", "c1");
-    expect(c!.searchGroupIds!.length).toBe(2);
+    // The miss joins the placeable audience but not the recall base: a second check is still 1 of 2.
+    expect(c!.searchGroupIds!.length).toBe(1);
+    expect(c!.controlGroupIds!.length).toBe(1);
     expect(c!.queries).toContain("Аренда Валенсия Русские");
-    const added = (await getOne<GroupCard>("groups", c!.searchGroupIds![1]))!;
+    const added = (await getOne<GroupCard>("groups", c!.controlGroupIds![0]))!;
     expect(added.status).toBe("new"); // a control-list find is not a permission to post
   });
 });

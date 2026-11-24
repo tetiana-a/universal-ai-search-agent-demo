@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     }
     case "addPlace": {
       const g = await addGroupManually({ url: str(body.url, 300), name: str(body.name, 120) || undefined, partnerTelegramId: str(body.partnerTelegramId, 24) || undefined, dailyLimit: body.dailyLimit === undefined || body.dailyLimit === "" ? undefined : Number(body.dailyLimit), minDaysBetween: body.minDaysBetween === undefined || body.minDaysBetween === "" ? undefined : Number(body.minDaysBetween), permissionNote: str(body.permissionNote, 300) || undefined });
-      return g ? Response.json({ ok: true, message: "Площадка добавлена: " + g.name }) : Response.json({ ok: false, error: "Нужна ссылка на Telegram, Facebook, Instagram или TikTok." }, { status: 400 });
+      return g ? Response.json({ ok: true, message: "Площадка добавлена: " + g.name + (g.permissionConfirmedAt ? "" : ". Размещений не будет, пока не записано согласие админа: укажите его в поле «Чем подтверждено согласие» или поставьте статус «бесплатно/обмен/платно» в карточке.") }) : Response.json({ ok: false, error: "Нужна ссылка на Telegram, Facebook, Instagram или TikTok." }, { status: 400 });
     }
     default:
       return Response.json({ ok: false, error: "unknown action" }, { status: 400 });

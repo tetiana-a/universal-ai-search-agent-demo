@@ -26,7 +26,7 @@ export function ArchivePanel({ auth }: { auth: () => Record<string, string> }) {
     setBusy("sync"); setNote("Переношу данные в Supabase…");
     const res = await fetch("/api/archive", { method: "POST", headers: auth() }).catch(() => null);
     const body = await res?.json().catch(() => null);
-    setNote(body?.ok ? "Готово: в архиве обновлено " + body.total + " записей." : "Ошибка: " + (body?.error || "нет связи"));
+    setNote(body?.ok ? "Готово: в архиве обновлено " + body.total + " записей" + (body.mode === "incremental" ? " (только изменённые с прошлого раза; полная сверка раз в неделю)." : " (полная сверка).") : "Ошибка: " + (body?.error || "нет связи"));
     setBusy(""); void load();
   };
 
