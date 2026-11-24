@@ -78,7 +78,7 @@ export default function AnalyticsDashboard() {
   const a = data?.analytics;
   const t = a?.totals || {};
   const runs: any[] = useMemo(() => (data?.runs || []).filter((r: any) =>
-    (origin === "all" || (r.origin || "web") === origin) && (platform === "all" || Number(r.byPlatform?.[platform]) > 0) && (!q || String(r.query || "").toLowerCase().includes(q.toLowerCase()))), [data, origin, q]);
+    (origin === "all" || (r.origin || "web") === origin) && (platform === "all" || Number(r.byPlatform?.[platform]) > 0) && (!q || String(r.query || "").toLowerCase().includes(q.toLowerCase()))), [data, origin, platform, q]);
   const kinds = useMemo(() => Array.from(new Set((data?.journal || []).map((e: Entry) => e.action.split(".")[0]))).sort((x: any, y: any) => String(x).localeCompare(String(y))) as string[], [data]);
   const journal: Entry[] = useMemo(() => (data?.journal || []).filter((e: Entry) =>
     (kind === "all" || e.action.split(".")[0] === kind) && (!q || (e.action + " " + (e.detail || "")).toLowerCase().includes(q.toLowerCase()))), [data, kind, q]);
