@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { json, mockFetch } from "./helpers";
-import { detectAdminContact, detectAdsPolicy, extractGroupLinks, findGroups, groupsXlsx, handleMyChatMember, listGroups, listPosts, listQueue, markQueued, normalizeTelegramUrl, parseMembers, parseTelegramPreview, postViaBot, queueManual, upsertGroups, type GroupCard } from "@/lib/scout/groups";
+import { isAdult, detectAdminContact, detectAdsPolicy, extractGroupLinks, findGroups, groupsXlsx, handleMyChatMember, listGroups, listPosts, listQueue, markQueued, normalizeTelegramUrl, parseMembers, parseTelegramPreview, postViaBot, queueManual, upsertGroups, type GroupCard } from "@/lib/scout/groups";
 import { parseGroupsArgs } from "@/lib/scout/groups-bot";
 import { handleUpdate } from "@/lib/scout/bot";
 import { resetMemoryStore } from "@/lib/scout/store";
@@ -103,4 +103,11 @@ describe("bot posting and manual queue", () => {
     const xlsx = await groupsXlsx(await listGroups(), await listPosts());
     expect(xlsx.length).toBeGreaterThan(1000);
   });
+});
+
+it("adult communities are never added to the base", () => {
+  expect(isAdult("Spicy Latinas 18+")).toBe(true);
+  expect(isAdult("Эскорт Милан")).toBe(true);
+  expect(isAdult("Вино Милан · дегустации")).toBe(false);
+  expect(isAdult("Sussex expats")).toBe(false);
 });

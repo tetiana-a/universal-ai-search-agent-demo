@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       const result = await findGroups({ topic, country, city, broadPage, platforms: requested?.length ? requested : undefined }, Date.now() + 240_000);
       await recordGroupSearch({ query: [topic || "все тематики", city, country].filter(Boolean).join(" · "), origin: "web", found: result.found, added: result.added, notes: result.notes }).catch(() => undefined);
       const byPlatform = Object.fromEntries(["telegram", "facebook", "instagram", "tiktok"].map((p) => [p, result.found.filter((g) => g.platform === p).length]));
-      return Response.json({ ok: true, added: result.added, total: result.found.length, byPlatform, message: "Найдено публичных площадок: " + result.found.length + " (новых " + result.added + "). Telegram: " + byPlatform.telegram + ", Facebook: " + byPlatform.facebook + ", Instagram: " + byPlatform.instagram + ", TikTok: " + byPlatform.tiktok + "." + (result.notes.length ? " " + result.notes.join(" ") : "") });
+      return Response.json({ ok: true, added: result.added, total: result.found.length, byPlatform, ids: result.found.map((g) => g.id), message: "Найдено публичных площадок: " + result.found.length + " (новых " + result.added + "). Telegram: " + byPlatform.telegram + ", Facebook: " + byPlatform.facebook + ", Instagram: " + byPlatform.instagram + ", TikTok: " + byPlatform.tiktok + "." + (result.notes.length ? " " + result.notes.join(" ") : "") });
     }
     case "profile": {
       // Next portion of the client-profile search (themes × regions); the daily cron continues it.
