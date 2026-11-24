@@ -64,7 +64,8 @@ async function uploadMedia(args: InstagramRequest): Promise<{id: string;path: st
     const token = botToken();
     if (!token) throw new Error("TELEGRAM_NOT_CONFIGURED");
     const file: any = await tgCall("getFile", { file_id: args.telegramFileId });
-    if (!file?.ok || !file?.result?.file_path) throw new Error("TELEGRAM_FILE_UNAVAILABLE");
+    // Telegram refuses getFile for anything over 20 MB ("file is too big").
+    if (!file?.ok || !file?.result?.file_path) throw new Error(/too big/i.test(String(file?.description || "")) ? "MEDIA_TOO_LARGE" : "TELEGRAM_FILE_UNAVAILABLE");
     const video = args.platform === "tiktok";
     const max = video ? VIDEO_LIMIT : LIMIT;
     if (Number(file.result.file_size || 0) > max) throw new Error("MEDIA_TOO_LARGE");
