@@ -800,7 +800,7 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
   // Daily monitoring of running campaigns (TZ 1.2 §5), within the remaining time budget.
   const running = (await step("список кампаний", () => listCampaigns()))?.filter((c) => c.status === "approved") || [];
   for (const c of running) {
-    if (Date.now() > deadlineAt - 40_000) break;
+    if (Date.now() > deadlineAt - 70_000) break; // leave time for the report and the archive
     await step("мониторинг «" + c.title + "»", () => monitorCampaign(c.id, Math.min(deadlineAt - 30_000, Date.now() + 60_000)));
   }
   const chat = await reportChatId();
@@ -813,6 +813,12 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
     const recent = instagram.slice(0, 6);
     const rows = recent.map((j) => j.channelName + " · " + j.status + (j.releaseURL ? " · " + j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
     await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n" + rows.join("\n"));
+  }
+  // Daily archive to Supabase (when connected): the long-term history outside Redis.
+  const archive = await import("@/lib/archive");
+  if (archive.archiveConfigured()) {
+    const synced = await step("архив Supabase", async () => { const r = await archive.syncArchive(); if (!r.ok) throw new Error(r.error); return r; });
+    if (synced) await logAction({ actor: "agent", action: "archive.sync", detail: synced.total + " записей" }).catch(() => null);
   }
   if (errors.length) {
     await logAction({ actor: "agent", action: "daily.errors", detail: errors.join(" | ").slice(0, 900) }).catch(() => null);
