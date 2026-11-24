@@ -55,7 +55,8 @@ export function mapDataForSeoResponse(body: any): DataForSeoResult {
   };
 }
 
-export async function dataForSeoSearch(query: string, country: string, language = "pl"): Promise<DataForSeoResult> {
+// Live Advanced SERP usually answers in 6–30 s; 12 s was too short in production.
+export async function dataForSeoSearch(query: string, country: string, language = "pl", budgetMs = 40_000): Promise<DataForSeoResult> {
   if (!dataForSeoEnabled()) return { ok: false, hits: [], message: "DataForSEO group search is not configured." };
   // The API charges 5x for Google's site: and other search operators.
   // We deliberately use ordinary keywords and limit results to depth=10.
@@ -71,7 +72,7 @@ export async function dataForSeoSearch(query: string, country: string, language 
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Basic " + Buffer.from(login + ":" + password).toString("base64") },
       body: JSON.stringify([{ keyword: safeQuery, location_name: location, language_code: isoLanguage, depth: 10 }]),
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(Math.max(12_000, Math.min(45_000, budgetMs))),
       cache: "no-store",
     });
     const body = response.ok ? await response.json().catch(() => null) : null;

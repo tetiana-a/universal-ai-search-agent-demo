@@ -396,16 +396,17 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
   const onePerPlatform = descriptors.filter((d, i) => descriptors.findIndex((v) => v.platform === d.platform) === i);
   const paidQueries = onePerPlatform.slice(0, 4); // billing limit per search run
+  const budget = deadlineAt - Date.now();
   const [paid, keyless, tgstat, apify] = await Promise.all([
     dataForSeoEnabled()
-      ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en")))
+      ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en", budget - 10_000)))
       : Promise.resolve([]),
     runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 19_000)).catch(() => []),
     selected.includes("telegram") && !broad && tgStatEnabled()
       ? tgStatSearch(input.topic, input.country || "")
       : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
     apifyEnabled()
-      ? apifySearch(paidQueries.map((d) => d.query), input.country || input.city || "", polish ? "pl" : input.language || "en")
+      ? apifySearch(paidQueries.map((d) => d.query), input.country || input.city || "", polish ? "pl" : input.language || "en", budget - 15_000)
       : Promise.resolve<Awaited<ReturnType<typeof apifySearch>>>({ ok: false, hits: [] }),
   ]);
   for (const result of paid) if (!result.ok && result.message) notes.push(result.message);

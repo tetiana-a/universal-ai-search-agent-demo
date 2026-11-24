@@ -39,7 +39,9 @@ export function mapApifyItems(items: unknown): ApifyHit[] {
   return hits;
 }
 
-export async function apifySearch(queries: string[], country: string, language = "en"): Promise<ApifyResult> {
+// Google scraping for 4 queries often takes 40–90 s; a shorter run timeout makes
+// Apify abort the run (TIMED-OUT) and answer HTTP 400 with no results.
+export async function apifySearch(queries: string[], country: string, language = "en", budgetMs = 120_000): Promise<ApifyResult> {
   if (!apifyEnabled()) return { ok: false, hits: [], message: "Apify group search is not configured." };
   if (await providerPaused("apify")) return { ok: false, hits: [], message: "Apify: лимит исчерпан, поиск через Apify на паузе до завтра." };
   const list = queries.map((q) => q.trim()).filter(Boolean).slice(0, 4); // budget per search run
@@ -48,18 +50,23 @@ export async function apifySearch(queries: string[], country: string, language =
   const code = apifyCountry(country);
   if (code) input.countryCode = code;
   try {
-    const response = await fetch(ACTOR + "?timeout=40", {
+    const runSeconds = Math.max(30, Math.min(150, Math.floor(budgetMs / 1000) - 5));
+    const response = await fetch(ACTOR + "?timeout=" + runSeconds, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer " + String(process.env.APIFY_TOKEN).trim() },
       body: JSON.stringify(input),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout((runSeconds + 5) * 1000),
       cache: "no-store",
     });
     if (isQuotaStatus(response.status)) {
       await pauseProvider("apify", "HTTP " + response.status);
       return { ok: false, hits: [], httpStatus: response.status, message: "Apify: лимит или баланс исчерпан (HTTP " + response.status + "), поиск через Apify на паузе до завтра." };
     }
-    if (!response.ok) return { ok: false, hits: [], httpStatus: response.status, message: "Apify HTTP " + response.status };
+    if (!response.ok) {
+      const body: any = await response.json().catch(() => null);
+      const reason = String(body?.error?.message || body?.error?.type || "").replace(/\s+/g, " ").slice(0, 160);
+      return { ok: false, hits: [], httpStatus: response.status, message: "Apify HTTP " + response.status + (reason ? ": " + reason : "") };
+    }
     return { ok: true, hits: mapApifyItems(await response.json()) };
   } catch (error) {
     return { ok: false, hits: [], message: error instanceof Error && /timeout|abort/i.test(error.name + error.message) ? "Apify timed out." : "Apify request failed." };

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apifyEnabled, apifySearch, mapApifyItems } from "@/lib/scout/apify-search";
 import { makeAyrsharePayload, scheduleAyrshareApproved } from "@/lib/scout/ayrshare";
 import { dataForSeoSearch } from "@/lib/scout/dataforseo-groups";
+import { deleteValue } from "@/lib/scout/store";
 import { json, mockFetch } from "./helpers";
 
 beforeEach(() => {
@@ -35,6 +36,15 @@ describe("Apify group search", () => {
     expect(second.ok).toBe(false);
     expect(calls).toHaveLength(1);
     expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({ countryCode: "pl", languageCode: "pl" });
+  });
+  it("gives the run enough time and shows Apify's reason on failure", async () => {
+    vi.stubEnv("APIFY_GROUP_SEARCH", "on");
+    vi.stubEnv("APIFY_TOKEN", "test-only-apify-400");
+    await deleteValue("provider-paused:apify"); // set by the quota test above
+    const calls = mockFetch([{ match: (u) => u.startsWith("https://api.apify.com/"), respond: () => json({ error: { type: "run-failed", message: "Actor run did not succeed (status: TIMED-OUT)" } }, 400) }]);
+    const result = await apifySearch(["kwiaty"], "Poland", "pl");
+    expect(result.message).toMatch(/HTTP 400: Actor run did not succeed/);
+    expect(String(calls[0].url)).toContain("timeout=115");
   });
 });
 
