@@ -23,14 +23,43 @@ export function dataForSeoEnabled() {
     && Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
 }
 
+// DataForSEO accepts only its own English location names ("Czechia", not "Czech Republic").
+// Country or main city in Russian, Ukrainian, English or the local language → that name.
+const REGIONS: Array<[RegExp, string]> = [
+  [/поль|польщ|poland|polsk|polsce|варшав|warsaw|krak|краков/i, "Poland"],
+  [/испан|іспан|spain|españa|espana|мадрид|madrid|валенси|valencia|барселон|barcelona|малаг|malaga|аликанте|alicante|марбель|marbella/i, "Spain"],
+  [/чех|czech|česk|cesk|прага|praha|prague|брно|brno/i, "Czechia"],
+  [/герман|німеч|germany|deutschland|берлин|berlin|мюнхен|munich/i, "Germany"],
+  [/словак|slovak|братислав|bratislava/i, "Slovakia"],
+  [/австри|austria|österreich|вена|wien|vienna/i, "Austria"],
+  [/итал|італ|italy|italia|милан|milan|roma\b|rome\b/i, "Italy"],
+  [/кипр|кіпр|cyprus|лимассол|limassol|пафос|paphos|ларнак|larnaca/i, "Cyprus"],
+  [/франц|france|париж|paris|ницц|nice/i, "France"],
+  [/португал|portugal|лиссабон|lisbon|lisboa|porto\b/i, "Portugal"],
+  [/черногор|montenegro|будва|budva/i, "Montenegro"],
+  [/оаэ|эмират|uae|emirates|дубай|dubai|абу.?даби/i, "United Arab Emirates"],
+  [/великобрит|англи|britain|england|\buk\b|лондон|london/i, "United Kingdom"],
+  [/нидерланд|голланд|netherlands|holland|амстердам|amsterdam/i, "Netherlands"],
+  [/греци|greece|афин|athens/i, "Greece"],
+  [/турц|turkey|türkiye|стамбул|istanbul|анталь|antalya/i, "Turkey"],
+  [/грузи|georgia|тбилиси|tbilisi|батуми|batumi/i, "Georgia"],
+  [/таиланд|тайланд|thailand|пхукет|phuket|бангкок|bangkok/i, "Thailand"],
+  [/индонез|бали|indonesia|bali/i, "Indonesia"],
+  [/израил|israel|тель.?авив|tel aviv/i, "Israel"],
+  [/швейцар|switzerland|цюрих|zurich|женев|geneva/i, "Switzerland"],
+  [/бельги|belgium|брюссел|brussels/i, "Belgium"],
+  [/серби|serbia|белград|belgrade/i, "Serbia"],
+  [/болгар|bulgaria|софи|sofia/i, "Bulgaria"],
+  [/хорват|croatia|загреб|zagreb|сплит|split/i, "Croatia"],
+  [/венгр|hungary|будапешт|budapest/i, "Hungary"],
+  [/румын|romania|бухарест|bucharest/i, "Romania"],
+  [/украин|україн|ukraine|киев|київ|kyiv/i, "Ukraine"],
+  [/казах|kazakhstan|алмат|almaty/i, "Kazakhstan"],
+  [/сша|америк|usa|united states|нью.?йорк|new york|майами|miami/i, "United States"],
+];
+
 export function dataForSeoRegion(country: string) {
-  if (/поль|poland|polska|polsce|polski/i.test(country)) return "Poland";
-  if (/испан|spain|españa/i.test(country)) return "Spain";
-  if (/чех|czech|česk/i.test(country)) return "Czech Republic";
-  if (/герман|germany|deutschland/i.test(country)) return "Germany";
-  if (/слова|slovak/i.test(country)) return "Slovakia";
-  if (/австри|austria|österreich/i.test(country)) return "Austria";
-  if (/итал|italy|italia/i.test(country)) return "Italy";
+  for (const [re, name] of REGIONS) if (re.test(country)) return name;
   return String(process.env.DATAFORSEO_LOCATION_NAME || "United States").trim();
 }
 

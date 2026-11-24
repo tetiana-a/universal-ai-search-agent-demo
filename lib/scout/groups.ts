@@ -408,7 +408,8 @@ function listPrompt(input: FindInput) {
 export type FindOutcome = { found: GroupCard[]; added: number; checked: number; notes: string[] };
 
 // Adult and escort communities never belong in a client's ad base, whatever the topic or place.
-export const isAdult = (text: string) => /18\s*\+|\bxxx\b|porn|порн|nsfw|onlyfans|escort|эскорт|интим|\bsex|секс/i.test(text);
+// NFKC turns decorative letters (𝐒𝐥𝐮𝐭) into plain ones before matching.
+export const isAdult = (text: string) => /18\s*\+|\bxxx\b|porn|порн|nsfw|onlyfans|escort|эскорт|интим|\bsex|секс|\borgi[ae]s?\b|\borg(y|ies)\b|оргия|оргии|slut|шлюх|проститут|nude|naked|голые|erotic|эрот|hentai|хентай|camgirl|fetish|фетиш|bdsm|бдсм|interracial|milf|public agent/i.test(text.normalize("NFKC"));
 
 // True when the text mentions any topic word (short stems, so word forms match: вино → винные). No topic = everything is on topic.
 export function onTopic(topic: string, text: string) {
@@ -665,7 +666,8 @@ export async function upsertGroups(cards: GroupCard[]) {
 }
 
 export async function listGroups() {
-  return (await listAll<GroupCard>("groups")).sort((a, b) => Number(Boolean(b.botConnected)) - Number(Boolean(a.botConnected)) || (b.members || 0) - (a.members || 0));
+  // Adult cards saved before the filter existed never reach the page, exports or posting.
+  return (await listAll<GroupCard>("groups")).filter((g) => !isAdult(g.name + " " + (g.description || ""))).sort((a, b) => Number(Boolean(b.botConnected)) - Number(Boolean(a.botConnected)) || (b.members || 0) - (a.members || 0));
 }
 
 const STATUSES = new Set<GroupStatus>(["new", "contacted", "free", "exchange", "paid", "declined"]);

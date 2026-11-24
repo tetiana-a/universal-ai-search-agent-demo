@@ -108,6 +108,10 @@ describe("bot posting and manual queue", () => {
 it("adult communities are never added to the base", () => {
   expect(isAdult("Spicy Latinas 18+")).toBe(true);
   expect(isAdult("Эскорт Милан")).toBe(true);
+  expect(isAdult("𝐒𝐥𝐮𝐭𝐭𝐲 𝐠𝐢𝐫𝐥 🍹")).toBe(true);
+  expect(isAdult("🚻 INTERRACIAL / ORGIAS")).toBe(true);
+  expect(isAdult("Organic wine Prague")).toBe(false);
+  expect(isAdult("Expats in Georgia, Tbilisi")).toBe(false);
   expect(isAdult("Вино Милан · дегустации")).toBe(false);
   expect(isAdult("Sussex expats")).toBe(false);
 });

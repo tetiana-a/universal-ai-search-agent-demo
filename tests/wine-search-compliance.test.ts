@@ -114,3 +114,12 @@ describe("Gemini 404 and billable search opt-in", () => {
     expect(mapDataForSeoResponse({ status_code: 40100, tasks: [] }).ok).toBe(false);
   });
 });
+
+it("DataForSEO gets its own location names for countries and cities", () => {
+  expect(dataForSeoRegion("Чехия")).toBe("Czechia");
+  expect(dataForSeoRegion("Прага")).toBe("Czechia");
+  expect(dataForSeoRegion("Италия")).toBe("Italy");
+  expect(dataForSeoRegion("Кипр")).toBe("Cyprus");
+  expect(dataForSeoRegion("Барселона")).toBe("Spain");
+  expect(dataForSeoRegion("Дубай")).toBe("United Arab Emirates");
+});
