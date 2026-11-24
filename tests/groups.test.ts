@@ -134,3 +134,12 @@ it("marks communities whose advertising is restricted by law", async () => {
   expect(restrictedTopic("Недвижимость Валенсия")).toBe("");
   expect(restrictedTopic("Romantic dinner")).toBe("");
 });
+
+describe("addBotUrl", () => {
+  it("gives admins a one-tap add link per platform", async () => {
+    const { addBotUrl } = await import("@/lib/scout/groups");
+    expect(addBotUrl({ platform: "telegram", kind: "group" })).toMatch(/\?startgroup=true&admin=post_messages$/);
+    expect(addBotUrl({ platform: "telegram", kind: "channel" })).toMatch(/\?startchannel=true&admin=post_messages$/);
+    expect(addBotUrl({ platform: "facebook" })).toMatch(/\?start=partner$/);
+  });
+});
