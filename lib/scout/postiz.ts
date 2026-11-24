@@ -9,7 +9,7 @@ export type PostizChannel = {
 };
 export type PostizMedia = { id: string; path: string };
 export type PostizDraftResult = { ok: boolean; error?: string; status?: number; postId?: string; channel?: PostizChannel };
-const DRAFT_TYPES = new Set(["telegram", "facebook", "linkedin", "linkedin-page", "instagram", "instagram-standalone", "tiktok", "threads", "bluesky", "mastodon", "vk", "pinterest"]);
+const DRAFT_TYPES = new Set(["telegram", "facebook", "linkedin", "linkedin-page", "instagram", "instagram-standalone", "tiktok", "tiktok-business", "threads", "bluesky", "mastodon", "vk", "pinterest"]);
 
 export function postizConfigured() {
   return Boolean(String(process.env.POSTIZ_API_KEY || "").trim());
@@ -67,9 +67,15 @@ export function makePostizDraftPayload(channel: PostizChannel, text: string, med
     posts: [{
       integration: { id: channel.id },
       value: [{ content: text.trim(), image: media ? [media] : [] }],
-      settings: { __type: channel.identifier, ...((channel.identifier === "instagram" || channel.identifier === "instagram-standalone") ? { post_type: "post" } : {}) },
+      settings: { __type: channel.identifier, ...extraSettings(channel.identifier) },
     }],
   };
+}
+// Postiz rejects Instagram/TikTok drafts without these fields; the owner can change them in Postiz before posting.
+function extraSettings(identifier: string) {
+  if (identifier === "instagram" || identifier === "instagram-standalone") return { post_type: "post" };
+  if (identifier.startsWith("tiktok")) return { privacy_level: "PUBLIC_TO_EVERYONE", duet: false, stitch: false, comment: true, autoAddMusic: "no", brand_content_toggle: false, brand_organic_toggle: false, content_posting_method: "DIRECT_POST" };
+  return {};
 }
 function isHttpsPublicMedia(value: string) {
   try {

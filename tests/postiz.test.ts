@@ -106,4 +106,9 @@ describe("Postiz integration: safe drafts", () => {
     expect(makePostizDraftPayload(integration, "A tested content for Facebook")).toMatchObject({ type: "draft" });
     expect(() => makePostizDraftPayload({ ...integration, identifier: "unsupported" }, "A tested content for Facebook")).toThrow("POSTIZ_UNSUPPORTED_CHANNEL");
   });
+
+  it("accepts TikTok Business channels with TikTok's required settings", () => {
+    const draft = makePostizDraftPayload({ ...integration, identifier: "tiktok-business" }, "A tested content for TikTok");
+    expect(draft.posts[0].settings).toMatchObject({ __type: "tiktok-business", privacy_level: "PUBLIC_TO_EVERYONE", duet: false });
+  });
 });
