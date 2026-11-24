@@ -19,6 +19,28 @@ type State = {
   summary: { today: { bot: number; manual: number; failed: number }; groups: { total: number; telegram: number; facebook: number; botReady: number; paid: number }; queuePending: number };
 };
 
+const restrictedOf = (g: GroupCard) => restrictedTopic(g.name + " " + (g.description || ""));
+
+function kindLabel(g: GroupCard) {
+  if (g.kind === "channel") return "канал";
+  if (g.kind === "profile") return "профиль · требует проверки";
+  return g.verification === "indexed_candidate" ? "кандидат · требует проверки" : "";
+}
+
+function RestrictedMark({ g }: { g: GroupCard }) {
+  const r = restrictedOf(g);
+  return r ? <span title={"Реклама ограничена законом и правилами площадки: " + r}> ⚠️ <span className="text-[10.5px] text-[var(--text-muted)]">{r}</span></span> : null;
+}
+
+function FilterNotes({ cards, hiddenAdult }: { cards: GroupCard[]; hiddenAdult: number }) {
+  const restricted = cards.filter((g) => restrictedOf(g)).length;
+  if (!restricted && !hiddenAdult) return null;
+  return <p className="mb-3 text-[11.5px] text-[var(--text-muted)]">
+    {hiddenAdult > 0 && "🔞 Скрыто 18+: " + hiddenAdult + " (не показываются, не выгружаются, не публикуются). "}
+    {restricted > 0 && "⚠️ С ограниченной рекламой (алкоголь, табак, ставки, оружие, наркотики): " + restricted + " — публиковать только после проверки правил группы и закона страны."}
+  </p>;
+}
+
 const KEY_STORAGE = "aurelius-scout-key";
 const inputClass = "scout-input w-full min-h-9 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-1.5 text-[12.5px] text-[var(--text)] outline-none focus:border-[var(--line)]";
 const ADS: Record<string, string> = { allowed: "разрешена", admin: "через админа", paid: "платно", forbidden: "запрещена", unknown: "—" };
@@ -185,7 +207,7 @@ export default function GroupsDashboard() {
         <Panel title={(lastFound ? "2. Результаты поиска · " : "2. База найденных площадок · ") + groups.length} icon={Users} color="#0a84ff" actions={<><input className={inputClass + " w-48"} placeholder="Фильтр" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button onClick={() => { void downloadGroups(); }}><Download size={13} />Excel</Button><Button onClick={() => { void downloadGroups("csv"); }}><Download size={13} />CSV</Button></>}>
           {lastFound && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-[var(--surface-2,rgba(10,132,255,.08))] px-3 py-2 text-[12px]"><span>{lastFound.message}</span><Button onClick={() => setLastFound(null)}>Показать всю базу ({state?.groups?.length || 0})</Button></div>}
           <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Площадка">{tabs.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={"rounded-full border px-3 py-1 text-[12px] " + (tab === id ? "border-[#0a84ff] bg-[#0a84ff]/15" : "border-[var(--border,rgba(127,127,127,.3))] opacity-80 hover:opacity-100")}>{label} · {id === "all" ? scoped.length : scoped.filter((g) => g.platform === id).length}</button>)}</div>
-          {(() => { const r = scoped.filter((g) => restrictedTopic(g.name + " " + (g.description || ""))).length; const h = state?.hiddenAdult || 0; return r || h ? <p className="mb-3 text-[11.5px] text-[var(--text-muted)]">{h ? "🔞 Скрыто 18+: " + h + " (не показываются, не выгружаются, не публикуются). " : ""}{r ? "⚠️ С ограниченной рекламой (алкоголь, табак, ставки, оружие, наркотики): " + r + " — публиковать только после проверки правил группы и закона страны." : ""}</p> : null; })()}
+          <FilterNotes cards={scoped} hiddenAdult={state?.hiddenAdult || 0} />
           {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">{lastFound ? "Этот поиск ничего не нашёл. Попробуйте другую тему или город." : "Пока пусто. Запустите поиск выше."}</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
@@ -193,8 +215,8 @@ export default function GroupsDashboard() {
                 <tbody>
                   {groups.map((g) => (
                     <tr key={g.id} className="border-t border-[var(--line-soft)] align-middle">
-                      <td className="px-2 py-1.5" title={(g.foundBy ? "Запрос: " + g.foundBy : "Поиск") + (g.verification === "indexed_candidate" ? " · Найдено в индексе, активность и реклама не подтверждены" : "")}>{({ telegram: "✈️", facebook: "📘", instagram: "📸", tiktok: "🎵" } as Record<string, string>)[g.platform]}{g.relevance === "adjacent" ? <span title="смежное сообщество"> 🟡</span> : null}{g.activity === "inactive" ? <span title="неактивна — исключена из размещения"> 💤</span> : null}{(() => { const r = restrictedTopic(g.name + " " + (g.description || "")); return r ? <span title={"Реклама ограничена законом и правилами площадки: " + r}> ⚠️</span> : null; })()}</td>
-                      <td className="max-w-[260px] px-2 py-1.5">{g.url ? <a className="hover:underline" href={g.url} target="_blank" rel="noreferrer">{g.name}</a> : g.name}<div className="text-[10.5px] text-[var(--text-muted)]">{[g.city, g.country, g.kind === "channel" ? "канал" : g.kind === "profile" ? "профиль · требует проверки" : g.verification === "indexed_candidate" ? "кандидат · требует проверки" : "", g.language, g.postsPerWeek !== undefined ? g.postsPerWeek + " пост/нед" : "", g.partnerTelegramId ? "партнёр" : "", restrictedTopic(g.name + " " + (g.description || "")) ? "⚠️ " + restrictedTopic(g.name + " " + (g.description || "")) : ""].filter(Boolean).join(" · ")}</div></td>
+                      <td className="px-2 py-1.5" title={(g.foundBy ? "Запрос: " + g.foundBy : "Поиск") + (g.verification === "indexed_candidate" ? " · Найдено в индексе, активность и реклама не подтверждены" : "")}>{({ telegram: "✈️", facebook: "📘", instagram: "📸", tiktok: "🎵" } as Record<string, string>)[g.platform]}{g.relevance === "adjacent" ? <span title="смежное сообщество"> 🟡</span> : null}{g.activity === "inactive" ? <span title="неактивна — исключена из размещения"> 💤</span> : null}<RestrictedMark g={g} /></td>
+                      <td className="max-w-[260px] px-2 py-1.5">{g.url ? <a className="hover:underline" href={g.url} target="_blank" rel="noreferrer">{g.name}</a> : g.name}<div className="text-[10.5px] text-[var(--text-muted)]">{[g.city, g.country, kindLabel(g), g.language, g.postsPerWeek !== undefined ? g.postsPerWeek + " пост/нед" : "", g.partnerTelegramId ? "партнёр" : ""].filter(Boolean).join(" · ")}</div></td>
                       <td className="px-2 py-1.5 tabular-nums">{g.members ? g.members.toLocaleString("ru-RU") : "—"}</td>
                       <td className="px-2 py-1.5">{ADS[g.ads]}</td>
                       <td className="px-2 py-1.5"><input className={inputClass + " min-h-7 w-36"} defaultValue={g.adminContact || ""} placeholder="@admin" onBlur={(e) => e.target.value !== (g.adminContact || "") && void act("update", { id: g.id, patch: { adminContact: e.target.value } })} /></td>
