@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { json, mockFetch } from "./helpers";
-import { isAdult, detectAdminContact, detectAdsPolicy, extractGroupLinks, findGroups, groupsXlsx, handleMyChatMember, listGroups, listPosts, listQueue, markQueued, normalizeTelegramUrl, parseMembers, parseTelegramPreview, postViaBot, queueManual, upsertGroups, type GroupCard } from "@/lib/scout/groups";
+import { isAdult, onTopic, detectAdminContact, detectAdsPolicy, extractGroupLinks, findGroups, groupsXlsx, handleMyChatMember, listGroups, listPosts, listQueue, markQueued, normalizeTelegramUrl, parseMembers, parseTelegramPreview, postViaBot, queueManual, upsertGroups, type GroupCard } from "@/lib/scout/groups";
 import { parseGroupsArgs } from "@/lib/scout/groups-bot";
 import { handleUpdate } from "@/lib/scout/bot";
 import { resetMemoryStore } from "@/lib/scout/store";
@@ -110,4 +110,11 @@ it("adult communities are never added to the base", () => {
   expect(isAdult("Эскорт Милан")).toBe(true);
   expect(isAdult("Вино Милан · дегустации")).toBe(false);
   expect(isAdult("Sussex expats")).toBe(false);
+});
+
+it("a card that never mentions the topic is not on topic", () => {
+  expect(onTopic("Вино", "Spicy Latinas · Milan")).toBe(false);
+  expect(onTopic("Вино", "Винные дегустации в Милане")).toBe(true);
+  expect(onTopic("недвижимость", "Недвижимость Валенсии: продажа")).toBe(true);
+  expect(onTopic("", "anything")).toBe(true);
 });

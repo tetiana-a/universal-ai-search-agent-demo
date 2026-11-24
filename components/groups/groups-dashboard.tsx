@@ -97,8 +97,11 @@ export default function GroupsDashboard() {
 
   const groups = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const only = lastFound ? new Set(lastFound.ids) : null;
-    return (state?.groups || []).filter((g) => !only || only.has(g.id)).filter((g) => !q || [g.name, g.city, g.country, g.topic, g.adminContact].join(" ").toLowerCase().includes(q));
+    const all = state?.groups || [];
+    // The last search keeps its own order: on-topic first, then by size.
+    const byId = new Map(all.map((g) => [g.id, g]));
+    const base = lastFound ? lastFound.ids.map((id) => byId.get(id)).filter((g): g is GroupCard => Boolean(g)) : all;
+    return base.filter((g) => !q || [g.name, g.city, g.country, g.topic, g.adminContact].join(" ").toLowerCase().includes(q));
   }, [state, filter, lastFound]);
 
   const saveKey = () => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); };

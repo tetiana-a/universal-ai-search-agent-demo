@@ -410,6 +410,13 @@ export type FindOutcome = { found: GroupCard[]; added: number; checked: number; 
 // Adult and escort communities never belong in a client's ad base, whatever the topic or place.
 export const isAdult = (text: string) => /18\s*\+|\bxxx\b|porn|порн|nsfw|onlyfans|escort|эскорт|интим|\bsex|секс/i.test(text);
 
+// True when the text mentions any topic word (short stems, so word forms match: вино → винные). No topic = everything is on topic.
+export function onTopic(topic: string, text: string) {
+  const words = topic.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, w.length <= 5 ? w.length - 1 : 5));
+  const t = text.toLowerCase();
+  return !words.length || words.some((w) => t.includes(w));
+}
+
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
   const selected = inferredSearchPlatforms(input);
@@ -562,10 +569,13 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const instagramCards = makeProfiles("instagram", instagram);
   const tiktokCards = makeProfiles("tiktok", tiktok);
   const found = [...tgCards, ...fbCards, ...instagramCards, ...tiktokCards].filter(Boolean) as GroupCard[];
+  // Search engines match the city alone too: a card that never mentions the topic is kept, but as adjacent (🟡), below the on-topic ones.
+  for (const g of found) if (!onTopic(broad ? "" : input.topic, g.name + " " + (g.description || ""))) g.relevance = "adjacent";
   const saved = await upsertGroups(found);
   if (!found.length && !notes.length) notes.push("Поиск не вернул публичных групп. Попробуйте другую формулировку темы или город на местном языке.");
   await logAction({ actor: "agent", action: "groups.find", detail: input.topic + " · " + placeOf(input) + " → " + found.length + " (новых " + saved.added + ")" });
-  return { found: saved.cards.sort((a, b) => (b.members || 0) - (a.members || 0)), added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
+  saved.cards.sort((a, b) => Number(a.relevance === "adjacent") - Number(b.relevance === "adjacent") || (b.members || 0) - (a.members || 0));
+  return { found: saved.cards, added: saved.added, checked: telegram.size + facebook.size + instagram.size + tiktok.size, notes };
 }
 
 // The same community found twice: once by its public @username and once by an invite link
