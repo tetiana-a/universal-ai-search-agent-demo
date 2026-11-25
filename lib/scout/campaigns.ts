@@ -890,7 +890,7 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
       if (j.status === "unknown" && j.error) line += "\n  причина: " + escapeHtml(j.error.slice(0, 120));
       return line;
     });
-    await sendMessage(chat, "📸 <b>Ваши публикации через Postiz</b> (Instagram, TikTok)\n" + rows.join("\n"));
+    await sendMessage(chat, "📸 <b>Ваши публикации через Postiz</b> (Instagram, TikTok, Facebook)\n" + rows.join("\n"));
   }
   await step("дубли сообществ", () => upsertGroups([]));
   // Daily archive to Supabase (when connected): the long-term history outside Redis.
