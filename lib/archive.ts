@@ -84,9 +84,10 @@ const FULL_EVERY_MS = 7 * 86_400_000;
 
 // PostgREST rejects the whole batch on a lone UTF-16 surrogate (PGRST102 "Empty or invalid json", e.g. an
 // emoji cut in half by .slice()) and Postgres jsonb on \u0000 (22P05). Replace both before sending.
-const BAD_TEXT = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]|\u0000/g;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const NUL = String.fromCodePoint(0);
 export function archiveJson(value: unknown) {
-  return JSON.stringify(value, (_k, v) => (typeof v === "string" ? v.replace(BAD_TEXT, "\ufffd") : v));
+  return JSON.stringify(value, (_k, v) => (typeof v === "string" ? v.replace(LONE_SURROGATE, "\ufffd").replaceAll(NUL, "\ufffd") : v));
 }
 
 // Incremental: only records changed since the last good sync (minus an hour of margin) and records with

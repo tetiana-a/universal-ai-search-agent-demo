@@ -883,9 +883,13 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
   const fresh = instagram?.filter((j) => Date.now() - Date.parse(j.updatedAt) < 2 * 86_400_000) || [];
   if (chat && fresh.length) {
     const { jobPlatform, jobStatusRu } = await import("@/lib/scout/instagram-posts");
-    const rows = fresh.slice(0, 6).map((j) => "• " + jobPlatform(j) + " · " + escapeHtml(j.channelName) + " · " + jobStatusRu(j.status)
-      + (j.releaseURL ? "\n  " + escapeHtml(j.releaseURL) : j.status === "scheduled" ? "\n  выйдет " + escapeHtml(j.scheduledAt.slice(0, 16).replace("T", " ")) + " UTC" : "")
-      + (j.status === "unknown" && j.error ? "\n  причина: " + escapeHtml(j.error.slice(0, 120)) : ""));
+    const rows = fresh.slice(0, 6).map((j) => {
+      let line = "• " + jobPlatform(j) + " · " + escapeHtml(j.channelName) + " · " + jobStatusRu(j.status);
+      if (j.releaseURL) line += "\n  " + escapeHtml(j.releaseURL);
+      else if (j.status === "scheduled") line += "\n  выйдет " + escapeHtml(j.scheduledAt.slice(0, 16).replace("T", " ")) + " UTC";
+      if (j.status === "unknown" && j.error) line += "\n  причина: " + escapeHtml(j.error.slice(0, 120));
+      return line;
+    });
     await sendMessage(chat, "📸 <b>Ваши публикации через Postiz</b> (Instagram, TikTok)\n" + rows.join("\n"));
   }
   await step("дубли сообществ", () => upsertGroups([]));
