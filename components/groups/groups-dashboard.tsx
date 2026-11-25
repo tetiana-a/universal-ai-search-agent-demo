@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { Atmosphere } from "@/components/site-chrome";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Copy, Download, ExternalLink, ListChecks, Megaphone, MessageSquare, Radar, ScrollText, Send, Users, X } from "lucide-react";
+import { Copy, Download, ExternalLink, ListChecks, Megaphone, MessageSquare, Mic, Radar, ScrollText, Send, Users, X } from "lucide-react";
 import CampaignsPanel from "@/components/groups/campaigns-panel";
+import { startVoiceRecording } from "@/components/voice-recorder";
 import { restrictedTopic } from "@/lib/scout/restricted";
 import type { GroupCard, GroupStatus, PostLog, QueueItem } from "@/lib/scout/groups";
 
@@ -80,6 +81,8 @@ export default function GroupsDashboard() {
   const [toast, setToast] = useState("");
   const [search, setSearch] = useState({ country: "Испания", city: "Валенсия", topic: "", platform: "auto" });
   const [broadPage, setBroadPage] = useState(0);
+  const [mic, setMic] = useState<MediaRecorder | null>(null);
+  const [hearing, setHearing] = useState(false);
   const broadSearch = !search.topic.trim() || /^(все|любые|all|any|всі|усі)(?:\s|$)/i.test(search.topic.trim());
   const [post, setPost] = useState({ text: "", photoUrl: "" });
   const [filter, setFilter] = useState("");
@@ -189,7 +192,14 @@ export default function GroupsDashboard() {
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_1fr_auto]">
             <input className={inputClass} placeholder="Страна" value={search.country} onChange={(e) => setSearch({ ...search, country: e.target.value })} />
             <input className={inputClass} placeholder="Город" value={search.city} onChange={(e) => setSearch({ ...search, city: e.target.value })} />
-            <input className={inputClass} placeholder="Любая тема; пусто = все тематики" value={search.topic} onChange={(e) => { setSearch({ ...search, topic: e.target.value }); setBroadPage(0); }} />
+            <div className="relative">
+              <input className={inputClass + " w-full pr-8"} placeholder="Тема на любом языке; пусто = все" value={search.topic} onChange={(e) => { setSearch({ ...search, topic: e.target.value }); setBroadPage(0); }} />
+              {/* Speak the topic in any language; it is translated into the place's language for the search. */}
+              <button type="button" aria-label={mic ? "Остановить запись" : "Сказать тему голосом"} title={hearing ? "Распознаю…" : mic ? "Остановить запись" : "Сказать голосом"} className={"absolute right-2 top-1/2 -translate-y-1/2 " + (mic || hearing ? "text-[#ff375f]" : "text-[var(--text-muted)]")} onClick={async () => {
+                if (mic) { mic.stop(); setMic(null); return; }
+                setMic(await startVoiceRecording((t) => { setSearch((prev) => ({ ...prev, topic: (prev.topic ? prev.topic + " " : "") + t })); setBroadPage(0); }, setToast, setHearing));
+              }}><Mic size={14} /></button>
+            </div>
             <select aria-label="Социальная платформа" className={inputClass} value={search.platform} onChange={(e) => setSearch({ ...search, platform: e.target.value })}>
               <option value="auto">🔎 Все платформы автоматически</option>
               <option value="telegram">✈️ Telegram</option>

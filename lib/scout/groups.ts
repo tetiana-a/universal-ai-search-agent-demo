@@ -9,7 +9,9 @@ import { isSafePublicUrl } from "@/lib/url-safety";
 import { botHandle, loadSettings } from "@/lib/scout/config";
 import { getOne, getValue, increment, listAll, logAction, putMany, putOne, readCounter, removeMany, setValue } from "@/lib/scout/store";
 import { botToken, resolveChatId, sendMessage, tgCall } from "@/lib/scout/telegram";
-import { detectLang, nowIso, randomId, stableId } from "@/lib/scout/text";
+import { detectLanguage, nowIso, randomId, stableId } from "@/lib/scout/text";
+import { runStructuredExtraction } from "@/lib/free-ai";
+import { detectCountry } from "@/lib/source-map";
 import { styleSheet } from "@/lib/xlsx-style";
 
 // Group finder and compliant posting.
@@ -313,6 +315,8 @@ export type FindInput = {
   relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string;
   platforms?: Platform[];
   broadPage?: number;
+  // The topic in the place's local language (second search round), filled by findGroups.
+  localTopic?: string;
 };
 export type PlatformQuery = { platform: Platform; query: string };
 
@@ -374,6 +378,7 @@ export function platformSearchQueries(input: FindInput): PlatformQuery[] {
   const topicText = input.topic.trim().replace(/(?:telegram|телеграм\w*|instagram|инстаграм\w*|інстаграм\w*|tiktok|tik.?tok|тикток\w*|тік.?ток\w*|facebook|фейсбук\w*)/giu, " ").replace(/\s+/g, " ").trim().slice(0, 160);
   const page = Math.max(0, Math.min(BROAD_DISCOVERY_PAGES - 1, Math.trunc(input.broadPage || 0)));
   const topics = broad ? [...BROAD_DISCOVERY_CATEGORIES].slice(page * BROAD_DISCOVERY_PAGE_SIZE, (page + 1) * BROAD_DISCOVERY_PAGE_SIZE) : [topicText || input.topic.trim()];
+  const local = !broad && input.localTopic?.trim() ? input.localTopic.trim().slice(0, 160) : "";
   const polish = /поль|poland|polska|polsce|polski/i.test(geo);
   const spanish = /испан|spain|españa|valencia|валенси|barcelona|барселон/i.test(geo);
   const searchWords: Record<Platform, [string, string]> = {
@@ -389,7 +394,8 @@ export function platformSearchQueries(input: FindInput): PlatformQuery[] {
   // category or synonym query. New topics never need a code edit.
   return [0, 1].flatMap((round) => topics.flatMap((topic) => requested.map((platform) => {
     const prefix = searchWords[platform][round];
-    const query = [prefix, topic, geo, domains[platform]].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    // Round 2 searches in the local language: «вино» in Valencia also finds «vino» groups.
+    const query = [prefix, round === 1 && local ? local : topic, geo, domains[platform]].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     return { platform, query };
   })));
 }
@@ -425,10 +431,42 @@ export function onTopic(topic: string, text: string) {
   return !words.length || words.some((w) => t.includes(w));
 }
 
+// The topic as words in the place's local language and in English, from the free AI, cached for
+// a month. Typed or spoken in any language, «вино» in Valencia becomes vino / wine, so search and
+// the on-topic check work across languages. No AI key: the topic is used as typed.
+export async function topicTranslations(topic: string, place: string, deadlineAt = Date.now() + 12_000): Promise<{ lang: string; local: string; variants: string[] }> {
+  const clean = topic.trim().slice(0, 160);
+  const known = detectCountry(place)?.lang || "";
+  if (!clean) return { lang: known, local: "", variants: [] };
+  const key = "topic-tr:" + stableId("t", (place + "|" + clean).toLowerCase());
+  const cached = await getValue<{ lang: string; local: string; variants: string[] }>(key).catch(() => null);
+  if (cached) return cached;
+  const ai = await runStructuredExtraction({
+    system: "You translate a search topic for finding social media communities. Return JSON only.",
+    user: "Topic (any language): " + clean + "\nPlace: " + (place || "not given") + "\nGive the main local language of the place (ISO 639-1; the topic's own language if no place), the topic as people there would write it in that language (1-4 words), and up to 4 short variants: the English term and local synonyms.",
+    schema: { type: "object", properties: { lang: { type: "string" }, local: { type: "string" }, variants: { type: "array", items: { type: "string" } } }, required: ["lang", "local", "variants"] },
+    deadlineAt: Math.min(deadlineAt, Date.now() + 12_000), maxTokens: 300, perCallTimeoutMs: 10_000, prefer: "gemini",
+  }).catch(() => null);
+  const p = ai?.parsed;
+  if (!p) return { lang: known, local: "", variants: [] };
+  const lang = /^[a-z]{2}$/.test(String(p.lang || "").toLowerCase()) ? String(p.lang).toLowerCase() : known;
+  const local = String(p.local || "").trim().slice(0, 80);
+  const variants = [...new Set([local, ...(Array.isArray(p.variants) ? p.variants : [])].map((v) => String(v || "").trim().slice(0, 60)).filter((v) => v && v.toLowerCase() !== clean.toLowerCase()))].slice(0, 5);
+  const out = { lang, local: local.toLowerCase() === clean.toLowerCase() ? "" : local, variants };
+  await setValue(key, out, 30 * 86400).catch(() => {});
+  return out;
+}
+
 export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_000): Promise<FindOutcome> {
   const notes: string[] = [];
   const selected = inferredSearchPlatforms(input);
   const broad = isBroadDiscoveryTopic(input.topic);
+  // Campaigns already pass keywords in each target language; a direct search gets translated here.
+  const tr = broad || input.language ? { lang: input.language || "", local: "", variants: [] as string[] } : await topicTranslations(input.topic, placeOf(input), deadlineAt - 30_000);
+  const topicsAll = [input.topic, ...tr.variants];
+  if (tr.variants.length) notes.push("Тема на других языках: " + tr.variants.join(", ") + ".");
+  input = { ...input, localTopic: tr.local || undefined };
+  const searchLang = /поль|poland|polska|polsce|polski/i.test(placeOf(input)) ? "pl" : tr.lang || input.language || "en";
   const broadPage = Math.max(0, Math.min(BROAD_DISCOVERY_PAGES - 1, Math.trunc(input.broadPage || 0)));
   if (broad) {
     const cats = BROAD_DISCOVERY_CATEGORIES.slice(broadPage * BROAD_DISCOVERY_PAGE_SIZE, (broadPage + 1) * BROAD_DISCOVERY_PAGE_SIZE);
@@ -437,20 +475,19 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   }
   const descriptors = platformSearchQueries({ ...input, platforms: selected, broadPage });
   const queries = descriptors.map((q) => q.query);
-  const polish = /поль|poland|polska|polsce|polski/i.test(placeOf(input));
   const onePerPlatform = descriptors.filter((d, i) => descriptors.findIndex((v) => v.platform === d.platform) === i);
   const paidQueries = onePerPlatform.slice(0, 4); // billing limit per search run
   const budget = deadlineAt - Date.now();
   const [paid, keyless, tgstat, apify] = await Promise.all([
     dataForSeoEnabled()
-      ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", polish ? "pl" : "en", budget - 10_000)))
+      ? Promise.all(paidQueries.map((d) => dataForSeoSearch(d.query, input.country || input.city || "", searchLang, budget - 10_000)))
       : Promise.resolve([]),
-    runKeylessSearch(queries, polish ? "pl" : "en", Math.min(deadlineAt, Date.now() + 19_000)).catch(() => []),
+    runKeylessSearch(queries, searchLang, Math.min(deadlineAt, Date.now() + 19_000)).catch(() => []),
     selected.includes("telegram") && !broad && tgStatEnabled()
       ? tgStatSearch(input.topic, input.country || "")
       : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
     apifyEnabled()
-      ? apifySearch(paidQueries.map((d) => d.query), input.country || input.city || "", polish ? "pl" : input.language || "en", budget - 15_000)
+      ? apifySearch(paidQueries.map((d) => d.query), input.country || input.city || "", searchLang, budget - 15_000)
       : Promise.resolve<Awaited<ReturnType<typeof apifySearch>>>({ ok: false, hits: [] }),
   ]);
   for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
@@ -471,7 +508,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   const fallbackQueries = descriptors.filter((q) => missing.includes(q.platform)).slice(0, 2);
   const gemini = !fallbackQueries.length || Date.now() > deadlineAt - 22_000
     ? []
-    : await Promise.all(fallbackQueries.map((q) => geminiSearch(q.query, polish ? "pl" : input.language || "en", listPrompt(input))));
+    : await Promise.all(fallbackQueries.map((q) => geminiSearch(q.query, searchLang, listPrompt(input))));
   for (const g of gemini) if (!g.ok && g.message) notes.push(g.message);
   const geminiHits = gemini.flatMap((g, i) => g.hits.map((h) => ({ ...h, sourceQuery: fallbackQueries[i].query })));
   if (!visibleHits.length && !gemini.some((g) => g.ok && (g.hits.length || g.text))) {
@@ -526,7 +563,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
   }
 
   const now = nowIso();
-  const topicWords = ((broad ? "" : input.topic) + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
+  const topicWords = ((broad ? "" : topicsAll.join(" ")) + " " + (input.city || "") + " " + (input.country || "")).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
   const relevant = (text: string) => { const t = text.toLowerCase(); return topicWords.some((w) => t.includes(w)); };
   const base = { country: input.country || undefined, city: input.city || undefined, topic: broad ? "разные тематики" : input.topic, status: "new" as GroupStatus, foundAt: now, updatedAt: now, relevance: input.relevance || "core", foundBy: [input.topic, placeOf(input)].filter(Boolean).join(" · ") };
   let adultHidden = 0;
@@ -549,7 +586,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     // Channels (and some groups) have a public feed: last post date and frequency.
     const feed = Date.now() < deadlineAt ? await telegramFeed(url) : [];
     const live = feed.length ? { ...activityFromPosts(feed, Date.now(), th), activityCheckedAt: now } : { activity: "unknown" as const };
-    return { ...base, ...live, foundBy: meta.sourceQuery, verification: "public_page", id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLang(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), (input.language as any) || "en") };
+    return { ...base, ...live, foundBy: meta.sourceQuery, verification: "public_page", id: stableId("grp", url.toLowerCase()), platform: "telegram", kind: preview.kind, url, name: preview.title, members: preview.members, description: preview.description.slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(preview.description, url), language: detectLanguage(preview.title + " " + preview.description + " " + feed.slice(0, 3).map((p) => p.text).join(" "), input.language || "en") };
   });
 
   const fbList = [...facebook.entries()].slice(0, 30);
@@ -559,7 +596,7 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     if (!name) return null;
     const text = (preview?.description || "") + "\n" + meta.snippet;
     if (excluded(name + " " + text)) return null;
-    return { ...base, foundBy: meta.sourceQuery, verification: preview ? "public_page" : "indexed_candidate", activity: "unknown", language: detectLang(name + " " + text, (input.language as any) || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
+    return { ...base, foundBy: meta.sourceQuery, verification: preview ? "public_page" : "indexed_candidate", activity: "unknown", language: detectLanguage(name + " " + text, input.language || "en"), id: stableId("grp", url.toLowerCase()), platform: "facebook", kind: "group", url, name, members: preview?.members ?? parseMembers(meta.snippet), description: text.trim().slice(0, 600), ads: detectAdsPolicy(text), adminContact: detectAdminContact(text, url) };
   });
 
   // Instagram/TikTok are PUBLIC thematic creators or business profiles, not
@@ -576,14 +613,14 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
         activity: "unknown" as const, verification: "indexed_candidate" as const,
         description: meta.snippet.slice(0, 600),
         foundBy: meta.sourceQuery,
-        language: detectLang(name + " " + meta.snippet, (input.language as any) || "en"),
+        language: detectLanguage(name + " " + meta.snippet, input.language || "en"),
       }];
     });
   const instagramCards = makeProfiles("instagram", instagram);
   const tiktokCards = makeProfiles("tiktok", tiktok);
   const found = [...tgCards, ...fbCards, ...instagramCards, ...tiktokCards].filter(Boolean) as GroupCard[];
   // Search engines match the city alone too: a card that never mentions the topic is kept, but as adjacent (🟡), below the on-topic ones.
-  for (const g of found) if (!onTopic(broad ? "" : input.topic, g.name + " " + (g.description || ""))) g.relevance = "adjacent";
+  for (const g of found) if (!broad && !topicsAll.some((t) => onTopic(t, g.name + " " + (g.description || "")))) g.relevance = "adjacent";
   const saved = await upsertGroups(found);
   if (adultHidden) notes.push("Скрыто 18+: " + adultHidden + ".");
   const restricted = found.filter((g) => restrictedTopic(g.name + " " + (g.description || ""))).length;

@@ -80,6 +80,37 @@ export function detectLang(text: string, fallback: Lang = "en"): Lang {
   return fallback;
 }
 
+// The language of a community (any language, ISO 639-1), wider than the four dialogue languages
+// above, so an ad goes out in the group's own language. Scripts first, then the Latin language
+// with the most hits of its common words and letters; otherwise the dialogue detector decides.
+const SCRIPTS: Array<[RegExp, string]> = [
+  [/[\u0590-\u05FF]/, "he"], [/[\u0600-\u06FF]/, "ar"], [/[\u0370-\u03FF]/, "el"], [/[\u10A0-\u10FF]/, "ka"],
+  [/[\u0530-\u058F]/, "hy"], [/[\u3040-\u30FF]/, "ja"], [/[\uAC00-\uD7AF]/, "ko"], [/[\u4E00-\u9FFF]/, "zh"],
+  [/[\u0E00-\u0E7F]/, "th"], [/[\u0900-\u097F]/, "hi"],
+];
+const W = (words: string, letters = "") => new RegExp("(?<!\\p{L})(?:" + words + ")(?!\\p{L})" + (letters ? "|[" + letters + "]" : ""), "giu");
+const LATIN: Record<string, RegExp> = {
+  en: W("the|and|for|with|you|are|this|from|group|channel|sale|rent|community"),
+  es: W("el|los|las|que|para|con|una|del|por|grupo|venta|alquiler|piso|comunidad", "ñ¿¡"),
+  pt: W("os|não|com|uma|do|da|dos|das|você|venda|aluguel|arrendamento", "ãõ"),
+  it: W("il|gli|della|delle|per|che|sono|gruppo|vendita|affitto|di|un|casa"),
+  fr: W("le|les|des|est|avec|pour|une|du|et|groupe|vente|location", "œçè"),
+  de: W("und|der|die|das|mit|für|nicht|ist|ein|eine|gruppe|wohnung|verkauf", "ßäöü"),
+  pl: W("się|dla|jest|oraz|nie|na|grupa|sprzedam|mieszkanie|ogłoszenia", "ąęłńśźż"),
+  cs: W("jsou|nebo|byt|prodám|skupina|inzerce|bazar", "řůě"),
+  sk: W("alebo|predám|skupina|inzercia|byty", "ľĺŕô"),
+  nl: W("het|een|van|voor|niet|ook|groep|huren|verkoop"),
+};
+export function detectLanguage(text: string, fallback: string = "en"): string {
+  const value = String(text || "");
+  if (/[а-яёіїєґ]/i.test(value)) return detectLang(value, "ru");
+  const script = SCRIPTS.find(([re]) => re.test(value));
+  if (script) return script[1];
+  const best = Object.entries(LATIN).map(([lang, re]) => [lang, (value.match(re) || []).length] as const).sort((a, b) => b[1] - a[1])[0];
+  if (best && best[1] > 0) return best[0];
+  return /[a-z]/i.test(value) ? "en" : fallback;
+}
+
 const CURRENCY_SIGNS: Array<[RegExp, string]> = [
   [/€|eur\b|euro|евро|євро/i, "EUR"],
   [/\$|usd\b|dollar|доллар|долар/i, "USD"],
