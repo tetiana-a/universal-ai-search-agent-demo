@@ -500,7 +500,7 @@ export default function Home() {
   const { theme, setTheme, audioRef: radioAudioRef, playing: radioPlaying, station: siteStation, setStation: setSiteStation } = useSite();
   const [activeNav, setActiveNav] = useState<NavKey>("research");
   const [scenario, setScenario] = useState<Scenario>("realEstate");
-  const [query, setQuery] = useState<string>(scenarios.realEstate.query);
+  const [query, setQuery] = useState<string>("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -798,10 +798,6 @@ export default function Home() {
   useEffect(() => {
     setSettings((currentSettings) => ({ ...currentSettings, language: lang }));
   }, [lang]);
-
-  useEffect(() => {
-    setQuery(lang === "ru" ? current.query : current.queryEn);
-  }, [current.query, current.queryEn, lang]);
 
   useEffect(() => {
     if (progress >= 100 && running) {
@@ -1281,6 +1277,7 @@ export default function Home() {
   }
 
   async function startResearch() {
+    if (!query.trim()) return; // field starts empty now: nothing to search yet
     const isContinuation = continueNextRef.current && researchSession !== null;
     continueNextRef.current = false;
     if (!isContinuation || !currentTaskIdRef.current) currentTaskIdRef.current = newTaskId();
@@ -1527,13 +1524,6 @@ export default function Home() {
 
   function sourceFavicon(domain: string) {
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
-  }
-
-  function setScenarioAndStay(next: Scenario) {
-    setScenario(next);
-    setProgress(0);
-    setRunning(false);
-    setFilter("All");
   }
 
 
@@ -2276,32 +2266,11 @@ export default function Home() {
                   onChange={(event) => setQuery(event.target.value)}
                   rows={3}
                   className="w-full resize-none bg-transparent px-2 py-1 text-base leading-6 text-[var(--text)] outline-none placeholder:text-[var(--text-faint)] sm:text-[14px]"
-                  placeholder={lang === "ru" ? "Например: найди..." : "For example: find..."}
+                  placeholder={lang === "ru" ? "Что угодно: компании, люди, товары, поставщики, события, данные…" : "Anything: companies, people, products, suppliers, events, data…"}
                   aria-label="Research query"
                 />
 
-                <div className="mt-2 flex flex-col gap-3 border-t border-[var(--line-soft)] pt-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      ["realEstate", "Земля", "Land"],
-                      ["investors", "Инвесторы", "Investors"],
-                      ["companies", "Компании", "Companies"],
-                    ] as const).map(([key, ruLabel, enLabel]) => (
-                      <button
-                        key={key}
-                        onClick={() => setScenarioAndStay(key)}
-                        aria-pressed={scenario === key}
-                        className={"rounded-full border px-3 py-1.5 text-[11.5px] transition " + (
-                          scenario === key
-                            ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--gold-bright)]"
-                            : "border-[var(--line-soft)] text-[var(--text-muted)] hover:border-[var(--gold)]/20"
-                        )}
-                      >
-                        {lang === "ru" ? ruLabel : enLabel}
-                      </button>
-                    ))}
-                  </div>
-
+                <div className="mt-2 flex flex-col gap-3 border-t border-[var(--line-soft)] pt-3 lg:flex-row lg:items-center lg:justify-end">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={startMic}
