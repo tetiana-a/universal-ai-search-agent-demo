@@ -26,9 +26,9 @@ function Btn({ children, onClick, variant = "ghost", disabled }: Readonly<{ chil
   );
 }
 
-function Section({ title, icon: Icon, color, children, actions }: Readonly<{ title: string; icon: typeof Gauge; color: string; children: ReactNode; actions?: ReactNode }>) {
+function Section({ id, title, icon: Icon, color, children, actions }: Readonly<{ id?: string; title: string; icon: typeof Gauge; color: string; children: ReactNode; actions?: ReactNode }>) {
   return (
-    <section className="glass scout-panel rounded-[18px] p-3 sm:p-4">
+    <section id={id} className="glass scout-panel scroll-mt-4 rounded-[18px] p-3 sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
         <h2 className="flex items-center gap-2 text-[15px] font-normal">
           <span className="grid h-[30px] w-[30px] place-items-center rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={14} style={{ color }} /></span>
@@ -107,6 +107,9 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
     if (r?.ok) setData(await r.json());
   }, [headers]);
   useEffect(() => { void load(); }, [load]);
+  // Links from the control panel (/groups#today, #partners…) land after the data has rendered.
+  const loaded = Boolean(data);
+  useEffect(() => { if (loaded && location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth" }); }, [loaded]);
 
   const act = useCallback(async (action: string, payload: Record<string, unknown> = {}, label = action) => {
     setBusy(label);
@@ -137,7 +140,7 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
           </div>
         </div>
       )}
-      <Section title="Рекламные кампании" icon={Megaphone} color="#ff375f" actions={data.campaigns.some((c) => c.status === "approved") ? <Btn onClick={() => void act("stopAll", {}, "stopAll")}><Square size={12} />Остановить всё</Btn> : undefined}>
+      <Section id="campaigns" title="Рекламные кампании" icon={Megaphone} color="#ff375f" actions={data.campaigns.some((c) => c.status === "approved") ? <Btn onClick={() => void act("stopAll", {}, "stopAll")}><Square size={12} />Остановить всё</Btn> : undefined}>
         <textarea ref={taskRef} className={inputClass + " min-h-20"} placeholder="Задача обычным языком: что рекламируем, где, на каких площадках, сколько в день, текст объявления. Можно голосом на любом языке." value={task} onChange={(e) => setTask(e.target.value)} />
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Btn variant="spectrum" disabled={task.trim().length < 10 || Boolean(busy)} onClick={async () => { const d = await act("create", { text: task }, "create"); if (d?.ok) setTask(""); }}><Plus size={12} />{busy === "create" ? "Разбираю…" : "Создать кампанию"}</Btn>
@@ -150,7 +153,7 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
         <div className="mt-3 space-y-2">{data.campaigns.map((c) => <CampaignEditor key={c.id + c.updatedAt} c={c} act={act} busy={busy} />)}</div>
       </Section>
 
-      <Section title={"Сегодня · " + cap.day} icon={Gauge} color="#ffd60a">
+      <Section id="today" title={"Сегодня · " + cap.day} icon={Gauge} color="#ffd60a">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
           {[["Цель в день", cap.target], ["Устойчиво сеть даёт", cap.sustained], ["Площадок с разрешением", cap.places], ["Запланировано", cap.planned], ["Размещено", cap.verified], ["Ждут / ошибки", cap.awaiting + " / " + cap.failed]].map(([l, v]) => (
             <div key={String(l)} className="glass rounded-xl p-3"><div className="text-[11px] text-[var(--text-muted)]">{l}</div><div className="text-[20px] font-light tabular-nums">{v}</div></div>
@@ -174,7 +177,7 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
         )}
       </Section>
 
-      <Section title="Площадка партнёра или по договорённости" icon={Plus} color="#30d158">
+      <Section id="partners" title="Площадка партнёра или по договорённости" icon={Plus} color="#30d158">
         {data.partnerLink && <p className="mb-2 text-sm opacity-80">Ссылка для админов, чтобы подключиться самим: <a className="underline" href={data.partnerLink} target="_blank" rel="noreferrer">{data.partnerLink}</a>. Заявка придёт вам в бот на подтверждение.</p>}
         {/* Telega.in and Collabstr have no open API: deals are made on their sites, then the agreed place is added below. */}
         <p className="mb-2 text-sm opacity-80">Платные размещения вручную: <a className="underline" href="https://telega.in/" target="_blank" rel="noreferrer">Telega.in</a> (Telegram-каналы) и <a className="underline" href="https://collabstr.com/" target="_blank" rel="noreferrer">Collabstr</a> (Instagram и TikTok-авторы). Договоритесь там, затем добавьте площадку ниже, а в поле согласия укажите номер заказа.</p>
@@ -190,7 +193,7 @@ export default function CampaignsPanel({ headers, onToast, onExport }: Readonly<
       </Section>
 
       {data.mentions.length > 0 && (
-        <Section title={"Мониторинг · " + data.mentions.length} icon={Radio} color="#64d2ff">
+        <Section id="monitoring" title={"Мониторинг · " + data.mentions.length} icon={Radio} color="#64d2ff">
           <div className="space-y-1.5">
             {data.mentions.slice(0, 30).map((m) => <div key={m.id} className="text-[12px]">{ICON[m.platform]} <a className="hover:underline" href={m.url} target="_blank" rel="noreferrer">{m.title || m.url}</a>{m.author ? <span className="text-[var(--text-muted)]"> — {m.author}</span> : null}{m.views ? <span className="text-[var(--text-muted)]"> · 👁 {m.views.toLocaleString("ru-RU")}</span> : null}</div>)}
           </div>

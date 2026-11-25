@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { BarChart3, Compass, Moon, Pause, Radio, Send, Sparkles, Sun, Users, Telescope } from "lucide-react";
+import { BarChart3, Compass, Gauge, Moon, Pause, Radio, Send, Sparkles, Sun, Users, Telescope } from "lucide-react";
 
 // One site-wide shell (mounted in the root layout, so it survives page changes):
 // theme, the single radio <audio> element and the dock to switch Главная → Группы → Scout.
@@ -40,6 +40,7 @@ const DEV_LINK = /^[a-z0-9_]{4,32}$/i.test(DEV_TG) ? "https://t.me/" + DEV_TG : 
 
 const TABS = [
   { href: "/", label: "Главная", icon: Sparkles },
+  { href: "/control", label: "Пульт", icon: Gauge },
   { href: "/groups", label: "Группы", icon: Users },
   { href: "/scout", label: "Scout", icon: Telescope },
   { href: "/advisor", label: "Советник", icon: Compass },
