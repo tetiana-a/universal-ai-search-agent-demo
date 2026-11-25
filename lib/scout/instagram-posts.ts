@@ -21,7 +21,7 @@ export const jobStatusRu = (status: InstagramJob["status"]) => STATUS_RU[status]
 export type InstagramRequest = {
   requestId: string; ownerId: string; integrationId?: string;
   caption: string; scheduledAt: string; mediaUrl?: string; telegramFileId?: string;
-  platform?: "instagram" | "tiktok";
+  platform?: "instagram" | "tiktok" | "facebook";
 };
 /** "сейчас" / "now" → in 6 minutes (Postiz needs a little lead time); anything else is passed through. */
 export function resolveWhen(value: string) {
@@ -33,7 +33,9 @@ export function instagramSchedulingEnabled() {
 export function validateInstagramRequest(args: InstagramRequest): string | null {
   if (!/^[\w-]{8,80}$/.test(args.requestId)) return "INVALID_REQUEST_ID";
   if (args.caption.trim().length < 5 || args.caption.length > 2200) return "INVALID_CAPTION";
-  if (Boolean(args.mediaUrl) === Boolean(args.telegramFileId)) return "ONE_MEDIA_REQUIRED";
+  // Facebook Page posts may be text only; Instagram and TikTok need exactly one file.
+  const textOnly = args.platform === "facebook" && !args.mediaUrl && !args.telegramFileId;
+  if (!textOnly && Boolean(args.mediaUrl) === Boolean(args.telegramFileId)) return "ONE_MEDIA_REQUIRED";
   if (args.mediaUrl) {
     try {
       const u = new URL(args.mediaUrl);
@@ -97,15 +99,20 @@ function mediaType(video: boolean, path: string): [string, string] {
   if (video) return ["video/mp4", "video.mp4"];
   return /\.png$/i.test(path) ? ["image/png", "image.png"] : ["image/jpeg", "image.jpg"];
 }
+const PLATFORMS = {
+  instagram: { prefix: "ig-", match: (id: string) => IG.has(id), missing: "SELECT_CONNECTED_INSTAGRAM_ACCOUNT", allowEnv: "INSTAGRAM_ALLOWED_CHANNEL_IDS" },
+  tiktok: { prefix: "tt-", match: (id: string) => id.startsWith("tiktok"), missing: "SELECT_CONNECTED_TIKTOK_ACCOUNT", allowEnv: "TIKTOK_ALLOWED_CHANNEL_IDS" },
+  facebook: { prefix: "fb-", match: (id: string) => id === "facebook", missing: "SELECT_CONNECTED_FACEBOOK_PAGE", allowEnv: "FACEBOOK_ALLOWED_CHANNEL_IDS" },
+};
 // The owner's connected Postiz channel for this platform, limited by the optional allowlist.
 async function pickChannel(args: InstagramRequest): Promise<{ channel?: Awaited<ReturnType<typeof listPostizChannels>>[number]; error?: string }> {
-  const tiktok = args.platform === "tiktok";
-  const channels = (await listPostizChannels()).filter(x => (tiktok ? x.identifier.startsWith("tiktok") : IG.has(x.identifier)) && !x.disabled);
+  const p = PLATFORMS[args.platform || "instagram"];
+  const channels = (await listPostizChannels()).filter(x => p.match(x.identifier) && !x.disabled);
   const single = channels.length === 1 ? channels[0] : undefined;
   const channel = args.integrationId ? channels.find(x => x.id === args.integrationId) : single;
-  if (!channel) return { error: tiktok ? "SELECT_CONNECTED_TIKTOK_ACCOUNT" : "SELECT_CONNECTED_INSTAGRAM_ACCOUNT" };
+  if (!channel) return { error: p.missing };
   // Do not allow posting to a different customer's channel by accident.
-  const allow = String((tiktok ? process.env.TIKTOK_ALLOWED_CHANNEL_IDS : process.env.INSTAGRAM_ALLOWED_CHANNEL_IDS) || "").split(",").map(x=>x.trim()).filter(Boolean);
+  const allow = String(process.env[p.allowEnv] || "").split(",").map(x=>x.trim()).filter(Boolean);
   if (allow.length && !allow.includes(channel.id)) return { error: "ACCOUNT_NOT_ALLOWLISTED" };
   return { channel };
 }
@@ -114,23 +121,22 @@ export async function scheduleInstagram(args: InstagramRequest): Promise<{ok: bo
   args = { ...args, scheduledAt: resolveWhen(args.scheduledAt) };
   const problem = validateInstagramRequest(args);
   if (problem) return {ok:false,error:problem};
-  const tiktok = args.platform === "tiktok";
   const picked = await pickChannel(args);
   if (!picked.channel) return { ok: false, error: picked.error };
   const channel = picked.channel;
-  const id = (tiktok ? "tt-" : "ig-") + args.requestId;
+  const id = PLATFORMS[args.platform || "instagram"].prefix + args.requestId;
   const existing = await getOne<InstagramJob>("instagram_posts", id);
   if (existing) return {ok:true,job:existing};
   if (!(await claimOnce("instagram-schedule:" + args.requestId, 86400 * 7))) return {ok:false,error:"ALREADY_PROCESSING"};
   const now = new Date().toISOString();
   try {
-    const media = await uploadMedia(args);
+    const media = args.mediaUrl || args.telegramFileId ? await uploadMedia(args) : null;
     const body = {
       type: "schedule", date: new Date(args.scheduledAt).toISOString(), shortLink: false, tags: [],
       posts: [{
         integration: {id:channel.id},
-        value: [{ content:args.caption.trim(), image:[media] }],
-        settings: tiktok ? { __type:channel.identifier, ...extraSettings(channel.identifier) } : { __type:channel.identifier, post_type:"post", is_trial_reel:false, collaborators:[] },
+        value: [{ content:args.caption.trim(), image:media ? [media] : [] }],
+        settings: IG.has(channel.identifier) ? { __type:channel.identifier, post_type:"post", is_trial_reel:false, collaborators:[] } : { __type:channel.identifier, ...extraSettings(channel.identifier) },
       }],
     };
     const response: any = await postizRequest("/posts", {
@@ -144,7 +150,7 @@ export async function scheduleInstagram(args: InstagramRequest): Promise<{ok: bo
       createdAt:now, updatedAt:now, status:"scheduled",
     };
     await putOne("instagram_posts", job);
-    await logAction({actor:"human",action:(tiktok ? "tiktok" : "instagram")+".scheduled",detail:id+" · "+channel.name+" · "+body.date});
+    await logAction({actor:"human",action:(args.platform || "instagram")+".scheduled",detail:id+" · "+channel.name+" · "+body.date});
     return {ok:true,job};
   } catch (error) {
     // Postiz may already have accepted a timed-out POST. Do not auto-retry,

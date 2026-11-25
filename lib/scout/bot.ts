@@ -53,7 +53,7 @@ const HELP = [
   "/recall — проверка полноты по ручному списку · /activity — порог активности",
   "/cstop all — остановить всё",
   "",
-  "/ttqueue — видео в TikTok сам (подпись к видео: /ttqueue сейчас | текст) · /igqueue — фото в Instagram",
+  "/ttqueue — видео в TikTok сам (подпись к видео: /ttqueue сейчас | текст) · /igqueue — фото в Instagram · /fbqueue — пост на страницу Facebook",
   "🤝 Ссылка для админов-партнёров: " + partnerInviteLink(),
   "➕ Добавить бота в группу: " + addBotUrl({ platform: "telegram", kind: "group" }),
   "➕ Добавить бота в канал: " + addBotUrl({ platform: "telegram", kind: "channel" }),
@@ -63,6 +63,15 @@ const HELP = [
 const TT_HELP = "🎬 <b>Автопубликация в TikTok (ваш аккаунт через Postiz)</b>\n\nПришлите ВИДЕО (mp4, до 20 МБ) с подписью:\n<code>/ttqueue сейчас | Текст и #хештеги</code>\nили со временем:\n<code>/ttqueue 2026-11-25T19:00:00+01:00 | Текст</code>\n\nБот загрузит видео в Postiz, и пост выйдет сам в указанное время, без подтверждения на сайте. Проверить: /igstatus · отменить: /igcancel ID";
 
 const TT_TOO_BIG = "⚠️ Видео больше 20 МБ — Telegram не отдаёт боту такие файлы.\nСожмите его (CapCut → Экспорт → 720p) или пришлите ссылку:\n<code>/ttqueue сейчас | https://…/video.mp4 | текст</code>";
+
+const FB_HELP = "📘 <b>Автопубликация на страницу Facebook (через Postiz)</b>\n\nТолько текст:\n<code>/fbqueue сейчас | Текст поста</code>\nС фото: пришлите фотографию с подписью\n<code>/fbqueue сейчас | Текст поста</code>\nСо временем: вместо «сейчас» — <code>2026-11-25T19:00:00+01:00</code>\n\nPostiz опубликует сам. Проверить: /igstatus · отменить: /igcancel ID";
+
+function fbResultText(result: { ok: boolean; error?: string; job?: { channelName: string; scheduledAt: string; id: string } }) {
+  if (result.ok && result.job)
+    return "✅ <b>Facebook запланирован</b>\nСтраница: " + escapeHtml(result.job.channelName) + "\nВремя: " + escapeHtml(result.job.scheduledAt) + "\nID: <code>" + escapeHtml(result.job.id) + "</code>\nPostiz опубликует сам. Проверить: /igstatus";
+  if (result.error === "SELECT_CONNECTED_FACEBOOK_PAGE") return "⚠️ В Postiz не подключена страница Facebook (или их несколько). Подключите одну: Postiz → Add Channel → Facebook.";
+  return "⚠️ Facebook не запланирован: " + escapeHtml(result.error || "ошибка") + "\nПодсказка: /fbhelp";
+}
 
 function ttResultText(result: { ok: boolean; error?: string; job?: { channelName: string; scheduledAt: string; id: string } }) {
   if (result.ok && result.job)
@@ -349,6 +358,24 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       await sendMessage(chatId,ttResultText(result));
       return {};
     }
+    case "fbqueue": {
+      if (!(await isControl(chatId, userId))) {
+        await sendMessage(chatId,"⛔ Facebook доступен только владельцу и админам группы."); return {};
+      }
+      // /fbqueue TIME | text   or   /fbqueue TIME | https://…/photo.jpg | text
+      const parts=args.split("|").map(x=>x.trim());
+      if (parts.length < 2 || !parts[1]) { await sendMessage(chatId,FB_HELP); return {}; }
+      const withUrl=parts.length >= 3 && /^https:\/\//i.test(parts[1]);
+      const caption=(withUrl ? parts.slice(2) : parts.slice(1)).join(" | ");
+      await sendMessage(chatId,"⏳ Ставлю пост в расписание Facebook через Postiz…");
+      const result=await scheduleInstagram({ platform:"facebook", requestId:"tgfb-"+userId+"-"+Date.now().toString(36), ownerId:userId, mediaUrl:withUrl ? parts[1] : undefined, caption, scheduledAt:parts[0] })
+        .catch(()=>({ok:false,error:"FACEBOOK_API_UNAVAILABLE",job:undefined}));
+      await sendMessage(chatId,fbResultText(result));
+      return {};
+    }
+    case "fbhelp": {
+      await sendMessage(chatId,FB_HELP); return {};
+    }
     case "tthelp": {
       await sendMessage(chatId,TT_HELP); return {};
     }
@@ -369,7 +396,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       if (!(await isControl(chatId, userId))) {
         await sendMessage(chatId,"⛔ Только владелец и админы группы."); return {};
       }
-      if (!/^(ig|tt)-[\w-]{8,80}$/.test(args)) {
+      if (!/^(ig|tt|fb)-[\w-]{8,80}$/.test(args)) {
         await sendMessage(chatId,"Укажите ID из /igstatus: <code>/igcancel ig-...</code> или <code>/igcancel tt-...</code>");return {};
       }
       const cancelled=await cancelInstagramJob(args).catch(()=>({ok:false,error:"POSTIZ_CANCEL_FAILED"}));
@@ -867,6 +894,23 @@ export async function handleUpdate(update: any): Promise<BotResult> {
       const result=await scheduleInstagram({platform:"tiktok",requestId,ownerId:userId,telegramFileId:String(ttVideo.file_id||""),scheduledAt:parts[0],caption:parts.slice(1).join(" | ")})
         .catch(()=>({ok:false,error:"TIKTOK_API_UNAVAILABLE",job:undefined}));
       await sendMessage(chatId,ttResultText(result));
+    }};
+  }
+
+  // A photo captioned /fbqueue TIME | text: scheduled on the owner's Facebook Page via Postiz.
+  if (message?.photo && /^\/fbqueue(?:@\w+)?\s/i.test(String(message.caption || "")) && !message.from?.is_bot) {
+    const chatId=String(message.chat?.id||"");
+    const userId=String(message.from?.id||"");
+    if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
+    const parts=String(message.caption).replace(/^\/fbqueue(?:@\w+)?\s*/i,"").split("|").map((x:string)=>x.trim());
+    if(parts.length<2){ await sendMessage(chatId,FB_HELP); return {}; }
+    const photo=message.photo[message.photo.length-1];
+    const requestId="tgfb-"+userId+"-"+String(message.message_id||Date.now());
+    await sendMessage(chatId,"⏳ Загружаю фото в Postiz и ставлю пост на страницу Facebook…");
+    return { background:async()=>{
+      const result=await scheduleInstagram({platform:"facebook",requestId,ownerId:userId,telegramFileId:String(photo?.file_id||""),scheduledAt:parts[0],caption:parts.slice(1).join(" | ")})
+        .catch(()=>({ok:false,error:"FACEBOOK_API_UNAVAILABLE",job:undefined}));
+      await sendMessage(chatId,fbResultText(result));
     }};
   }
 
