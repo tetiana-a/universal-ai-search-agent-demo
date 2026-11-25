@@ -54,9 +54,9 @@ function Button({ children, onClick, variant = "ghost", disabled, href }: Readon
   return <button type="button" disabled={disabled} onClick={onClick} className={cls}>{children}</button>;
 }
 
-function Panel({ title, icon: Icon, color, children, actions }: Readonly<{ title: string; icon: typeof Radar; color: string; children: ReactNode; actions?: ReactNode }>) {
+function Panel({ id, title, icon: Icon, color, children, actions }: Readonly<{ id?: string; title: string; icon: typeof Radar; color: string; children: ReactNode; actions?: ReactNode }>) {
   return (
-    <section className="glass scout-panel rounded-[18px] p-3 sm:p-4">
+    <section id={id} className="glass scout-panel scroll-mt-4 rounded-[18px] p-3 sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
         <h2 className="flex items-center gap-2 text-[15px] font-normal">
           <span className="grid h-[30px] w-[30px] place-items-center rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)]"><Icon size={14} style={{ color }} /></span>
@@ -188,7 +188,7 @@ export default function GroupsDashboard() {
 
         {!needKey && state && <CampaignsPanel headers={headers} onToast={setToast} onExport={() => { void downloadGroups(); }} />}
 
-        <Panel title="1. Найти сообщества и профили" icon={Radar} color="#30d158" actions={<Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("profile", {}, "profile")}>{busy === "profile" ? "Подбираю… до 4 мин" : "✦ Подобрать под клиента"}</Button>}>
+        <Panel id="search" title="1. Найти сообщества и профили" icon={Radar} color="#30d158" actions={<Button variant="spectrum" disabled={Boolean(busy)} onClick={() => void act("profile", {}, "profile")}>{busy === "profile" ? "Подбираю… до 4 мин" : "✦ Подобрать под клиента"}</Button>}>
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_1fr_auto]">
             <input className={inputClass} placeholder="Страна" value={search.country} onChange={(e) => setSearch({ ...search, country: e.target.value })} />
             <input className={inputClass} placeholder="Город" value={search.city} onChange={(e) => setSearch({ ...search, city: e.target.value })} />
