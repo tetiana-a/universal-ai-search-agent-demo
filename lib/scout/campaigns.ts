@@ -417,13 +417,24 @@ export function modeFor(g: GroupCard): TaskMode | null {
   return null; // no permission yet: outreach first
 }
 
+const campaignWords = (c: Campaign) => [c.topic, c.region, ...c.keywords].join(" ").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
+const groupText = (g: GroupCard) => [g.name, g.topic, g.city, g.country, g.description].filter(Boolean).join(" ").toLowerCase();
+
 export function matchesCampaign(g: GroupCard, c: Campaign) {
   if (!c.platforms.includes(g.platform)) return false;
-  const words = [c.topic, c.region, ...c.keywords].join(" ").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, 5));
-  const own = [g.name, g.topic, g.city, g.country, g.description].filter(Boolean).join(" ").toLowerCase();
+  const words = campaignWords(c);
   // Groups added by the bot or by hand often carry no topic: the admin's consent is what counts.
   if (!g.topic && !g.city && !g.country) return true;
+  const own = groupText(g);
   return !words.length || words.some((w) => own.includes(w));
+}
+
+// A consented place the campaign's own search did not find still gets it, but only on a real
+// topic/region hit (title, partner's topics), never on an empty card, so unrelated chats stay out.
+export function topicHit(g: GroupCard, c: Campaign) {
+  if (!c.platforms.includes(g.platform)) return false;
+  const own = groupText(g);
+  return campaignWords(c).some((w) => own.includes(w));
 }
 
 export type PlanResult = { day: string; created: number; byMode: Record<TaskMode, number>; perCampaign: Record<string, number> };
@@ -445,9 +456,9 @@ export function planTasks(campaigns: Campaign[], groups: GroupCard[], existing: 
     let count = live.filter((t) => t.campaignId === c.id && t.day === day).length;
     for (const g of groups) {
       if (count >= c.dailyTarget) break;
-      if (!eligible.has(g.id)) continue;
       const mode = modeFor(g);
-      if (!mode || !matchesCampaign(g, c)) continue;
+      if (!mode) continue;
+      if (eligible.has(g.id) ? !matchesCampaign(g, c) : !topicHit(g, c)) continue;
       const id = stableId("ct", c.id + "|" + g.id + "|" + day);
       if (ids.has(id)) continue;
       if ((dayLoad.get(g.id) || 0) >= (g.dailyLimit ?? DEFAULT_DAILY_LIMIT)) continue;
@@ -634,8 +645,18 @@ export function capacityText(c: ReturnType<typeof capacityOf>) {
     (gap > 0 ? "\n\n⚠️ До цели не хватает ~" + gap + " публикаций в день. Нужны новые площадки с согласием админов (" + c.withoutPermission + " групп ждут ответа)." : "");
 }
 
+// Heartbeat of the scheduled dispatch (GitHub Actions every 15 min): the daily report flags silence.
+const DISPATCH_KEY = "campaign-dispatch:last";
+export async function markDispatch(at = Date.now()) { await setValue(DISPATCH_KEY, at).catch(() => null); }
+export function dispatchWarning(last: number | null, campaigns: Campaign[], now = Date.now()) {
+  if (process.env.CAMPAIGN_AUTOPOST !== "on" || !campaigns.some((c) => c.status === "approved")) return "";
+  const hours = last ? Math.floor((now - last) / 3_600_000) : null;
+  if (hours !== null && hours < 3) return "";
+  return "\n⚠️ <b>Публикации по расписанию " + (hours === null ? "ещё ни разу не запускались" : "не запускались " + hours + " ч") + "</b>: GitHub → Actions → «Campaign dispatch» и секрет CRON_SECRET.";
+}
+
 export async function digestText(day = today()) {
-  const [groups, campaigns0, all, mentions] = await Promise.all([listGroups(), listCampaigns(), listAll<CampaignTask>("campaign_tasks"), listAll<Mention>("mentions")]);
+  const [groups, campaigns0, all, mentions, ownPosts, lastDispatch] = await Promise.all([listGroups(), listCampaigns(), listAll<CampaignTask>("campaign_tasks"), listAll<Mention>("mentions"), listAll<{ status?: string; updatedAt?: string }>("instagram_posts"), getValue<number>(DISPATCH_KEY)]);
   const cap = capacityOf(groups, all, campaigns0, day);
   const campaigns = campaigns0.filter((c) => c.status === "approved");
   const tasks = all.filter((t) => t.day === day);
@@ -645,7 +666,9 @@ export async function digestText(day = today()) {
   const rejected = failed.filter((t) => /отклонено/.test(t.error || ""));
   return "📊 <b>Отчёт за " + day + "</b>" +
     "\nНайдено сообществ: " + groups.filter((g) => g.foundAt.startsWith(day)).length + " (всего в базе " + groups.length + ", неактивных " + groups.filter((g) => g.activity === "inactive").length + ")" +
-    "\nРазмещено: <b>" + cap.verified + "</b> · отклонено " + rejected.length + " · ошибок " + (failed.length - blocked.length - rejected.length) + " · удалили бота / блокировки " + blocked.length +
+    dispatchWarning(lastDispatch, campaigns0) +
+    "\nРазмещено в чужих группах и у партнёров: <b>" + cap.verified + "</b> · отклонено " + rejected.length + " · ошибок " + (failed.length - blocked.length - rejected.length) + " · удалили бота / блокировки " + blocked.length +
+    "\nСвои аккаунты (Postiz, считаются отдельно): " + ownPosts.filter((p) => p.status === "published" && (p.updatedAt || "").startsWith(day)).length +
     "\nОтклики партнёров (прислали ссылку): " + tasks.filter((t) => t.status === "proof" || (t.mode === "partner" && t.status === "verified")).length +
     "\nНайдено публикаций мониторингом: " + mentions.filter((m) => m.foundAt.startsWith(day)).length +
     (() => {

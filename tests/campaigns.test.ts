@@ -131,7 +131,7 @@ describe("campaign flow", () => {
     expect((await submitProof(task.id, "555", "https://t.me/x/1")).ok).toBe(false);
     expect((await submitProof(task.id, "555", "https://www.instagram.com/p/abc")).ok).toBe(true);
     expect((await verifyProof(task.id, true))?.status).toBe("verified");
-    expect(await digestText()).toContain("Размещено: <b>1</b>");
+    expect(await digestText()).toContain("Размещено в чужих группах и у партнёров: <b>1</b>");
 
     await setCampaignStatus(draft.id, "stopped");
     const manual = (await listAll<CampaignTask>("campaign_tasks")).find((t) => t.mode === "manual")!;
