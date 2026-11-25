@@ -205,7 +205,7 @@ const SCHEMA = {
     ad_text: { type: "string", description: "ready-to-publish ad text in the task's language; keep facts, prices and contacts exactly" },
     topic: { type: "string" },
     region: { type: "string", description: "country / city, empty if none" },
-    languages: { type: "array", items: { type: "string", description: "ISO 639-1" } },
+    languages: { type: "array", items: { type: "string", description: "ISO 639-1" }, description: "target languages: the local language(s) of the region plus the owner's language and the audience's language; the task may be written or spoken in any language" },
     keywords: { type: "array", items: { type: "string" }, description: "40 keywords for finding communities on the topic: word forms, synonyms, translations into the languages of the region and of the target audience" },
     adjacent_keywords: { type: "array", items: { type: "string" }, description: "8-15 phrases for ADJACENT communities where the same audience gathers and such an ad is appropriate (classifieds, flea markets, expats and relocants, city and district communities), with the city, in local languages" },
     questions: { type: "array", items: { type: "string" }, description: "clarifying questions in the owner's language for missing essentials (region, ad text, platforms); empty if the task is clear" },
