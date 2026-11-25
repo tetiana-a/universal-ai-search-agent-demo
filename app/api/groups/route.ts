@@ -63,6 +63,7 @@ export async function POST(request: Request) {
     case "post.bot": {
       const text = str(body.text, 4000);
       if (!text) return Response.json({ ok: false, error: "Пустой текст." }, { status: 400 });
+      if (photoUrl(body.photoUrl) && text.length > 1024) return Response.json({ ok: false, error: "Текст с фото — максимум 1024 символа. Сократите подпись или уберите фото." }, { status: 400 });
       const targets = await postingTargets();
       if (!targets.length) return Response.json({ ok: false, error: "Нет групп, куда бот может публиковать. Попросите админов добавить бота и включите «Постинг»." }, { status: 400 });
       // Runs after the reply: posting is paced (~3 s per chat) to stay within Telegram limits.

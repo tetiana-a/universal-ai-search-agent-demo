@@ -123,7 +123,7 @@ export async function deleteValue(key: string) {
 export async function claimOnce(key: string, ttlSeconds: number): Promise<boolean> {
   const fullKey = PREFIX + key;
   if (storeIsPersistent()) {
-    const result = await redisCommand<string | null>("SET", [fullKey, "1", "NX", "EX", Math.max(1, Math.floor(ttlSeconds))]);
+    const result = await redisCommandStrict<string | null>("SET", [fullKey, "1", "NX", "EX", Math.max(1, Math.floor(ttlSeconds))]);
     return result === "OK";
   }
   const state = memory();
@@ -144,7 +144,7 @@ export async function increment(key: string, ttlSeconds: number): Promise<number
 }
 
 export async function readCounter(key: string): Promise<number> {
-  if (storeIsPersistent()) return Number((await redisCommand<string>("GET", [PREFIX + key])) || 0);
+  if (storeIsPersistent()) return Number((await redisCommandStrict<string>("GET", [PREFIX + key])) || 0);
   return Number(memory().values.get(key) || 0);
 }
 
