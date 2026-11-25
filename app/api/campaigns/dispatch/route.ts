@@ -1,5 +1,5 @@
 import { isCronRequest, unauthorized } from "@/lib/scout/auth";
-import { dispatchBotTasks } from "@/lib/scout/campaigns";
+import { dispatchBotTasks, markDispatch } from "@/lib/scout/campaigns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ export async function GET(request: Request) {
   if (process.env.CAMPAIGN_AUTOPOST !== "on") {
     return Response.json({ ok: true, disabled: true, sent: 0, failed: 0, left: 0 });
   }
+  await markDispatch();
   const stats = await dispatchBotTasks(undefined, Date.now() + 230_000);
   return Response.json({ ok: true, ...stats });
 }

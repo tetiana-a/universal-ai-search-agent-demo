@@ -1,4 +1,4 @@
-name: Campaign dispatch (hourly)
+name: Campaign dispatch (every 15 min)
 
 # Vercel Hobby runs crons once a day. This wave lets the bot publish campaign
 # tasks at their scheduled hours (/schedule). It only calls the signed endpoint;
@@ -6,7 +6,7 @@ name: Campaign dispatch (hourly)
 # approved by the owner. Needs repository secret CRON_SECRET (same value as in Vercel).
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions: {}

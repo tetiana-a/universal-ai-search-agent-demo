@@ -282,26 +282,29 @@ export function partnerInviteLink() {
 
 export function parseJoinArgs(args: string) {
   const url = /https?:\/\/\S+|(?:t\.me|facebook\.com|instagram\.com|tiktok\.com)\/\S+/i.exec(args)?.[0] || "";
-  const nums = (args.replace(url, " ").match(/\d+/g) || []).map(Number);
-  return { url, dailyLimit: nums[0], minDaysBetween: nums[1] };
+  const rest = args.replace(url, " ");
+  const nums = (rest.match(/(?<![\p{L}\d])\d+(?![\p{L}\d])/gu) || []).map(Number);
+  // Whatever words remain are the partner's topics: campaigns reach this place only on a match.
+  const topic = rest.replace(/(?<![\p{L}\d])\d+(?![\p{L}\d])/gu, " ").replace(/[^\p{L}\p{N},\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return { url, dailyLimit: nums[0], minDaysBetween: nums[1], topic: topic || undefined };
 }
 
 const JOIN_HELP = "🤝 <b>Подключение к сети партнёров</b>\n\nВы админ группы, канала или владелец страницы и готовы публиковать подходящие объявления? Подключитесь один раз:\n\n" +
   "<b>Telegram</b>: добавьте бота {bot} администратором в группу или канал — публикации пойдут автоматически, в пределах лимита.\n\n" +
-  "<b>Facebook, Instagram, TikTok</b> (или Telegram с согласованием каждого поста): отправьте\n<code>/join ссылка постов_в_день раз_в_N_дней</code>\nНапример: <code>/join https://www.facebook.com/groups/valencia 1 3</code>\n\n" +
+  "<b>Facebook, Instagram, TikTok</b> (или Telegram с согласованием каждого поста): отправьте\n<code>/join ссылка постов_в_день раз_в_N_дней темы</code>\nНапример: <code>/join https://www.facebook.com/groups/valencia 1 3 недвижимость, Валенсия</code>\nЗадания приходят только по вашим темам.\n\n" +
   "Бот будет присылать вам готовые задания, вы публикуете сами и отвечаете /proof со ссылкой. Отключиться: /leave ссылка.";
 
 export async function handleJoin(chatId: string, userId: string, who: string, args: string) {
-  const { url, dailyLimit, minDaysBetween } = parseJoinArgs(args);
+  const { url, dailyLimit, minDaysBetween, topic } = parseJoinArgs(args);
   if (!url) { await sendMessage(chatId, JOIN_HELP.replace("{bot}", escapeHtml(botHandle()))); return; }
   const found = platformOfUrl(url);
   const existing = found ? await getOne<GroupCard>("groups", stableId("grp", found.url.toLowerCase())) : null;
   if (existing?.partnerTelegramId && existing.partnerTelegramId !== userId && existing.status !== "declined") { await sendMessage(chatId, "Эта площадка уже подключена другим админом. Если это ошибка, напишите владельцу сети."); return; }
-  const card = await addGroupManually({ url, pending: true, partnerTelegramId: userId, dailyLimit: dailyLimit ?? 1, minDaysBetween: minDaysBetween ?? 1, permissionNote: "самоподключение через бота: " + who + ", " + new Date().toISOString().slice(0, 10) });
+  const card = await addGroupManually({ url, pending: true, partnerTelegramId: userId, dailyLimit: dailyLimit ?? 1, minDaysBetween: minDaysBetween ?? 1, topic, permissionNote: "самоподключение через бота: " + who + ", " + new Date().toISOString().slice(0, 10) });
   if (!card) { await sendMessage(chatId, "Нужна ссылка на группу или страницу в Telegram, Facebook, Instagram или TikTok."); return; }
-  await sendMessage(chatId, "✅ Заявка принята: " + escapeHtml(card.name) + " (" + PLATFORM_LABEL[card.platform] + "), до " + (card.dailyLimit ?? 1) + " постов в день, не чаще раза в " + (card.minDaysBetween || 1) + " дн. После проверки владельцем вы начнёте получать задания.");
+  await sendMessage(chatId, "✅ Заявка принята: " + escapeHtml(card.name) + " (" + PLATFORM_LABEL[card.platform] + "), до " + (card.dailyLimit ?? 1) + " постов в день, не чаще раза в " + (card.minDaysBetween || 1) + " дн." + (topic ? " Темы: " + escapeHtml(topic) + "." : " Темы не указаны: пришлите /join ещё раз с темами, иначе подойдут только кампании, совпавшие с названием площадки.") + " После проверки владельцем вы начнёте получать задания.");
   const owner = [...controlIds()].find((id) => /^\d+$/.test(id)) || (await reportChatId());
-  if (owner) await sendMessage(owner, "🤝 Новый партнёр: " + escapeHtml(who) + " (ID " + userId + ")\n" + escapeHtml(card.url) + " · " + PLATFORM_LABEL[card.platform] + " · " + (card.dailyLimit ?? 1) + "/день", [[{ text: "✅ Подключить", callback_data: "cp:pok:" + card.id }, { text: "✖️ Отклонить", callback_data: "cp:pno:" + card.id }]]);
+  if (owner) await sendMessage(owner, "🤝 Новый партнёр: " + escapeHtml(who) + " (ID " + userId + ")\n" + escapeHtml(card.url) + " · " + PLATFORM_LABEL[card.platform] + " · " + (card.dailyLimit ?? 1) + "/день" + (card.topic ? "\nТемы: " + escapeHtml(card.topic) : ""), [[{ text: "✅ Подключить", callback_data: "cp:pok:" + card.id }, { text: "✖️ Отклонить", callback_data: "cp:pno:" + card.id }]]);
 }
 
 export async function handleLeave(chatId: string, userId: string, args: string) {
