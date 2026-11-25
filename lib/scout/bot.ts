@@ -17,7 +17,7 @@ import { CAMPAIGN_COMMANDS, campaignSummary, handleCampaignCallback, handleCampa
 import { ADVISOR_COMMANDS, advisorMode, handleAdvisorCallback, handleAdvisorCommand, handleAdvisorText, handleAdvisorVoice } from "@/lib/scout/advisor-bot";
 import { advanceAdWizard, adWizardButton, cancelAdWizard, isAdPostingIntent, startAdWizard } from "@/lib/scout/ad-wizard";
 import { createPostizDraft, listPostizChannels, postizConfigured } from "@/lib/scout/postiz";
-import { cancelInstagramJob, listInstagramJobs, refreshInstagramJobs, scheduleInstagram } from "@/lib/scout/instagram-posts";
+import { cancelInstagramJob, jobPlatform, jobStatusRu, listInstagramJobs, refreshInstagramJobs, scheduleInstagram } from "@/lib/scout/instagram-posts";
 import type { AgencyCard, Draft, InvestorCard, Lead, Match, ObjectCard, ScoutSource, WatchItem, WatchKind } from "@/lib/scout/types";
 
 // Telegram control of the agent (spec 6: Telegram is the main interface).
@@ -359,10 +359,9 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       let posts=await refreshInstagramJobs().catch(()=>null);
       const stale=!posts;
       posts ??=await listInstagramJobs();
-      const rows=posts.slice(0,8).map(p=>"<code>"+escapeHtml(p.id)+"</code> · "+escapeHtml(p.channelName)+" · "+
-        (p.status==="published" ? "✅ опубликовано" : p.status==="scheduled" ? "🗓 в расписании" : p.status==="cancelled" ? "⏹ отменено" : "⚠️ не подтверждено")+
+      const rows=posts.slice(0,8).map(p=>"<code>"+escapeHtml(p.id)+"</code> · "+jobPlatform(p)+" · "+escapeHtml(p.channelName)+" · "+jobStatusRu(p.status)+
         "\n"+escapeHtml(p.scheduledAt)+(p.releaseURL ? "\n"+escapeHtml(p.releaseURL) : "")+(p.error ? "\nПричина: "+escapeHtml(p.error) : "")).join("\n\n");
-      await sendMessage(chatId,"📊 <b>Instagram / Postiz</b>"+(stale?"\n⚠️ API статистики недоступен, показан журнал AURELIUS.":"")+
+      await sendMessage(chatId,"📊 <b>Postiz · Instagram и TikTok</b>"+(stale?"\n⚠️ API статистики недоступен, показан журнал AURELIUS.":"")+
         "\n\n"+(rows||"Очередь пуста. /ighelp"));
       return {};
     }
@@ -370,8 +369,8 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
       if (!(await isControl(chatId, userId))) {
         await sendMessage(chatId,"⛔ Только владелец и админы группы."); return {};
       }
-      if (!/^ig-[\w-]{8,80}$/.test(args)) {
-        await sendMessage(chatId,"Укажите ID из /igstatus: <code>/igcancel ig-...</code>");return {};
+      if (!/^(ig|tt)-[\w-]{8,80}$/.test(args)) {
+        await sendMessage(chatId,"Укажите ID из /igstatus: <code>/igcancel ig-...</code> или <code>/igcancel tt-...</code>");return {};
       }
       const cancelled=await cancelInstagramJob(args).catch(()=>({ok:false,error:"POSTIZ_CANCEL_FAILED"}));
       await sendMessage(chatId,cancelled.ok?"⏹ Запланированная публикация отменена в Postiz.":"⚠️ Отмена не подтверждена: "+escapeHtml(cancelled.error||"ошибка"));

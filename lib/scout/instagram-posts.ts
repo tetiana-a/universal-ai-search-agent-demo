@@ -13,6 +13,10 @@ export type InstagramJob = {
   caption: string; scheduledAt: string; postId?: string; releaseURL?: string; campaignId?: string;
   status: "scheduled" | "published" | "unknown" | "cancelled"; error?: string;
 };
+// Jobs share one collection; the id prefix tells the platform (tt- TikTok, ig- Instagram).
+export const jobPlatform = (job: Pick<InstagramJob, "id">) => (job.id.startsWith("tt-") ? "TikTok" : "Instagram");
+export const jobStatusRu = (status: InstagramJob["status"]) =>
+  status === "published" ? "✅ опубликовано" : status === "scheduled" ? "🗓 в расписании" : status === "cancelled" ? "⏹ отменено" : "⚠️ Postiz не принял";
 export type InstagramRequest = {
   requestId: string; ownerId: string; integrationId?: string;
   caption: string; scheduledAt: string; mediaUrl?: string; telegramFileId?: string;

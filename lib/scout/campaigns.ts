@@ -879,10 +879,14 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
   // Instagram is scheduled in Postiz; one daily check tracks actual external
   // links without claiming success merely because Postiz accepted a schedule.
   const instagram = await step("Instagram / Postiz", () => import("@/lib/scout/instagram-posts").then((m) => m.refreshInstagramJobs()));
-  if (chat && instagram?.length) {
-    const recent = instagram.slice(0, 6);
-    const rows = recent.map((j) => j.channelName + " · " + j.status + (j.releaseURL ? " · " + j.releaseURL : " · ссылка на Instagram пока не подтверждена"));
-    await sendMessage(chat, "📸 <b>Instagram · отчёт Postiz</b>\n" + rows.join("\n"));
+  // Only jobs that changed in the last two days, so an old failed attempt is not repeated every morning.
+  const fresh = instagram?.filter((j) => Date.now() - Date.parse(j.updatedAt) < 2 * 86_400_000) || [];
+  if (chat && fresh.length) {
+    const { jobPlatform, jobStatusRu } = await import("@/lib/scout/instagram-posts");
+    const rows = fresh.slice(0, 6).map((j) => "• " + jobPlatform(j) + " · " + escapeHtml(j.channelName) + " · " + jobStatusRu(j.status)
+      + (j.releaseURL ? "\n  " + escapeHtml(j.releaseURL) : j.status === "scheduled" ? "\n  выйдет " + escapeHtml(j.scheduledAt.slice(0, 16).replace("T", " ")) + " UTC" : "")
+      + (j.status === "unknown" && j.error ? "\n  причина: " + escapeHtml(j.error.slice(0, 120)) : ""));
+    await sendMessage(chat, "📸 <b>Ваши публикации через Postiz</b> (Instagram, TikTok)\n" + rows.join("\n"));
   }
   await step("дубли сообществ", () => upsertGroups([]));
   // Daily archive to Supabase (when connected): the long-term history outside Redis.

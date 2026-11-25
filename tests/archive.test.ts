@@ -53,3 +53,12 @@ describe("Supabase archive", () => {
     expect(Object.keys(archiveSheets(rows)).sort()).toEqual(["Размещения", "Сообщества"]);
   });
 });
+
+describe("archiveJson", () => {
+  it("replaces lone surrogates and NUL so PostgREST accepts the batch", async () => {
+    const { archiveJson } = await import("@/lib/archive");
+    const json = archiveJson([{ data: { a: "cut 😀".slice(0, 5), b: "x\u0000y", c: "ok 😀" } }]);
+    expect(json).not.toMatch(/\\ud8|\\u0000/);
+    expect(JSON.parse(json)[0].data).toEqual({ a: "cut �", b: "x�y", c: "ok 😀" });
+  });
+});
