@@ -3,7 +3,7 @@ import { POST } from "@/app/api/research/task/route";
 import { clearReaderCache } from "@/lib/free-research";
 import { resetLocalQuotaCounters } from "@/lib/plans";
 import { checkNumericCriteria, parseNumericCriteria } from "@/lib/criteria";
-import { rankFreeModels, resetFreeModelCache, runStructuredExtraction } from "@/lib/free-ai";
+import { configuredAiProviders, rankFreeModels, resetFreeModelCache, runStructuredExtraction } from "@/lib/free-ai";
 import { buildSourceMap, pickBranches, roughEnglish } from "@/lib/source-map";
 import { isNoiseSource } from "@/lib/page-kind";
 import { json, mockFetch, openRouterReply, postJson, verifyReply } from "./helpers";
@@ -143,16 +143,19 @@ describe("listicles", () => {
 });
 
 describe("free model choice after the live test", () => {
-  it("never picks music, image or audio models such as Lyria", () => {
+  it("never picks music, image, audio or tiny models; prefers DeepSeek", () => {
     const list = [
       { id: "google/lyria-3-pro-preview", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { input_modalities: ["text"], output_modalities: ["audio", "text"] } },
       { id: "google/lyria-3-clip-preview:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { input_modalities: ["text"], output_modalities: ["text"] } },
       { id: "acme/imagegen:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { output_modalities: ["image"] } },
       { id: "acme/chat-no-json:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, supported_parameters: ["temperature"] },
-      { id: "nvidia/nemotron-nano-reasoning:free", pricing: { prompt: "0", completion: "0" }, context_length: 64000, supported_parameters: ["response_format"] },
+      { id: "nvidia/nemotron-super-reasoning:free", pricing: { prompt: "0", completion: "0" }, context_length: 64000, supported_parameters: ["response_format"] },
+      { id: "liquid/lfm-3-1.7b:free", pricing: { prompt: "0", completion: "0" }, context_length: 64000, supported_parameters: ["response_format"] },
+      { id: "deepseek/deepseek-chat-v3-0324:free", pricing: { prompt: "0", completion: "0" }, context_length: 64000, supported_parameters: ["response_format"] },
       { id: "acme/chat:free", pricing: { prompt: "0", completion: "0" }, context_length: 32000, architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["response_format"] },
     ];
-    expect(rankFreeModels(list)).toEqual(["acme/chat:free", "nvidia/nemotron-nano-reasoning:free"]);
+    // DeepSeek first; tiny models (1.7B) never.
+    expect(rankFreeModels(list)).toEqual(["deepseek/deepseek-chat-v3-0324:free", "nvidia/nemotron-super-reasoning:free", "acme/chat:free"]);
   });
 
   it("tries the model that last worked first and skips one that just failed", async () => {
@@ -216,5 +219,20 @@ describe("after the third live test", () => {
     expect(body.aiStatus.ok).toBe(true);
     expect(body.results).toEqual([]);
     expect(body.outcome).toBe("all_candidates_rejected");
+  });
+});
+
+describe("free AI provider order", () => {
+  it("puts fast free tiers first, OpenRouter last, and keeps Groq/DeepSeek in zero-cost mode", () => {
+    vi.stubEnv("ZERO_COST_MODE", "on");
+    vi.stubEnv("OPENROUTER_API_KEY", "or");
+    vi.stubEnv("GEMINI_API_KEY", "gm");
+    vi.stubEnv("GROQ_API_KEY", "gq");
+    vi.stubEnv("GITHUB_MODELS_TOKEN", "gh");
+    const providers = configuredAiProviders("free");
+    expect(providers.map((p) => p.id)).toEqual(["groq", "gemini", "github", "openrouter"]);
+    expect(providers.find((p) => p.id === "github")?.model).toBe("deepseek/DeepSeek-V3-0324");
+    expect(providers.find((p) => p.id === "gemini")?.models).toContain("gemini-flash-lite-latest");
+    vi.unstubAllEnvs();
   });
 });

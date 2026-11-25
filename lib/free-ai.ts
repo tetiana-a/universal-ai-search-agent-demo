@@ -2,7 +2,7 @@
 // answers. Every provider here has a free tier; Pro can point OpenRouter at a
 // stronger paid model with PRO_OPENROUTER_MODEL.
 
-export type AiProviderId = "openrouter" | "gemini" | "groq";
+export type AiProviderId = "openrouter" | "gemini" | "groq" | "github" | "cerebras" | "mistral";
 export type Edition = "free" | "pro";
 
 type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: string; model: string; models?: string[]; headers?: Record<string, string> };
@@ -11,17 +11,19 @@ type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: stri
 // free models are read from OpenRouter's public model list and the best few are tried in
 // turn. These IDs are only the fallback when that list cannot be fetched.
 export const FALLBACK_FREE_MODELS = [
-  "meta-llama/llama-3.3-70b-instruct:free",
   "deepseek/deepseek-chat-v3-0324:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
   "qwen/qwen-2.5-72b-instruct:free",
   "mistralai/mistral-small-3.2-24b-instruct:free",
 ];
-const PREFERRED_FREE = [/nemotron.*super/i, /llama-3\.3-70b/i, /deepseek-(chat|v3)/i, /gemini.*flash/i, /qwen.*(72b|235b|max)/i, /llama-4/i, /mistral-(small|medium)/i, /gpt-oss/i];
+const PREFERRED_FREE = [/deepseek-(chat|v3)/i, /nemotron.*super/i, /gemma-4-31b/i, /llama-3\.3-70b/i, /gemini.*flash/i, /qwen.*(72b|235b|max)/i, /llama-4/i, /mistral-(small|medium)/i, /gpt-oss/i];
 let freeModelCache: { at: number; models: string[] } | null = null;
 
 // Only text-in/text-out chat models that support JSON output are usable; music, image,
 // audio and embedding models (e.g. Lyria) are never picked even when listed as free.
 const NOT_CHAT = /lyria|image|imagen|audio|music|tts|whisper|speech|veo|video|embed|rerank|guard|moderation|vision-only|omni/i;
+// Tiny models (1-9B, nano/lightning) truncate or garble the verification JSON.
+const TOO_SMALL = /[-_](?:[0-9](?:\.\d+)?b)\b|nano|lightning/i;
 const REASONING = /reason|thinking|r1\b|qwq|dots-|apodex|note-preview/i;
 
 export function rankFreeModels(list: any[]): string[] {
@@ -36,7 +38,7 @@ export function rankFreeModels(list: any[]): string[] {
     const textIn = !Array.isArray(input) || input.includes("text");
     const params = Array.isArray(m?.supported_parameters) ? m.supported_parameters : null;
     const json = !params || params.includes("response_format") || params.includes("structured_outputs");
-    return id && isFree && textOnlyOut && textIn && json && !NOT_CHAT.test(id) && Number(m?.context_length || 0) >= 16000;
+    return id && isFree && textOnlyOut && textIn && json && !NOT_CHAT.test(id) && !TOO_SMALL.test(id) && Number(m?.context_length || 0) >= 16000;
   });
   const score = (m: any) => {
     const id = String(m.id);
@@ -84,21 +86,49 @@ async function freeOpenRouterModels(): Promise<string[]> {
   return FALLBACK_FREE_MODELS;
 }
 
+// Order matters: fast, reliable free tiers first (Groq answers in ~2 s), OpenRouter's shared
+// free pool (often 429) last. Each provider has a few models; a 404/429 moves to the next one.
+// Groq, GitHub Models, Cerebras and Mistral keys only bill if the account is upgraded, so they
+// are allowed in ZERO_COST_MODE too.
 export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   const out: AiProvider[] = [];
-  const zeroCost = process.env.ZERO_COST_MODE === "on";
-  const openRouterKey = String(process.env.OPENROUTER_API_KEY || "").trim();
+  const env = (name: string) => String(process.env[name] || "").trim();
+  const list = (...ids: string[]) => [...new Set(ids.filter(Boolean))];
+  const zeroCost = env("ZERO_COST_MODE") === "on";
 
+  if (env("GROQ_API_KEY")) {
+    const models = list(env("GROQ_MODEL") || "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct");
+    out.push({ id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1/chat/completions", key: env("GROQ_API_KEY"), model: models[0], models });
+  }
+
+  // A Google AI Studio key without billing only has the free tier; ZERO_COST_GEMINI=off drops it.
+  const geminiKey = env("GEMINI_API_KEY") || env("GOOGLE_AI_API_KEY");
+  if (geminiKey && !(zeroCost && env("ZERO_COST_GEMINI") === "off")) {
+    const models = list((edition === "pro" && env("PRO_GEMINI_MODEL")) || env("GEMINI_MODEL") || "gemini-2.5-flash", "gemini-flash-lite-latest");
+    out.push({ id: "gemini", label: "Google Gemini", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: geminiKey, model: models[0], models });
+  }
+
+  // DeepSeek for free: GitHub Models serves DeepSeek-V3 on any GitHub account (token with models:read).
+  // DeepSeek's own API has no free tier.
+  const githubToken = env("GITHUB_MODELS_TOKEN");
+  if (githubToken) {
+    const models = list(env("GITHUB_MODELS_MODEL") || "deepseek/DeepSeek-V3-0324", "openai/gpt-4.1-mini");
+    out.push({ id: "github", label: "GitHub Models", endpoint: "https://models.github.ai/inference/chat/completions", key: githubToken, model: models[0], models });
+  }
+  if (env("CEREBRAS_API_KEY")) {
+    const models = list(env("CEREBRAS_MODEL") || "gpt-oss-120b", "llama-3.3-70b");
+    out.push({ id: "cerebras", label: "Cerebras", endpoint: "https://api.cerebras.ai/v1/chat/completions", key: env("CEREBRAS_API_KEY"), model: models[0], models });
+  }
+  if (env("MISTRAL_API_KEY")) {
+    const models = list(env("MISTRAL_MODEL") || "mistral-small-latest");
+    out.push({ id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1/chat/completions", key: env("MISTRAL_API_KEY"), model: models[0], models });
+  }
+
+  const openRouterKey = env("OPENROUTER_API_KEY");
   if (openRouterKey) {
-    const requested = String(
-      (edition === "pro" && process.env.PRO_OPENROUTER_MODEL) ||
-      process.env.OPENROUTER_MODEL ||
-      "",
-    ).trim();
-    const freeOnlyModel = requested === "openrouter/free" || requested.endsWith(":free")
-      ? requested
-      : "openrouter/free";
-
+    const requested = String((edition === "pro" && process.env.PRO_OPENROUTER_MODEL) || process.env.OPENROUTER_MODEL || "").trim();
+    // Strict zero-cost mode never lets OpenRouter pick a model that could become billable.
+    const freeOnlyModel = requested === "openrouter/free" || requested.endsWith(":free") ? requested : "openrouter/free";
     out.push({
       id: "openrouter",
       label: zeroCost ? "OpenRouter Free" : "OpenRouter",
@@ -111,35 +141,6 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
       },
     });
   }
-
-  // Strict zero-cost mode must never fall through to a provider whose selected
-  // model could become billable. Deterministic extraction remains the fallback.
-  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "").trim();
-  // A Google AI Studio key without billing only has the free tier, and the same key already powers
-  // Gemini search, so zero-cost mode keeps it unless ZERO_COST_GEMINI=off.
-  if (zeroCost && (!geminiKey || process.env.ZERO_COST_GEMINI === "off")) return out;
-  if (geminiKey) {
-    out.push({
-      id: "gemini",
-      label: "Google Gemini",
-      endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      key: geminiKey,
-      model: (edition === "pro" && process.env.PRO_GEMINI_MODEL) || process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    });
-  }
-  if (zeroCost) return out;
-
-  const groqKey = String(process.env.GROQ_API_KEY || "").trim();
-  if (groqKey) {
-    out.push({
-      id: "groq",
-      label: "Groq",
-      endpoint: "https://api.groq.com/openai/v1/chat/completions",
-      key: groqKey,
-      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-    });
-  }
-
   return out;
 }
 
@@ -204,14 +205,15 @@ export async function runStructuredExtraction(options: {
   for (const provider of providers) {
     // OpenRouter: the configured model first, then current free models as a fallback.
     const models = provider.id !== "openrouter"
-      ? [provider.model]
-      : orderByHealth([...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...(await freeOpenRouterModels())])]);
-    for (const model of models.slice(0, 4)) {
+      ? orderByHealth(provider.models || [provider.model])
+      : [...new Set([...(provider.model === "auto-free" ? [] : [provider.model]), ...orderByHealth(await freeOpenRouterModels())])];
+    // OpenRouter's free pool is the last resort: at most 3 models so it cannot eat the whole budget.
+    for (const model of models.slice(0, provider.id === "openrouter" ? 3 : 4)) {
       const remaining = options.deadlineAt - Date.now() - 1500;
       const timeoutMs = Math.min(options.perCallTimeoutMs, remaining);
       if (timeoutMs < 4000) {
         attempts.push({ provider: provider.id, model, ok: false, message: provider.label + ": not enough time left for AI verification." });
-        break;
+        return { parsed: null, usage: null, attempts, error: attempts.filter((a) => a.message).map((a) => a.message).join(" ") + " Candidates are shown for manual review." };
       }
       try {
         let { response, raw } = await call(provider, model, timeoutMs, true);

@@ -65,6 +65,13 @@ import {
   type ResearchExportPayload,
 } from "@/lib/exporters";
 import { scenarios } from "@/lib/data";
+import { inferResearchKind } from "@/lib/relevance-gate";
+
+// Task category shown above the progress bar, from the same rules the search uses.
+function kindLabel(query: string, lang: string) {
+  const labels = { real_estate: ["Недвижимость", "Real estate"], investor: ["Инвесторы", "Investors"], company: ["Компании", "Companies"], person: ["Специалисты", "People"], general: ["Общий поиск", "General search"] } as const;
+  return labels[inferResearchKind(query)][lang === "ru" ? 0 : 1];
+}
 
 type Theme = "dark" | "light";
 type ResultFilter = "All" | "Verified" | "High match";
@@ -184,12 +191,12 @@ const labels = {
     engineRunning: "AI-движок выполняет исследование",
     engineComplete: "Исследование завершено",
     stageUnderstanding: "Понимание запроса",
-    stagePlanning: "Создание Search Plan",
+    stagePlanning: "План поиска",
     stageDiscovery: "Обнаружение источников",
     stageAcquisition: "Исследование страниц",
     stageExtraction: "Извлечение данных",
-    stageDedup: "Дедупликация и Entity Resolution",
-    stageQuality: "Quality Gate + Evidence",
+    stageDedup: "Удаление дублей",
+    stageQuality: "Проверка результатов",
     liveFeed: "Живой поток исследования",
     resultPreview: "Поток результатов",
     recordsFound: "записей найдено",
@@ -522,10 +529,6 @@ export default function Home() {
   });
   const [liveSources, setLiveSources] = useState<string[]>([]);
   const [liveSourceRegistry, setLiveSourceRegistry] = useState<any[]>([]);
-  const [accessEvents, setAccessEvents] = useState<any[]>([]);
-  const [accessCheckpoints, setAccessCheckpoints] = useState<any[]>([]);
-  const [searchBranches, setSearchBranches] = useState<string[]>([]);
-  const [queryUnderstanding, setQueryUnderstanding] = useState<any>(null);
   const [researchSummary, setResearchSummary] = useState("");
   const [aiCheck, setAiCheck] = useState<{ ok: boolean; configured?: boolean; provider?: string; model?: string; pagesChecked?: number; kept?: number; dropped?: number; message?: string } | null>(null);
   const [liveBilling, setLiveBilling] = useState<Record<string, unknown> | undefined>(undefined);
@@ -574,14 +577,6 @@ export default function Home() {
     if (!id) return;
     setTaskHistory((list) => saveTasks(upsertTask(list, { ...patch, id })));
   }
-  const [qualityGate, setQualityGate] = useState({
-    total: 0,
-    pass: 0,
-    review: 0,
-    fail: 0,
-    independentVerification: false,
-    ruleSet: [] as string[],
-  });
   const [searchPlan, setSearchPlan] = useState("");
   const [liveError, setLiveError] = useState("");
   const [exportError, setExportError] = useState("");
@@ -1133,20 +1128,8 @@ export default function Home() {
     setResearchSummary(String(data.summary || ""));
     setAiCheck(data.aiStatus && typeof data.aiStatus === "object" ? data.aiStatus : null);
     setLiveBilling(data.billing || undefined);
-    setQueryUnderstanding(data.queryUnderstanding || null);
-    setSearchBranches(Array.isArray(data.searchBranches) ? data.searchBranches : []);
     setLiveSources(Array.isArray(data.sourceUrls) ? data.sourceUrls : []);
     setLiveSourceRegistry(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
-    setAccessEvents(Array.isArray(data.accessEvents) ? data.accessEvents : []);
-    setAccessCheckpoints(Array.isArray(data.accessCheckpoints) ? data.accessCheckpoints : []);
-    setQualityGate({
-      total: Number(data.qualityGate?.total || 0),
-      pass: Number(data.qualityGate?.pass || 0),
-      review: Number(data.qualityGate?.review || 0),
-      fail: Number(data.qualityGate?.fail || 0),
-      independentVerification: Boolean(data.qualityGate?.independentVerification),
-      ruleSet: Array.isArray(data.qualityGate?.ruleSet) ? data.qualityGate.ruleSet : [],
-    });
     saveSourceMemory(Array.isArray(data.sourceRegistry) ? data.sourceRegistry : []);
     recordTask({ status: "completed", finishedAt: new Date().toISOString(), rounds: session.round, resultsCount: session.results.length, counters: session.counters as any, snapshot: { ...data, query: session.query } });
     setProgress(100);
@@ -1294,14 +1277,9 @@ export default function Home() {
     setLiveStats({ sourcesFound: 0, sourcesChecked: 0, pagesProcessed: 0, recordsExtracted: 0, duplicatesRemoved: 0, qualified: 0, evidenceCoverage: 0, sourcesBlocked: 0, sourcesManualReview: 0, averageConfidence: 0 });
     setLiveSources([]);
     setLiveSourceRegistry([]);
-    setAccessEvents([]);
-    setAccessCheckpoints([]);
-    setSearchBranches([]);
-    setQueryUnderstanding(null);
     setResearchSummary("");
     setAiCheck(null);
     setLiveBilling(undefined);
-    setQualityGate({ total: 0, pass: 0, review: 0, fail: 0, independentVerification: false, ruleSet: [] });
     setSearchPlan("");
     setLiveError("");
     setRunning(true);
@@ -2004,12 +1982,12 @@ export default function Home() {
 
   const researchStages = [
     { ru: "Понимание запроса", en: "Understanding request", icon: Sparkles, from: 0, to: 12 },
-    { ru: "Создание Search Plan", en: "Building Search Plan", icon: Radar, from: 12, to: 27 },
+    { ru: "План поиска", en: "Building Search Plan", icon: Radar, from: 12, to: 27 },
     { ru: "Обнаружение источников", en: "Discovering sources", icon: Globe2, from: 27, to: 48 },
     { ru: "Исследование страниц", en: "Researching pages", icon: FileSearch, from: 48, to: 70 },
     { ru: "Извлечение данных", en: "Extracting data", icon: Database, from: 70, to: 84 },
-    { ru: "Дедупликация и Entity Resolution", en: "Deduplication & Entity Resolution", icon: Layers3, from: 84, to: 94 },
-    { ru: "Quality Gate + Evidence", en: "Quality Gate + Evidence", icon: ShieldCheck, from: 94, to: 100 },
+    { ru: "Удаление дублей", en: "Deduplication & Entity Resolution", icon: Layers3, from: 84, to: 94 },
+    { ru: "Проверка результатов", en: "Result check", icon: ShieldCheck, from: 94, to: 100 },
   ];
 
   let liveResultCount = 0;
@@ -2020,7 +1998,6 @@ export default function Home() {
   }
 
   const startButtonLabel = lang === "ru" ? "Исследование..." : "Researching...";
-  const taskStateLabel = running ? "LIVE BACKGROUND" : completedSearch ? "COMPLETED" : "READY";
 
   function renderControlPanel() {
     return (
@@ -2053,7 +2030,7 @@ export default function Home() {
               {running ? t.engineRunning : completedSearch ? t.engineComplete : t.liveFeed}
             </div>
             <div className="mt-1 text-xs text-[var(--text-muted)]">
-              {current.label} · {activeTask?.id || "—"} · {taskStateLabel}
+              {kindLabel(query, lang)}
             </div>
           </div>
           <div className="text-left lg:text-right">
@@ -2069,136 +2046,21 @@ export default function Home() {
           />
         </div>
 
-        {(searchPlan || liveError) && (
-          <div className="mt-4 grid gap-3 lg:grid-cols-[1.5fr_.7fr]">
-            {searchPlan ? (
-              <div className="glass-soft rounded-xl p-4">
-                <div className="text-[10px] uppercase tracking-[.16em] text-[var(--text-faint)]">
-                  Search Plan
-                </div>
-                <div className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
-                  {searchPlan}
-                </div>
-              </div>
-            ) : null}
-            {liveError ? (
-              <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/6 p-4 text-xs leading-5 text-[var(--danger)]">
-                {liveError}
-              </div>
-            ) : null}
-          </div>
-        )}
+        {liveError ? (
+          <div className="mt-4 rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/6 p-4 text-xs leading-5 text-[var(--danger)]">{liveError}</div>
+        ) : null}
 
-        {usingLiveData && (queryUnderstanding || searchBranches.length || researchSummary) ? (
-          <div className="mt-4 grid gap-3 xl:grid-cols-[1.1fr_.9fr]">
-            <div className="glass-soft rounded-xl p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[10px] uppercase tracking-[.16em] text-[var(--gold)]">AI QUERY UNDERSTANDING</div>
-                <div className="text-[10px] text-[var(--text-faint)]">{queryUnderstanding?.entityType || "—"}</div>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {[
-                  ["Intent", queryUnderstanding?.intent],
-                  ["Geography", Array.isArray(queryUnderstanding?.geography) ? queryUnderstanding.geography.join(", ") : ""],
-                  ["Criteria", Array.isArray(queryUnderstanding?.criteria) ? queryUnderstanding.criteria.join(" · ") : ""],
-                  ["Required fields", Array.isArray(queryUnderstanding?.requiredFields) ? queryUnderstanding.requiredFields.join(" · ") : ""],
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3">
-                    <div className="text-[9px] uppercase tracking-[.13em] text-[var(--text-faint)]">{label}</div>
-                    <div className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">{String(value || "—")}</div>
-                  </div>
-                ))}
-              </div>
-              {aiCheck ? (
-                <div className={"mt-3 rounded-lg border p-3 text-[10px] leading-4 " + (aiCheck.ok ? "border-emerald-400/30 text-emerald-200/90" : "border-amber-400/40 text-amber-200/90")}>
-                  {aiCheck.ok
-                    ? (lang === "ru" ? "ИИ-проверка работает" : "AI verification ran") + ` · ${aiCheck.provider} · ${aiCheck.model} · ` + (lang === "ru" ? `страниц ${aiCheck.pagesChecked}, подошло ${aiCheck.kept}, отсеяно ${aiCheck.dropped}` : `${aiCheck.pagesChecked} pages, ${aiCheck.kept} kept, ${aiCheck.dropped} dropped`)
-                    : !aiCheck.configured
-                      ? (lang === "ru" ? "ИИ-проверка не подключена (нет OPENROUTER_API_KEY / GEMINI_API_KEY / GROQ_API_KEY): результаты отобраны правилами." : "AI verification is not configured: results were selected by rules.")
-                      : (lang === "ru" ? "ИИ-проверка не сработала: " : "AI verification failed: ") + String(aiCheck.message || "")}
-                </div>
-              ) : null}
-              {researchSummary ? <div className="mt-3 rounded-lg border border-[var(--line-soft)] bg-white/[.012] p-3 text-[10px] leading-4 text-[var(--text-muted)]">{researchSummary}</div> : null}
-            </div>
-            <div className="glass-soft rounded-xl p-4">
-              <div className="text-[10px] uppercase tracking-[.16em] text-[var(--cyan)]">SEARCH BRANCHES</div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {searchBranches.slice(0, 16).map((branch) => <span key={branch} className="rounded-full border border-[var(--line-soft)] bg-white/[.02] px-2.5 py-1.5 text-[9px] text-[var(--text-muted)]">{branch}</span>)}
-              </div>
-            </div>
+        {usingLiveData && aiCheck ? (
+          <div className={"mt-4 text-[11px] leading-5 " + (aiCheck.ok ? "text-[var(--success)]" : "text-[var(--warning)]")}>
+            {aiCheck.ok
+              ? (lang === "ru" ? `Проверено ИИ (${aiCheck.provider}): подошло ${aiCheck.kept} из ${aiCheck.pagesChecked} страниц.` : `Checked by AI (${aiCheck.provider}): ${aiCheck.kept} of ${aiCheck.pagesChecked} pages fit.`)
+              : (lang === "ru" ? "ИИ-проверка сейчас недоступна (лимиты бесплатных моделей). Результаты отмечены для ручной проверки." : "AI check is unavailable right now (free model limits). Results are marked for manual review.")}
           </div>
         ) : null}
 
-        <div className="mt-5 grid gap-2 md:grid-cols-7">
-          {researchStages.map((item, index) => {
-            const Icon = item.icon;
-            const state = completedSearch || progress >= item.to ? "done" : researchStage === index && running ? "active" : "idle";
-            return (
-              <div key={item.ru} className={`rounded-xl border p-3 transition-all duration-300 ${state === "done" ? "border-[var(--success)]/20 bg-[var(--success)]/6" : state === "active" ? "border-[var(--gold)]/25 bg-[var(--gold)]/8" : "border-[var(--line-soft)] bg-[var(--surface)]"}`}>
-                <div className="flex items-center gap-2">
-                  <Icon size={14} className={state === "done" ? "text-[var(--success)]" : state === "active" ? "spectrum-icon-text" : "text-[var(--text-faint)]"} />
-                  {state === "done" ? <Check size={12} className="ml-auto text-[var(--success)]" /> : null}
-                </div>
-                <div className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">{item[lang === "ru" ? "ru" : "en"]}</div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            [
-              "Sources",
-              liveAttempted
-                ? (usingLiveData ? liveStats.sourcesFound.toLocaleString() : "—")
-                : "—",
-            ],
-            [
-              "Pages / URLs",
-              liveAttempted
-                ? (usingLiveData ? liveStats.pagesProcessed.toLocaleString() : "—")
-                : "—",
-            ],
-            [
-              "Extracted",
-              liveAttempted
-                ? (usingLiveData ? liveStats.recordsExtracted.toLocaleString() : "—")
-                : "—",
-            ],
-            [
-              "Qualified",
-              liveAttempted
-                ? (usingLiveData ? liveStats.qualified.toLocaleString() : "—")
-                : "—",
-            ],
-          ].map(([label, value]) => (
-            <div key={label} className="glass-soft rounded-xl p-3">
-              <div className="text-[10px] uppercase tracking-[.15em] text-[var(--text-faint)]">{label}</div>
-              <div className="mt-1 text-lg font-semibold text-[var(--text-soft)]">{value}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-5 rounded-2xl border border-[var(--line-soft)] bg-black/10 p-4">
-          <div className="flex items-center justify-between text-[10px] uppercase tracking-[.16em] text-[var(--text-faint)]">
-            <span>Agent event stream</span>
-            <span>{running ? "LIVE" : completedSearch ? "DONE" : "READY"}</span>
-          </div>
-          <div className="mt-3 space-y-2 font-mono text-[10px] text-[var(--text-muted)]">
-            {researchStages.slice(0, Math.max(1, researchStage + 1)).map((item, index) => (
-              <div key={item.ru} className="flex items-center gap-2">
-                <span className={index < researchStage || completedSearch ? "text-[var(--success)]" : "spectrum-icon-text"}>●</span>
-                <span>{index < researchStage || completedSearch ? "DONE" : "RUN "}</span>
-                <span className="text-[var(--text-soft)]">{item[lang === "ru" ? "ru" : "en"]}</span>
-                <span className="ml-auto text-[var(--text-faint)]">{Math.min(100, Math.max(0, progress - item.from))}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {liveResultCount > 0 && (
           <div id="results-preview" className="mt-5 scroll-mt-28 rounded-2xl border border-[var(--line-soft)] bg-[var(--surface)] p-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-soft)]">
                   <Target size={15} className="spectrum-icon-text" />
@@ -2216,24 +2078,6 @@ export default function Home() {
               {completedSearch ? renderShareActions(true) : null}
             </div>
 
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {results.slice(0, liveResultCount).map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setSelectedResult(item)}
-                  className="panel-hover rounded-xl border border-[var(--line-soft)] bg-[var(--bg-soft)] p-3 text-left"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-medium text-[var(--text-soft)]">{item.title}</div>
-                      <div className="mt-1 text-[10px] text-[var(--text-muted)]">{item.location} · {item.area} · {item.price}</div>
-                    </div>
-                    <span className="rounded-full bg-[var(--success)]/8 px-2 py-1 text-[9px] text-[var(--success)]">{item.match}%</span>
-                  </div>
-                  <div className="mt-2 text-[10px] text-[var(--text-faint)]">{item.source} · {item.evidence}</div>
-                </button>
-              ))}
-            </div>
           </div>
         )}
         {renderControlPanel()}
@@ -2249,17 +2093,7 @@ export default function Home() {
           <div className="absolute inset-x-0 top-0 h-px shimmer opacity-70" />
 
           <div className="relative max-w-5xl">
-            <h1 className="font-display text-[27px] font-normal leading-[1.12] tracking-[-.012em] text-[var(--text)] sm:text-[32px] lg:text-[36px]">
-              {lang === "ru" ? "Поиск. Проверка. Решение." : "Research. Verify. Decide."}
-            </h1>
-
-            <p className="mt-1.5 max-w-xl text-[12.5px] leading-5 text-[var(--text-muted)]">
-              {lang === "ru"
-                ? "Один запрос — проверенные источники и структурированный результат."
-                : "One request — sourced, structured results."}
-            </p>
-
-            <div className="mt-4 rounded-[16px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-1.5 backdrop-blur-xl">
+            <div className="rounded-[16px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_40%,transparent)] p-1.5 backdrop-blur-xl">
               <div className="rounded-[12px] border border-[var(--line-soft)] bg-[var(--surface-strong)] p-2.5">
                 <textarea
                   value={query}
@@ -2575,64 +2409,12 @@ export default function Home() {
 
         
         {usingLiveData ? (
-          <section data-reveal="panel" className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
+          <section data-reveal="panel" className="mt-5">
             <div className="glass rounded-[26px] p-6 sm:p-7">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[10px] uppercase tracking-[.18em] text-[var(--gold)]">
-                    QUALITY GATE
-                  </div>
-                  <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
-                    {lang === "ru" ? "Проверка доказательств" : "Evidence validation"}
-                  </h3>
-                </div>
-                <div className="rounded-full border border-[var(--line)] bg-white/[.02] px-3 py-1 text-[10px] text-[var(--text-muted)]">
-                  {qualityGate.pass}/{qualityGate.total} PASS
-                </div>
-              </div>
-
-              <div className="mt-5 grid grid-cols-3 gap-3">
-                {[
-                  ["PASS", qualityGate.pass, "text-[var(--success)]"],
-                  ["REVIEW", qualityGate.review, "text-[var(--warning)]"],
-                  ["FAIL", qualityGate.fail, "text-[var(--danger)]"],
-                ].map(([label, value, tone]) => (
-                  <div key={String(label)} className="rounded-xl border border-[var(--line-soft)] bg-white/[.012] p-4">
-                    <div className={`text-[10px] uppercase tracking-[.14em] ${tone}`}>{String(label)}</div>
-                    <div className="mt-2 text-2xl font-semibold text-[var(--text)]">{String(value)}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-5 space-y-2">
-                {qualityGate.ruleSet.map((rule) => (
-                  <div
-                    key={rule}
-                    className="flex items-center gap-2 rounded-lg border border-[var(--line-soft)] bg-white/[.012] px-3 py-2 text-[11px] text-[var(--text-muted)]"
-                  >
-                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--success)]/10 text-[var(--success)]">
-                      ✓
-                    </span>
-                    {rule}
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4 text-[11px] leading-5 text-[var(--warning)]">
-                {lang === "ru"
-                  ? "PASS означает, что структурные проверки пройдены. Независимая проверка вторым источником пока не включена."
-                  : "PASS means the structural checks passed. Independent second-source verification is not enabled yet."}
-              </div>
-            </div>
-
-            <div className="glass rounded-[26px] p-6 sm:p-7">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[10px] uppercase tracking-[.18em] text-[var(--cyan)]">
-                    LIVE SOURCES
-                  </div>
-                  <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
-                    {lang === "ru" ? "Источники текущего поиска" : "Sources used in this search"}
+                  <h3 className="text-xl font-semibold text-[var(--text)]">
+                    {lang === "ru" ? "Источники" : "Sources"}
                   </h3>
                 </div>
                 <div className="rounded-full border border-[var(--line)] bg-white/[.02] px-3 py-1 text-[10px] text-[var(--text-muted)]">
@@ -2640,8 +2422,8 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mt-5 space-y-2">
-                {liveSources.slice(0, 12).map((url) => {
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                {liveSources.slice(0, 6).map((url) => {
                   let host = url;
                   try {
                     host = new URL(url).hostname.replace(/^www\./, "");
@@ -2672,97 +2454,6 @@ export default function Home() {
                   {lang === "ru" ? "URL источников не вернулись из текущего ответа. Результаты ниже всё равно содержат прямые ссылки." : "Source URLs were not returned in the current response. Results below still contain direct links."}
                 </div>
               ) : null}
-            </div>
-          </section>
-        ) : null}
-
-        {usingLiveData && (liveSourceRegistry.length || accessEvents.length || accessCheckpoints.length) ? (
-          <section data-reveal="panel" className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
-            <div className="glass rounded-[26px] p-6 sm:p-7">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[10px] uppercase tracking-[.18em] text-[var(--gold)]">SOURCE REGISTRY / ACCESS POLICY</div>
-                  <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">{lang === "ru" ? "Что реально было доступно" : "What was actually accessible"}</h3>
-                </div>
-                <span className="rounded-full border border-[var(--line)] px-3 py-1 text-[10px] text-[var(--text-muted)]">{liveSourceRegistry.length}</span>
-              </div>
-              <div className="mt-5 thin-scroll overflow-x-auto">
-                <table className="mobile-table w-full border-collapse">
-                  <thead><tr className="border-b border-[var(--line-soft)] text-left text-[9px] uppercase tracking-[.14em] text-[var(--text-faint)]"><th className="px-3 py-3">Source</th><th className="px-3 py-3">Access</th><th className="px-3 py-3">Method</th><th className="px-3 py-3">Evidence</th><th className="px-3 py-3">Quality</th></tr></thead>
-                  <tbody>{liveSourceRegistry.slice(0, 25).map((source: any) => (
-                    <tr key={`${source.domain}-${source.url}`} className="border-b border-[var(--line-soft)] last:border-0">
-                      <td className="px-3 py-3"><div className="text-[10px] font-medium text-[var(--text-soft)]">{source.name}</div><div className="mt-1 text-[9px] text-[var(--text-faint)]">{source.domain}</div></td>
-                      <td className="px-3 py-3 text-[9px] text-[var(--text-muted)]">{source.accessStatus}</td>
-                      <td className="px-3 py-3 text-[9px] text-[var(--text-muted)]">{source.accessMethod}</td>
-                      <td className="px-3 py-3 text-[9px]">{source.evidenceAvailable ? "YES" : "NO"}</td>
-                      <td className="px-3 py-3 text-[9px] text-[var(--text-muted)]">{source.quality}%</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            </div>
-            <div className="glass rounded-[26px] p-6 sm:p-7">
-              <div className="text-[10px] uppercase tracking-[.18em] text-[var(--cyan)]">ACCESS EVENTS</div>
-              <div className="mt-4 space-y-2">
-                {accessEvents.slice(0, 14).map((event: any, index: number) => (
-                  <div key={`${event.url}-${index}`} className="rounded-xl border border-[var(--line-soft)] bg-white/[.012] p-3">
-                    <div className="flex items-center gap-2"><span className="rounded-full bg-white/[.04] px-2 py-1 text-[9px] text-[var(--gold-bright)]">{event.status}</span><span className="text-[9px] text-[var(--text-faint)]">{event.method}</span></div>
-                    <div className="mt-2 break-all text-[9px] text-[var(--text-muted)]">{event.url}</div>
-                    <div className="mt-1 text-[9px] leading-4 text-[var(--text-faint)]">{event.reason}</div>
-                    <div className="mt-1 text-[9px] leading-4 text-[var(--cyan)]">Fallback: {event.fallback}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {usingLiveData && accessCheckpoints.length ? (
-          <section data-reveal="panel" className="mt-5 glass rounded-[24px] p-5 sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-[10px] uppercase tracking-[.18em] text-[var(--warning)]">ACCESS ESCALATION</div>
-                <h3 className="mt-2 text-xl font-semibold text-[var(--text)]">
-                  {lang === "ru" ? "Требуется ручной доступ к отдельным источникам" : "Manual access is required for some sources"}
-                </h3>
-                <p className="mt-2 max-w-3xl text-[11px] leading-5 text-[var(--text-muted)]">
-                  {lang === "ru"
-                    ? "Агент не обходит CAPTCHA или защиту сайта. Он открывает безопасную точку ручной проверки и продолжает работу с разрешёнными альтернативными источниками."
-                    : "The agent does not bypass CAPTCHA or site access controls. It provides a safe manual checkpoint and continues with allowed alternate sources."}
-                </p>
-              </div>
-              <div className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/5 px-3 py-1.5 text-[11.5px] text-[var(--warning)]">
-                {accessCheckpoints.length} {lang === "ru" ? "точек" : "checkpoints"}
-              </div>
-            </div>
-            <div className="mt-5 grid gap-3">
-              {accessCheckpoints.slice(0, 12).map((checkpoint: any, index: number) => (
-                <div key={String(checkpoint.url || "") + "-" + index} className="rounded-2xl border border-[var(--line-soft)] bg-white/[.012] p-4">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-[var(--warning)]/10 px-2 py-1 text-[9px] uppercase tracking-[.12em] text-[var(--warning)]">
-                          {checkpoint.kind}
-                        </span>
-                        <span className="text-[9px] text-[var(--text-faint)]">
-                          {lang === "ru" ? "действует" : "valid"} {checkpoint.expiresInMinutes} min
-                        </span>
-                      </div>
-                      <div className="mt-2 break-all text-[10px] text-[var(--text-soft)]">{checkpoint.url}</div>
-                      <div className="mt-2 text-[10px] leading-5 text-[var(--text-muted)]">{checkpoint.instructions}</div>
-                    </div>
-                    <a
-                      href={checkpoint.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[10px] text-[var(--gold-bright)] hover:border-[var(--gold)]/30"
-                    >
-                      <ExternalLink size={12} />
-                      {lang === "ru" ? "Открыть вручную" : "Open manually"}
-                    </a>
-                  </div>
-                </div>
-              ))}
             </div>
           </section>
         ) : null}
@@ -3069,11 +2760,11 @@ export default function Home() {
                 </span>
               </div>
               <div className="mt-1.5 text-[11.5px] leading-5 text-[var(--text-muted)]">
-                {[item.location, item.area, item.price].filter(Boolean).join(" · ")}
+                {[item.location, ...(inferResearchKind(query) === "real_estate" ? [item.area, item.price] : [])].filter((v) => v && !/^(not specified|—|-)$/i.test(String(v))).join(" · ")}
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
                 <span className="truncate text-[var(--gold-bright)]">{item.source}</span>
-                <span className="shrink-0 text-[var(--text-faint)]">{item.status}</span>
+                <span className="shrink-0 text-[var(--text-faint)]">{lang === "ru" ? ({ Verified: "Проверено", Reviewed: "Просмотрено", "Manual review": "Проверить вручную" } as Record<string, string>)[item.status] || item.status : item.status}</span>
               </div>
             </div>
             <ArrowUpRight size={14} className="mt-1 shrink-0 text-[var(--text-faint)]" />

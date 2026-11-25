@@ -200,23 +200,23 @@ describe("Free edition without any keys", () => {
     expect(body.results.map((r: any) => r.url)).toContain("https://fincas-madrid.es/terreno-valdebebas");
   });
 
-  it("falls back from OpenRouter to Gemini when the first free model fails", async () => {
+  it("tries Gemini before OpenRouter and falls back when Gemini is busy", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "or_key");
     vi.stubEnv("GEMINI_API_KEY", "gm_key");
     mockFetch([
       ddgOk(),
       keylessReader({ "https://fincas-madrid.es/terreno-valdebebas": LAND_PAGE }),
-      { match: (u) => u.includes("openrouter.ai"), respond: () => json({ error: { message: "free model busy" } }, 429) },
+      { match: (u) => u.includes("generativelanguage.googleapis.com"), respond: () => json({ error: { message: "quota" } }, 429) },
       {
-        match: (u) => u.includes("generativelanguage.googleapis.com"),
+        match: (u) => u.includes("openrouter.ai/api/v1/chat"),
         respond: () => openRouterReply(researchPayload([
           aiResult({ title: "Parcela Valdebebas 12.500 m²", location: "Madrid", area: "12.500 m²", price: "3.200.000 €", url: "https://fincas-madrid.es/terreno-valdebebas", source: "fincas-madrid.es", evidence: "Land plot", evidence_quote: "Parcela de 12.500 m² en Valdebebas." }),
         ])),
       },
     ]);
     const body = await (await POST(request({ testMode: true }))).json();
-    expect(body.aiStatus).toMatchObject({ ok: true, provider: "gemini" });
-    expect(body.aiStatus.attempts[0]).toMatchObject({ provider: "openrouter", ok: false });
+    expect(body.aiStatus).toMatchObject({ ok: true, provider: "openrouter" });
+    expect(body.aiStatus.attempts[0]).toMatchObject({ provider: "gemini", ok: false });
     expect(body.results[0].price).toBe("3.200.000 €");
   });
 

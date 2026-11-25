@@ -66,7 +66,7 @@ const KIND_RULES: Record<ResearchKind, string> = {
   investor: "An entity is ONE investor: a venture fund, an angel network, a family office or a named business angel, on its own site or profile. 'Top 10 investors' articles, rankings, news and event pages are article/listing_index, not entities. Extract investment_type, stage, ticket.",
   company: "An entity is ONE company: its own website, or its supplier/company page on a B2B platform (Made-in-China, Alibaba, Global Sources, Europages…). For manufacturers it must make the product itself (factory/manufacturer), not only write about it. Blog posts, 'top manufacturers' lists, Reddit, YouTube and Quora are not entities. Extract organization, specialization, location, contact.",
   person: "An entity is ONE professional or ONE firm (law firm, bureau) with its own page or directory profile. Articles and lists of many people are not entities. Extract organization, specialization, location, contact.",
-  general: "An entity is one item that directly answers the task. Pages that only discuss the topic are articles.",
+  general: "An entity is one item that directly answers the task. For news or events tasks, a news page reporting one specific event is an entity (put the event in name, its date and place in location, the publisher in organization). Pages that only discuss the topic in general, and list or category pages, are not entities.",
 };
 
 function excerpt(content: string, max = 2200) {
