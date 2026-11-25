@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { readWorkerStatus, workerSummary } from "@/lib/jobs";
 import { isAuthorized, unauthorized } from "@/lib/scout/auth";
 import { parseSchedule, parseWatch, recallCheck, capacity, createCampaign, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, today, updateCampaign, verifyProof, type CampaignTask, type Mention } from "@/lib/scout/campaigns";
 import { partnerInviteLink } from "@/lib/scout/campaigns-bot";
@@ -16,9 +17,10 @@ const list = (v: unknown) => (Array.isArray(v) ? v : str(v).split(/[,;\n]/)).map
 export async function GET(request: Request) {
   if (!isAuthorized(request)) return unauthorized();
   const day = today();
-  const [campaigns, tasks, mentions, cap] = await Promise.all([listCampaigns(), listAll<CampaignTask>("campaign_tasks"), listAll<Mention>("mentions"), capacity(day)]);
+  const [campaigns, tasks, mentions, cap, worker] = await Promise.all([listCampaigns(), listAll<CampaignTask>("campaign_tasks"), listAll<Mention>("mentions"), capacity(day), readWorkerStatus()]);
   return Response.json({
     ok: true, campaigns, capacity: cap, partnerLink: partnerInviteLink(),
+    worker: { ...workerSummary(worker), jobs: worker?.jobs || {}, dead: (worker?.dead || []).slice(0, 5) },
     tasks: tasks.filter((t) => t.day === day).sort((a, b) => a.groupName.localeCompare(b.groupName)),
     mentions: mentions.sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 60),
   });

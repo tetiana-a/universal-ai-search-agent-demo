@@ -1,0 +1,54 @@
+# Render Blueprint: the AURELIUS background queue (Graphile Worker on Supabase PostgreSQL).
+# Render → New → Blueprint → this repository. Background Workers are paid on Render (Starter ≈ $7/month).
+# Values marked sync:false are asked once in the Render form (copy them from Vercel → Settings → Environment Variables).
+services:
+  - type: worker
+    name: aurelius-worker
+    runtime: node
+    plan: starter
+    region: frankfurt
+    branch: main
+    buildCommand: npm ci --no-audit --no-fund
+    startCommand: npm run worker
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL          # Supabase → Connect → Session pooler (port 5432)
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: KV_REST_API_URL       # same Upstash Redis as the site
+        sync: false
+      - key: KV_REST_API_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
+      - key: CAMPAIGN_AUTOPOST
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: JINA_API_KEY
+        sync: false
+      - key: DATAFORSEO_LOGIN
+        sync: false
+      - key: DATAFORSEO_PASSWORD
+        sync: false
+      - key: APIFY_TOKEN
+        sync: false
+      - key: POSTIZ_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://universal-ai-search-agent-demo.vercel.app

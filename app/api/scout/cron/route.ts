@@ -1,3 +1,4 @@
+import { workerAlive } from "@/lib/jobs";
 import { isCronRequest, unauthorized } from "@/lib/scout/auth";
 import { sendDailyReport } from "@/lib/scout/report";
 import { runScan } from "@/lib/scout/scan";
@@ -9,6 +10,8 @@ export const maxDuration = 60;
 // Daily run (Vercel Cron, see vercel.json): scan → match → drafts → report to Telegram.
 export async function GET(request: Request) {
   if (!isCronRequest(request)) return unauthorized();
+  // The background queue (worker/) owns this job while it is alive; this cron is the fallback.
+  if (await workerAlive()) return Response.json({ ok: true, skipped: "worker" });
   const started = Date.now();
   let stats = null;
   let scanError = "";

@@ -1,3 +1,4 @@
+import { captureException } from "@sentry/core";
 import { runStructuredExtraction } from "@/lib/free-ai";
 import { geminiTranscribe } from "@/lib/gemini-audio";
 import { geminiSearch, geminiSearchKey } from "@/lib/gemini-search";
@@ -860,6 +861,7 @@ export async function runDaily(deadlineAt = Date.now() + 270_000) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(name + ": " + message);
       console.error("[daily] " + name + " failed: " + message);
+      captureException(error, { tags: { daily_step: name } });
       return null;
     }
   };
