@@ -82,6 +82,14 @@ export function changedAt(r: Record<string, unknown>): string | null {
 }
 const FULL_EVERY_MS = 7 * 86_400_000;
 
+// PostgREST rejects the whole batch on a lone UTF-16 surrogate (PGRST102 "Empty or invalid json", e.g. an
+// emoji cut in half by .slice()) and Postgres jsonb on \u0000 (22P05). Replace both before sending.
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const NUL = String.fromCodePoint(0);
+export function archiveJson(value: unknown) {
+  return JSON.stringify(value, (_k, v) => (typeof v === "string" ? v.replace(LONE_SURROGATE, "\ufffd").replaceAll(NUL, "\ufffd") : v));
+}
+
 // Incremental: only records changed since the last good sync (minus an hour of margin) and records with
 // no timestamp; a full pass once a week (or on demand) catches anything missed. Upserted in batches of 500.
 export async function syncArchive(opts: { full?: boolean } = {}): Promise<SyncResult> {
@@ -95,7 +103,7 @@ export async function syncArchive(opts: { full?: boolean } = {}): Promise<SyncRe
     const rows = full ? all : all.filter((r) => { const t = changedAt(r.data); return !t || t >= since; });
     for (let i = 0; i < rows.length; i += 500) {
       const batch = rows.slice(i, i + 500).map((r) => ({ ...r, synced_at: at }));
-      await rest(TABLE + "?on_conflict=collection,id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(batch) });
+      await rest(TABLE + "?on_conflict=collection,id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: archiveJson(batch) });
     }
     for (const r of rows) byCollection[r.collection] = (byCollection[r.collection] || 0) + 1;
     const result: SyncResult = { ok: true, at, total: rows.length, byCollection, mode: full ? "full" : "incremental", scanned: all.length, fullAt: full ? at : prevGood?.fullAt };
