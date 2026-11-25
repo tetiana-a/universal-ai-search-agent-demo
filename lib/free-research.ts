@@ -462,7 +462,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
   const readerLimit = Math.min(toRead.length, input.testMode ? 3 : edition === "pro" ? 14 : 8);
   // Stage 3: a list page (portal search, B2B category) is opened and the item pages it links
   // to are read right away, in parallel with the other reads. Reading stops early enough
-  // to leave the AI check about 25 seconds.
+  // to leave the AI check about 45 seconds.
   const followBudget = input.testMode ? 2 : edition === "pro" ? 10 : 6;
   const known = new Set(candidateHits.map((hit) => hit.url.toLowerCase()));
   const followUrls: string[] = [];
@@ -487,7 +487,7 @@ export async function runFreeResearch(input: BackgroundResearchRequest) {
       const title = (read.content.match(/^Title:\s*(.+)$/m)?.[1] || read.content.match(/^#\s+(.+)$/m)?.[1] || host(url)).trim();
       followed.push({ title, url, snippet: firstSentences(read.content.replace(/^(Title|URL Source|Markdown Content):.*$/gm, ""), 600), domain: host(url), content: read.content, provider: "followed_link", retrievedAt: new Date().toISOString(), readStatus: read.status });
     }));
-  })), deadlineAt - 27_000);
+  })), deadlineAt - 45_000);
   for (const hit of candidateHits) if (!hit.content) hit.readStatus = hit.readStatus || "skipped";
   candidateHits = [...followed.filter((hit) => hit.content), ...candidateHits];
 

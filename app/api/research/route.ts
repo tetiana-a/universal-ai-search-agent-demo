@@ -52,7 +52,7 @@ export async function POST(request:Request){
        multilingual:body.multilingual!==false,
        followRelatedLinks:body.followRelatedLinks!==false,
        testMode:limits.depth==="Quick",
-       deadlineAt:Date.now()+52_000,
+       deadlineAt:Date.now()+110_000,
        sourceMemory:memoryContext.sources,
        edition:editionFor(plan),
        knownSourceCount:memoryContext.sources.length,

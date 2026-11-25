@@ -34,9 +34,8 @@ export function Atmosphere() {
   return <div className={"music-atmosphere pointer-events-none fixed inset-0 z-0 " + (playing ? "is-live" : "")} aria-hidden="true" />;
 }
 
-// Developer's Telegram; NEXT_PUBLIC_DEVELOPER_TELEGRAM in Vercel can change it without code.
-const DEV_TG = String(process.env.NEXT_PUBLIC_DEVELOPER_TELEGRAM || "tetiana_K888").trim().replace(/^@/, "").replace(/^https?:\/\/t\.me\//, "");
-const DEV_LINK = /^[a-z0-9_]{4,32}$/i.test(DEV_TG) ? "https://t.me/" + DEV_TG : "https://tetianakotolup.com/";
+// The AURELIUS Telegram group (resolved server-side by /tg).
+const GROUP_LINK = "/tg";
 
 const TABS = [
   { href: "/", label: "Главная", icon: Sparkles },
@@ -112,15 +111,15 @@ export default function SiteChrome({ children }: Readonly<{ children: ReactNode 
           {playing ? <Pause size={14} /> : <Radio size={14} />}
           <span className="hidden max-w-[110px] truncate sm:inline">{playing ? station?.name || "Радио" : "Радио"}</span>
         </button>
-        {/* On phones the developer link lives inside the dock, so nothing floats over it. */}
-        <a href={DEV_LINK} target="_blank" rel="noreferrer" aria-label="Написать разработчику в Telegram" className="grid h-9 flex-1 place-items-center sm:hidden">
+        {/* On phones the group link lives inside the dock, so nothing floats over it. */}
+        <a href={GROUP_LINK} target="_blank" rel="noreferrer" aria-label="Группа AURELIUS в Telegram" className="grid h-9 flex-1 place-items-center sm:hidden">
           <span className="dev-chat-ring grid h-7 w-7 place-items-center rounded-full"><Send size={13} className="dev-chat-icon" /></span>
         </a>
       </nav>
-      <a href={DEV_LINK} target="_blank" rel="noreferrer" className="dev-chat fixed bottom-4 right-4 z-[60] hidden h-10 sm:inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] pl-1 pr-1 text-[13px] text-[var(--text)] shadow-2xl backdrop-blur-xl"
-        aria-label="Написать разработчику в Telegram" title="Написать разработчику">
+      <a href={GROUP_LINK} target="_blank" rel="noreferrer" className="dev-chat fixed bottom-4 right-4 z-[60] hidden h-10 sm:inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface-strong)] pl-1 pr-1 text-[13px] text-[var(--text)] shadow-2xl backdrop-blur-xl"
+        aria-label="Группа AURELIUS в Telegram" title="Группа AURELIUS в Telegram">
         <span className="dev-chat-ring grid h-8 w-8 place-items-center rounded-full"><Send size={14} className="dev-chat-icon" /></span>
-        <span className="dev-chat-label">Написать разработчику</span>
+        <span className="dev-chat-label">Группа в Telegram</span>
       </a>
     </SiteContext.Provider>
   );

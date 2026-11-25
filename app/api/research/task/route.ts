@@ -13,7 +13,7 @@ import { editionFor, pipelineFor, researchMode } from "@/lib/editions";
 import { applyClarifications } from "@/lib/task-profile";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 // Client-supplied source memory is untrusted: keep only public http(s) URLs and plain fields.
 function sanitizeSourceMemory(value: unknown) {
