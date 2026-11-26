@@ -198,8 +198,10 @@ export async function runStructuredExtraction(options: {
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    const raw: any = await response.json().catch(() => null);
-    return { response, raw };
+    const body = await response.text().catch(() => "");
+    let raw: any = null;
+    try { raw = JSON.parse(body); } catch { /* not JSON: kept as text for the error message */ }
+    return { response, raw, body };
   }
 
   for (const provider of providers) {
@@ -216,10 +218,10 @@ export async function runStructuredExtraction(options: {
         return { parsed: null, usage: null, attempts, error: attempts.filter((a) => a.message).map((a) => a.message).join(" ") + " Candidates are shown for manual review." };
       }
       try {
-        let { response, raw } = await call(provider, model, timeoutMs, true);
+        let { response, raw, body } = await call(provider, model, timeoutMs, true);
         const errText = String(raw?.error?.message || raw?.error || "");
         if (!response.ok && (response.status === 400 || response.status === 404 || response.status === 422) && /response_format|json|structured|parameter/i.test(errText)) {
-          ({ response, raw } = await call(provider, model, Math.min(timeoutMs, options.deadlineAt - Date.now() - 1500), false));
+          ({ response, raw, body } = await call(provider, model, Math.min(timeoutMs, options.deadlineAt - Date.now() - 1500), false));
         }
         if (!response.ok || raw?.error) {
           const message = provider.label + " " + model + " HTTP " + response.status + ": " + String(raw?.error?.message || raw?.error?.metadata?.raw || "request failed").slice(0, 240);
@@ -236,7 +238,7 @@ export async function runStructuredExtraction(options: {
         } catch {
           const finish = String(raw?.choices?.[0]?.finish_reason || "");
           const snippet = extractText(raw).replace(/\s+/g, " ").slice(0, 200);
-          const message = provider.label + " " + String(raw?.model || model) + " returned text that is not valid JSON" + (finish ? " (finish_reason " + finish + ")" : "") + (snippet ? ": " + snippet : ": empty answer") + ".";
+          const message = provider.label + " " + String(raw?.model || model) + " returned text that is not valid JSON" + (finish ? " (finish_reason " + finish + ")" : "") + (snippet ? ": " + snippet : ": empty answer (HTTP " + response.status + ", " + (response.headers.get("content-type") || "no content-type") + ", body: " + body.replace(/\s+/g, " ").slice(0, 160) + ")") + ".";
           console.warn("[ai] " + message);
           attempts.push({ provider: provider.id, model, ok: false, message });
           markModel(model, false);
