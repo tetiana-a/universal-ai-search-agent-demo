@@ -235,4 +235,16 @@ describe("free AI provider order", () => {
     expect(providers.find((p) => p.id === "gemini")?.models).toContain("gemini-flash-lite-latest");
     vi.unstubAllEnvs();
   });
+
+  it("puts paid DeepSeek via OpenRouter first only when the owner opts in", () => {
+    vi.stubEnv("ZERO_COST_MODE", "on");
+    vi.stubEnv("OPENROUTER_API_KEY", "or");
+    vi.stubEnv("GROQ_API_KEY", "gq");
+    expect(configuredAiProviders("free").map((p) => p.id)).toEqual(["groq", "openrouter"]);
+    vi.stubEnv("OPENROUTER_DEEPSEEK", "on");
+    const providers = configuredAiProviders("free");
+    expect(providers.map((p) => p.id)).toEqual(["deepseek", "groq", "openrouter"]);
+    expect(providers[0].models).toEqual(["deepseek/deepseek-v4-flash", "openai/gpt-4o-mini"]);
+    vi.unstubAllEnvs();
+  });
 });

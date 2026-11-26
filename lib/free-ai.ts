@@ -2,7 +2,7 @@
 // answers. Every provider here has a free tier; Pro can point OpenRouter at a
 // stronger paid model with PRO_OPENROUTER_MODEL.
 
-export type AiProviderId = "openrouter" | "gemini" | "groq" | "github" | "cerebras" | "mistral";
+export type AiProviderId = "openrouter" | "gemini" | "groq" | "github" | "deepseek" | "cerebras" | "mistral";
 export type Edition = "free" | "pro";
 
 type AiProvider = { id: AiProviderId; label: string; endpoint: string; key: string; model: string; models?: string[]; headers?: Record<string, string> };
@@ -95,6 +95,15 @@ export function configuredAiProviders(edition: Edition = "free"): AiProvider[] {
   const env = (name: string) => String(process.env[name] || "").trim();
   const list = (...ids: string[]) => [...new Set(ids.filter(Boolean))];
   const zeroCost = env("ZERO_COST_MODE") === "on";
+
+  // Paid DeepSeek through the existing OpenRouter key (~$0.09/$0.18 per 1M tokens), first in line;
+  // GPT-4o mini (~$0.15/$0.60) on the same key is its paid backup.
+  // Explicit owner opt-in only (OPENROUTER_DEEPSEEK=on), so ZERO_COST_MODE never bills by accident.
+  if (env("OPENROUTER_API_KEY") && env("OPENROUTER_DEEPSEEK") === "on") {
+    const models = list(env("DEEPSEEK_MODEL") || "deepseek/deepseek-v4-flash", env("GPT_BACKUP_MODEL") || "openai/gpt-4o-mini");
+    out.push({ id: "deepseek", label: "DeepSeek / GPT (OpenRouter)", endpoint: "https://openrouter.ai/api/v1/chat/completions", key: env("OPENROUTER_API_KEY"), model: models[0], models,
+      headers: { "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://universal-ai-search-agent-demo.vercel.app", "X-Title": "Aurelius Universal AI Research Engine" } });
+  }
 
   if (env("GROQ_API_KEY")) {
     const models = list(env("GROQ_MODEL") || "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct");
