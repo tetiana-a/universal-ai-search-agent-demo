@@ -244,7 +244,7 @@ describe("free AI provider order", () => {
     vi.stubEnv("OPENROUTER_DEEPSEEK", "on");
     const providers = configuredAiProviders("free");
     expect(providers.map((p) => p.id)).toEqual(["deepseek", "groq", "openrouter"]);
-    expect(providers[0].model).toBe("deepseek/deepseek-v4-flash");
+    expect(providers[0].models).toEqual(["deepseek/deepseek-v4-flash", "openai/gpt-4o-mini"]);
     vi.unstubAllEnvs();
   });
 });
