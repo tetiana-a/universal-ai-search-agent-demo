@@ -25,6 +25,14 @@ export function apifyCountry(country: string) {
   return "";
 }
 
+// Google's own language codes as the actor accepts them; anything else is sent as "" (any language).
+const APIFY_LANGS = new Set("af sq sm ar az eu be bn bh bs bg ca zh-CN zh-TW hr cs da nl en eo et fo fi fr fy gl ka de el gu iw hi hu is id ia ga it ja jw kn ko la lv lt mk ms ml mt mr sr no oc fa pl pt-BR pt-PT pa ro ru gd sk sl es su sw sv tl ta te th ti tr uk ur uz vi cy xh zu".split(" "));
+const APIFY_ALIAS: Record<string, string> = { zh: "zh-CN", he: "iw", pt: "pt-PT", jv: "jw", nb: "no", nn: "no", fil: "tl" };
+export function apifyLanguage(code: string) {
+  const c = APIFY_ALIAS[code.toLowerCase()] || code;
+  return APIFY_LANGS.has(c) ? c : "";
+}
+
 export function mapApifyItems(items: unknown): ApifyHit[] {
   const hits: ApifyHit[] = [];
   for (const page of Array.isArray(items) ? items : []) {
@@ -46,7 +54,7 @@ export async function apifySearch(queries: string[], country: string, language =
   if (await providerPaused("apify")) return { ok: false, hits: [], message: "Apify: лимит исчерпан, поиск через Apify на паузе до завтра." };
   const list = queries.map((q) => q.trim()).filter(Boolean).slice(0, 4); // budget per search run
   if (!list.length) return { ok: false, hits: [], message: "Search phrase is empty." };
-  const input: Record<string, unknown> = { queries: list.join("\n"), resultsPerPage: 10, maxPagesPerQuery: 1, languageCode: /^[a-z]{2}$/.test(language) ? language : "en" };
+  const input: Record<string, unknown> = { queries: list.join("\n"), resultsPerPage: 10, maxPagesPerQuery: 1, languageCode: apifyLanguage(language) };
   const code = apifyCountry(country);
   if (code) input.countryCode = code;
   try {

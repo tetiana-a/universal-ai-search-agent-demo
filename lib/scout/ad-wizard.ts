@@ -152,6 +152,11 @@ export async function advanceAdWizard(chatId: string, ownerId: string, text: str
       await sendMessage(chatId, photo && !value ? "Фото сохранено. Теперь пришлите текст объявления." : "Текст объявления должен содержать от 15 до 3500 символов.", CANCEL);
       return {};
     }
+    // "Найди меня…" is a request to the bot, not an ad for strangers: ask again instead of building a campaign.
+    if (/^(найди|найти|поищи|ищи|знайди|find|search)\s/i.test(value)) {
+      await sendMessage(chatId, "Это похоже на поисковый запрос, а не на текст объявления.\n\nПришлите текст, который увидят люди в группах: что вы предлагаете, цена, контакт. Если хотели что-то найти — нажмите «Отмена» и напишите запрос обычным сообщением.", CANCEL);
+      return {};
+    }
     await setValue(KEY(chatId, ownerId), { ...draft, stage: "platforms", adText: value, photo: photo || draft.photo } satisfies Draft, TTL);
     await platformQuestion(chatId);
     return {};

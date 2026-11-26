@@ -152,7 +152,9 @@ export function scheduleAllows(s: Schedule | undefined, day: string) {
 
 // ---- Task → campaign (AI with a rule-based fallback) ------------------------------------
 
-const STOP = new Set("и в во на по для из с со от до за к о об а но или что это как the and for with from in on of to a an de la el en y para con los las del".split(" "));
+const STOP = new Set(("и в во на по для из с со от до за к о об а но или что это как the and for with from in on of to a an de la el en y para con los las del " +
+  // request words and dates: never a topic or a search keyword
+  "найди найти найдите поищи ищи ищу мне меня нам нас мой моя мои где кто какой какие можно нужно надо хочу сегодня завтра вчера сейчас пожалуйста find search where who what want need please today tomorrow").split(" "));
 const PROMPT_WORDS = new Set("разместить размещение разместить опубликовать опубликовать публикация опубликуй объявление объявления объявлений оголошення розмістити реклама рекламу продаже продажа нарушая законов соблюдать законы нелегально легально польша польше польшу польши".split(" "));
 
 export function cleanKeywords(list: unknown[], limit = 40) {
@@ -241,7 +243,7 @@ export async function parseCampaign(text: string, deadlineAt = Date.now() + 70_0
     region: String(p.region || base.region).slice(0, 80),
     languages: cleanKeywords(Array.isArray(p.languages) ? p.languages : base.languages, 5),
     // Raw words of the task ("where", "find") only fill in when the AI gave too few keywords.
-    keywords: (() => { const k = cleanKeywords(Array.isArray(p.keywords) ? p.keywords : [], 40); return k.length >= 10 ? k : cleanKeywords([...k, ...base.keywords], 40); })(),
+    keywords: (() => { const k = cleanKeywords((Array.isArray(p.keywords) ? p.keywords : []).filter((w: unknown) => !STOP.has(String(w).trim().toLowerCase())), 40); return k.length >= 10 ? k : cleanKeywords([...k, ...base.keywords], 40); })(),
     adjacent: cleanKeywords(Array.isArray(p.adjacent_keywords) ? p.adjacent_keywords : [], 15),
     queries: [],
     exclusions: [],

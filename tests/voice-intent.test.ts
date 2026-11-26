@@ -83,3 +83,44 @@ describe("plain search in the owner's group", () => {
     expect(sent.join("\n")).toContain("винодельни Мозель");
   });
 });
+
+describe("garbage-in guards", () => {
+  it("maps languages the Apify actor accepts", async () => {
+    const { apifyLanguage } = await import("@/lib/scout/apify-search");
+    expect(apifyLanguage("zh")).toBe("zh-CN");
+    expect(apifyLanguage("de")).toBe("de");
+    expect(apifyLanguage("xx")).toBe("");
+  });
+  it("keeps request words out of the topic and keywords", async () => {
+    const { ruleCampaign } = await import("@/lib/scout/campaigns");
+    const c = ruleCampaign("Найди меня в копию письма завтра");
+    expect(c.keywords).not.toContain("найди");
+    expect(c.keywords).not.toContain("завтра");
+    expect(c.topic).not.toMatch(/найди|меня/);
+  });
+});
+
+it("ad wizard refuses a search request as ad text", async () => {
+  const { startAdWizard, advanceAdWizard } = await import("@/lib/scout/ad-wizard");
+  const sent: string[] = [];
+  mockFetch([{ match: (u) => u.startsWith("https://api.telegram.org/"), respond: (_u, init) => { sent.push(String(JSON.parse(String(init?.body || "{}")).text || "")); return json({ ok: true, result: { message_id: 1 } }); } }]);
+  await startAdWizard("1", "1");
+  await advanceAdWizard("1", "1", "Китай");
+  await advanceAdWizard("1", "1", "Найди меня в копию письма завтра");
+  expect(sent.at(-1)).toContain("похоже на поисковый запрос");
+});
+
+it("Groq search switches to the current Compound model after a 404", async () => {
+  vi.stubEnv("GROQ_API_KEY", "test-groq");
+  vi.stubEnv("GROQ_SEARCH_MODEL", "");
+  const { groqSearch } = await import("@/lib/gemini-search");
+  const models: string[] = [];
+  mockFetch([
+    { match: (u) => u.endsWith("/openai/v1/models"), respond: () => json({ data: [{ id: "llama-x" }, { id: "groq/compound-mini-2" }] }) },
+    { match: (u) => u.endsWith("/chat/completions"), respond: (_u, init) => { const m = JSON.parse(String(init?.body)).model; models.push(m); return m === "groq/compound-mini" ? json({ error: "not found" }, 404) : json({ choices: [{ message: { content: "ok", executed_tools: [{ search_results: { results: [{ url: "https://weingut-example.de/", title: "Weingut" }] } }] } }] }); } },
+  ]);
+  const r = await groqSearch("Weingüter Deutschland", "de");
+  expect(models).toEqual(["groq/compound-mini", "groq/compound-mini-2"]);
+  expect(r.ok).toBe(true);
+  expect(r.hits[0].url).toContain("weingut-example.de");
+});
