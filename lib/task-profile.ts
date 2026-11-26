@@ -90,7 +90,9 @@ export function heuristicFields(kind: ResearchKind, text: string) {
 
 export type ClarifyingQuestion = { id: string; ru: string; en: string; placeholderRu: string; placeholderEn: string };
 
-const GEO_HINT = /\b(in|near|around|across)\s+[A-ZÀ-Ý][\w-]+|\b(в|во|на|под)\s+[А-ЯЁІЇЄ][\wа-яё-]+|madrid|amsterdam|spain|italy|china|europe|usa|london|berlin|paris|мадрид|амстердам|испани|итали|кита|европ|сша|лондон|берлин|париж|прага|praha|czech|чехи|украин|ukrain|киев|kyiv/i;
+const GEO_PREP = [/\b(?:in|near|around|across)\s+[A-ZÀ-Ý][\w-]+/i, /(?:^|\s)(?:в|во|на|под)\s+[А-ЯЁІЇЄ][\wа-яё-]+/i];
+const GEO_PLACES = "madrid amsterdam spain italy china europe usa london berlin paris мадрид амстердам испани итали кита европ сша лондон берлин париж прага praha czech чехи украин ukrain киев kyiv".split(" ");
+const hasGeography = (q: string) => GEO_PREP.some((re) => re.test(q)) || GEO_PLACES.some((w) => q.toLowerCase().includes(w));
 const NUMBER = /\d/;
 
 function hasAny(q: string, re: RegExp) { return re.test(q); }
@@ -101,7 +103,7 @@ export function clarifyingQuestions(query: string): { kind: ResearchKind; questi
   const kind = inferResearchKind(query);
   const q = query.toLowerCase();
   const detected = {
-    geography: hasAny(query, GEO_HINT),
+    geography: hasGeography(query),
     numbers: NUMBER.test(q),
     budget: /€|\$|eur|usd|£|₽|руб|budget|бюджет|price|цен|ticket|чек/.test(q),
     // A product named after "производители"/"suppliers of" counts as the company profile.

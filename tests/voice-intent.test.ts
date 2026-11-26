@@ -63,3 +63,23 @@ describe("placement start", () => {
     expect(texts).not.toContain("Размещение запущено");
   });
 });
+
+describe("plain search in the owner's group", () => {
+  const groupMsg = (text: string, extra: object = {}) => ({ message: { message_id: 5, chat: { id: -1004318201860, type: "supergroup" }, from: { id: owner, first_name: "T" }, text, ...extra } });
+  it("takes «Найди…» without @mention and the message after «🔎 Найти»", async () => {
+    vi.stubEnv("TELEGRAM_CHAT_ID", "-1004318201860");
+    vi.stubEnv("TELEGRAM_ALLOWED_CHAT_IDS", "-1004318201860," + owner);
+    const sent: string[] = [];
+    mockFetch([{ match: (u) => u.startsWith("https://api.telegram.org/"), respond: (_u, init) => { sent.push(String(JSON.parse(String(init?.body || "{}")).text || "")); return json({ ok: true, result: { message_id: 1, status: "administrator" } }); } }]);
+    await handleUpdate(groupMsg("Найди все винодельни в Германии"));
+    expect(sent.join("\n")).toContain("Найди все винодельни в Германии");
+    expect(sent.join("\n")).not.toContain("Где искать");
+    sent.length = 0;
+    await handleUpdate(groupMsg("как дела у всех"));
+    expect(sent).toEqual([]);
+    await handleUpdate({ callback_query: { id: "q", from: { id: owner }, data: "menu:find", message: { message_id: 7, chat: { id: -1004318201860, type: "supergroup" } } } });
+    sent.length = 0;
+    await handleUpdate(groupMsg("винодельни Мозель с дегустацией"));
+    expect(sent.join("\n")).toContain("винодельни Мозель");
+  });
+});
