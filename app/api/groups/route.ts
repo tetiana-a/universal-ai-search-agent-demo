@@ -57,8 +57,8 @@ export async function POST(request: Request) {
     case "outreach": {
       const card = await getOne<GroupCard>("groups", str(body.id, 80));
       if (!card) return Response.json({ ok: false, error: "not found" }, { status: 404 });
-      const lang = ["ru", "en", "es"].includes(body.lang) ? body.lang : "ru";
-      return Response.json({ ok: true, drafts: await outreachDrafts(card, lang) });
+      // Default: the community's own language; the dialog can switch it.
+      return Response.json({ ok: true, drafts: await outreachDrafts(card, str(body.lang, 5) || undefined) });
     }
     case "post.bot": {
       const text = str(body.text, 4000);

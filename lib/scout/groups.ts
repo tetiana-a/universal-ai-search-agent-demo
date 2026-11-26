@@ -25,7 +25,7 @@ import { styleSheet } from "@/lib/xlsx-style";
 
 export type Platform = "telegram" | "facebook" | "instagram" | "tiktok";
 export type AdsPolicy = "allowed" | "admin" | "paid" | "forbidden" | "unknown";
-export type GroupStatus = "new" | "contacted" | "free" | "exchange" | "paid" | "declined";
+export type GroupStatus = "new" | "contacted" | "replied" | "free" | "exchange" | "paid" | "declined";
 
 export type GroupCard = {
   id: string;
@@ -59,6 +59,9 @@ export type GroupCard = {
   // Who recorded the admin's agreement and when; without it an "agreed" status gets no manual/partner tasks.
   permissionConfirmedAt?: string;
   permissionConfirmedBy?: string;
+  // Admin request: when we sent it and when the admin answered.
+  requestSentAt?: string;
+  repliedAt?: string;
   // TZ 1.2: language, relevance (core topic or adjacent audience), which query found it, liveness.
   language?: string;
   relevance?: "core" | "adjacent";
@@ -700,7 +703,7 @@ export async function upsertGroups(cards: GroupCard[]) {
     const prev = byId.get(card.id);
     const twin = prev ? undefined : existing.find((g) => sameCommunity(g, card));
     if (!prev && !twin) added += 1;
-    merged.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, permissionConfirmedAt: prev.permissionConfirmedAt, permissionConfirmedBy: prev.permissionConfirmedBy, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
+    merged.push(prev ? { ...card, relevance: prev.relevance === "core" ? "core" : card.relevance, foundBy: prev.foundBy || card.foundBy, partnerTelegramId: prev.partnerTelegramId, minDaysBetween: prev.minDaysBetween, permissionNote: prev.permissionNote, permissionConfirmedAt: prev.permissionConfirmedAt, permissionConfirmedBy: prev.permissionConfirmedBy, requestSentAt: prev.requestSentAt, repliedAt: prev.repliedAt, status: prev.status, price: prev.price, currency: prev.currency, notes: prev.notes, chatId: prev.chatId, botConnected: prev.botConnected, postingEnabled: prev.postingEnabled, dailyLimit: prev.dailyLimit, adminContact: prev.adminContact || card.adminContact, foundAt: prev.foundAt } : card);
   }
   const incoming = new Set(merged.map((g) => g.id));
   const { keep, dropped, survivorOf } = collapseTwins([...merged, ...existing.filter((g) => !incoming.has(g.id))]);
@@ -728,7 +731,7 @@ export async function adultHiddenCount() {
   return (await listAll<GroupCard>("groups")).filter((g) => isAdult(g.name + " " + (g.description || ""))).length;
 }
 
-const STATUSES = new Set<GroupStatus>(["new", "contacted", "free", "exchange", "paid", "declined"]);
+const STATUSES = new Set<GroupStatus>(["new", "contacted", "replied", "free", "exchange", "paid", "declined"]);
 const AGREED = new Set<GroupStatus>(["free", "exchange", "paid"]);
 
 // An admin's consent is on record: the bot was added by the chat, or someone confirmed the agreement.
@@ -742,6 +745,8 @@ export async function updateGroup(id: string, patch: Partial<Pick<GroupCard, "st
   const next: GroupCard = { ...card, updatedAt: nowIso() };
   if (patch.status && STATUSES.has(patch.status)) {
     next.status = patch.status;
+    if (patch.status === "contacted" && !card.requestSentAt) next.requestSentAt = next.updatedAt;
+    if (["replied", "free", "exchange", "paid", "declined"].includes(patch.status) && !card.repliedAt) next.repliedAt = next.updatedAt;
     if (!AGREED.has(patch.status)) { next.permissionConfirmedAt = undefined; next.permissionConfirmedBy = undefined; }
     else if (!AGREED.has(card.status) || !card.permissionConfirmedAt) { next.permissionConfirmedAt = next.updatedAt; next.permissionConfirmedBy = String(by).slice(0, 80); }
   }
@@ -812,63 +817,85 @@ export async function addGroupManually(input: { url: string; pending?: boolean; 
   return updateGroup(id, { partnerTelegramId: input.partnerTelegramId, dailyLimit: input.dailyLimit, minDaysBetween: input.minDaysBetween, permissionNote: input.permissionNote });
 }
 
-// ---- Admin outreach drafts -------------------------------------------------------
+// ---- Admin outreach: one personal request per community -----------------------
+// Each letter is built for that community: its name, platform (group/channel vs profile),
+// the language its posts are written in, and the kind of deal. A person sends it from their
+// own account (or e-mail); nothing here messages admins automatically.
 
 export type OutreachKind = "free" | "exchange" | "paid";
-type OLang = "ru" | "en" | "es";
+type LetterTpl = { hi: string; me: string; community: string; profile: string; free: string; freeProfile: string; exchange: string; paid: string; join: string; bot: string; partner: string; bye: string };
 
-const OUTREACH: Record<OLang, Record<OutreachKind, string>> = {
-  ru: {
-    free: "Здравствуйте! Я {sender} из {company}. Мы публикуем проверенные объявления о недвижимости ({topic}, {place}). Можно ли иногда размещать их в «{group}»? Готовы соблюдать правила группы и частоту, которую вы укажете. Если удобно, вы можете добавить нашего бота {bot} — он будет публиковать только согласованное.",
-    exchange: "Здравствуйте! Я {sender} из {company}. Предлагаем взаимный обмен: мы публикуем анонс «{group}» в наших каналах, а вы — наши объявления о недвижимости ({topic}, {place}). Частоту и формат согласуем, правила группы соблюдаем.",
-    paid: "Здравствуйте! Я {sender} из {company}. Интересует платное размещение объявлений о недвижимости ({topic}, {place}) в «{group}». Подскажите, пожалуйста, стоимость одного поста и пакета на месяц и есть ли требования к оформлению.",
-  },
-  en: {
-    free: "Hello! I'm {sender} from {company}. We share verified real-estate listings ({topic}, {place}). Could we post them in \"{group}\" from time to time? We'll follow your rules and the frequency you set. If convenient, you can add our bot {bot} — it only posts what we agree on.",
-    exchange: "Hello! I'm {sender} from {company}. We'd like to propose a cross-promotion: we feature \"{group}\" in our channels and you share our real-estate listings ({topic}, {place}). We'll agree on frequency and format and follow your rules.",
-    paid: "Hello! I'm {sender} from {company}. We're interested in paid placement of real-estate listings ({topic}, {place}) in \"{group}\". Could you share the price per post and for a monthly package, and any format requirements?",
-  },
-  es: {
-    free: "¡Hola! Soy {sender} de {company}. Publicamos anuncios inmobiliarios verificados ({topic}, {place}). ¿Podríamos compartirlos de vez en cuando en «{group}»? Respetaremos las normas y la frecuencia que nos indique. Si le resulta cómodo, puede añadir nuestro bot {bot}: solo publica lo acordado.",
-    exchange: "¡Hola! Soy {sender} de {company}. Le proponemos un intercambio: anunciamos «{group}» en nuestros canales y usted comparte nuestros anuncios inmobiliarios ({topic}, {place}). Acordamos frecuencia y formato, respetando las normas.",
-    paid: "¡Hola! Soy {sender} de {company}. Nos interesa publicar anuncios inmobiliarios de pago ({topic}, {place}) en «{group}». ¿Podría indicarnos el precio por publicación y por un paquete mensual, y si hay requisitos de formato?",
-  },
+const LETTERS: Record<string, LetterTpl> = {
+  ru: { hi: "Здравствуйте!", me: "Меня зовут {sender}, я представляю {company}.", community: "Пишу по поводу вашего сообщества «{group}»{tp}.", profile: "Пишу по поводу вашего профиля «{group}»{tp}.", free: "Можно ли нам иногда публиковать там полезные для участников посты? Частоту и формат определяете вы, правила соблюдаем.", freeProfile: "Интересно ли вам сотрудничество: пост, сторис или коллаборация на близкую вашей аудитории тему? Формат и частоту определяете вы.", exchange: "Предлагаем взаимный обмен: мы рассказываем о вас в наших каналах, а вы — о нас. Формат и частоту согласуем.", paid: "Нас интересует платное размещение. Подскажите, пожалуйста, стоимость одной публикации и пакета на месяц и требования к оформлению.", join: "Также мы отправили запрос на вступление в группу.", bot: "Удобнее всего добавить нашего бота {bot}: он публикует только согласованное, убрать его можно в любой момент.", partner: "Если вы согласны, отметьте это по ссылке, там же можно указать частоту:", bye: "Спасибо! {sender}" },
+  uk: { hi: "Добрий день!", me: "Мене звати {sender}, я представляю {company}.", community: "Пишу щодо вашої спільноти «{group}»{tp}.", profile: "Пишу щодо вашого профілю «{group}»{tp}.", free: "Чи можемо ми інколи публікувати там корисні для учасників дописи? Частоту й формат визначаєте ви, правил дотримуємося.", freeProfile: "Чи цікава вам співпраця: допис, сторіс або колаборація на близьку вашій аудиторії тему? Формат і частоту визначаєте ви.", exchange: "Пропонуємо взаємний обмін: ми розповідаємо про вас у наших каналах, а ви — про нас. Формат і частоту узгодимо.", paid: "Нас цікавить платне розміщення. Підкажіть, будь ласка, вартість однієї публікації та пакета на місяць і вимоги до оформлення.", join: "Також ми надіслали запит на вступ до групи.", bot: "Найзручніше додати нашого бота {bot}: він публікує лише погоджене, прибрати його можна будь-коли.", partner: "Якщо ви згодні, позначте це за посиланням, там же можна вказати частоту:", bye: "Дякуємо! {sender}" },
+  en: { hi: "Hello!", me: "My name is {sender}, I represent {company}.", community: "I'm writing about your community \"{group}\"{tp}.", profile: "I'm writing about your profile \"{group}\"{tp}.", free: "Would it be possible for us to share occasional posts useful to your members? You set the frequency and format, and we follow your rules.", freeProfile: "Would you be open to a collaboration: a post, a story or a collab on a topic close to your audience? You set the format and frequency.", exchange: "We'd like to propose a cross-promotion: we feature you in our channels and you feature us. We'll agree on format and frequency.", paid: "We're interested in paid placement. Could you share the price per post and for a monthly package, and any format requirements?", join: "We've also sent a request to join the group.", bot: "The easiest way is to add our bot {bot}: it only posts what we agree on, and you can remove it any time.", partner: "If you agree, please confirm via this link, where you can also set the frequency:", bye: "Thank you! {sender}" },
+  es: { hi: "¡Hola!", me: "Me llamo {sender} y represento a {company}.", community: "Le escribo sobre su comunidad «{group}»{tp}.", profile: "Le escribo sobre su perfil «{group}»{tp}.", free: "¿Podríamos compartir de vez en cuando publicaciones útiles para sus miembros? Usted decide la frecuencia y el formato, y respetamos las normas.", freeProfile: "¿Le interesaría colaborar: una publicación, una historia o un collab sobre un tema cercano a su audiencia? Usted decide el formato y la frecuencia.", exchange: "Le proponemos un intercambio: hablamos de usted en nuestros canales y usted de nosotros. Acordamos formato y frecuencia.", paid: "Nos interesa una publicación de pago. ¿Podría indicarnos el precio por publicación y por un paquete mensual, y los requisitos de formato?", join: "También hemos enviado una solicitud para unirnos al grupo.", bot: "Lo más cómodo es añadir nuestro bot {bot}: solo publica lo acordado y puede quitarlo cuando quiera.", partner: "Si está de acuerdo, confírmelo en este enlace, donde también puede fijar la frecuencia:", bye: "¡Gracias! {sender}" },
+  cs: { hi: "Dobrý den!", me: "Jmenuji se {sender} a zastupuji {company}.", community: "Píšu ohledně vaší komunity „{group}“{tp}.", profile: "Píšu ohledně vašeho profilu „{group}“{tp}.", free: "Mohli bychom občas sdílet příspěvky užitečné pro vaše členy? Frekvenci a formát určujete vy, pravidla dodržujeme.", freeProfile: "Měli byste zájem o spolupráci: příspěvek, story nebo collab na téma blízké vašemu publiku? Formát a frekvenci určujete vy.", exchange: "Navrhujeme vzájemnou výměnu: my představíme vás v našich kanálech a vy nás. Formát a frekvenci domluvíme.", paid: "Máme zájem o placenou publikaci. Mohli byste nám sdělit cenu za jeden příspěvek a za měsíční balíček a požadavky na formát?", join: "Zároveň jsme poslali žádost o vstup do skupiny.", bot: "Nejjednodušší je přidat našeho bota {bot}: publikuje jen dohodnuté a můžete ho kdykoli odebrat.", partner: "Pokud souhlasíte, potvrďte to prosím přes tento odkaz, kde můžete nastavit i frekvenci:", bye: "Děkuji! {sender}" },
+  de: { hi: "Hallo!", me: "Mein Name ist {sender}, ich vertrete {company}.", community: "Ich schreibe Ihnen wegen Ihrer Community „{group}“{tp}.", profile: "Ich schreibe Ihnen wegen Ihres Profils „{group}“{tp}.", free: "Dürften wir gelegentlich Beiträge teilen, die für Ihre Mitglieder nützlich sind? Häufigkeit und Format bestimmen Sie, Ihre Regeln halten wir ein.", freeProfile: "Hätten Sie Interesse an einer Zusammenarbeit: ein Beitrag, eine Story oder ein Collab zu einem Thema, das zu Ihrem Publikum passt? Format und Häufigkeit bestimmen Sie.", exchange: "Wir schlagen einen gegenseitigen Austausch vor: Wir stellen Sie in unseren Kanälen vor und Sie uns. Format und Häufigkeit stimmen wir ab.", paid: "Wir interessieren uns für eine bezahlte Veröffentlichung. Könnten Sie uns den Preis pro Beitrag und für ein Monatspaket sowie die Formatvorgaben nennen?", join: "Wir haben außerdem eine Beitrittsanfrage für die Gruppe gesendet.", bot: "Am einfachsten fügen Sie unseren Bot {bot} hinzu: Er veröffentlicht nur Abgesprochenes und lässt sich jederzeit entfernen.", partner: "Wenn Sie einverstanden sind, bestätigen Sie es bitte über diesen Link, dort können Sie auch die Häufigkeit festlegen:", bye: "Vielen Dank! {sender}" },
+  it: { hi: "Buongiorno!", me: "Mi chiamo {sender} e rappresento {company}.", community: "Le scrivo a proposito della sua community «{group}»{tp}.", profile: "Le scrivo a proposito del suo profilo «{group}»{tp}.", free: "Potremmo condividere ogni tanto post utili per i suoi membri? Frequenza e formato li decide lei, e rispettiamo le regole.", freeProfile: "Le interesserebbe una collaborazione: un post, una storia o un collab su un tema vicino al suo pubblico? Formato e frequenza li decide lei.", exchange: "Le proponiamo uno scambio: noi parliamo di lei nei nostri canali e lei di noi. Concordiamo formato e frequenza.", paid: "Ci interessa una pubblicazione a pagamento. Potrebbe indicarci il prezzo per un post e per un pacchetto mensile, e i requisiti di formato?", join: "Abbiamo anche inviato una richiesta di adesione al gruppo.", bot: "Il modo più semplice è aggiungere il nostro bot {bot}: pubblica solo ciò che concordiamo e può rimuoverlo in qualsiasi momento.", partner: "Se è d'accordo, lo confermi a questo link, dove può anche indicare la frequenza:", bye: "Grazie! {sender}" },
+  fr: { hi: "Bonjour !", me: "Je m'appelle {sender} et je représente {company}.", community: "Je vous écris au sujet de votre communauté « {group} »{tp}.", profile: "Je vous écris au sujet de votre profil « {group} »{tp}.", free: "Pourrions-nous partager de temps en temps des publications utiles à vos membres ? Vous fixez la fréquence et le format, et nous respectons vos règles.", freeProfile: "Seriez-vous intéressé(e) par une collaboration : une publication, une story ou un collab sur un thème proche de votre audience ? Vous fixez le format et la fréquence.", exchange: "Nous vous proposons un échange : nous vous présentons sur nos canaux et vous nous présentez. Nous convenons ensemble du format et de la fréquence.", paid: "Nous sommes intéressés par une publication payante. Pourriez-vous nous indiquer le prix par publication et pour un forfait mensuel, ainsi que les exigences de format ?", join: "Nous avons également envoyé une demande pour rejoindre le groupe.", bot: "Le plus simple est d'ajouter notre bot {bot} : il ne publie que ce qui est convenu et vous pouvez le retirer à tout moment.", partner: "Si vous êtes d'accord, confirmez-le via ce lien, où vous pouvez aussi fixer la fréquence :", bye: "Merci ! {sender}" },
+  pt: { hi: "Olá!", me: "Chamo-me {sender} e represento a {company}.", community: "Escrevo sobre a sua comunidade «{group}»{tp}.", profile: "Escrevo sobre o seu perfil «{group}»{tp}.", free: "Poderíamos partilhar de vez em quando publicações úteis para os seus membros? Você define a frequência e o formato, e respeitamos as regras.", freeProfile: "Teria interesse numa colaboração: uma publicação, um story ou um collab sobre um tema próximo do seu público? Você define o formato e a frequência.", exchange: "Propomos uma troca: falamos de si nos nossos canais e você fala de nós. Combinamos formato e frequência.", paid: "Temos interesse numa publicação paga. Poderia indicar o preço por publicação e por um pacote mensal, e os requisitos de formato?", join: "Também enviámos um pedido para entrar no grupo.", bot: "O mais simples é adicionar o nosso bot {bot}: só publica o combinado e pode removê-lo a qualquer momento.", partner: "Se concordar, confirme neste link, onde também pode definir a frequência:", bye: "Obrigado! {sender}" },
+  pl: { hi: "Dzień dobry!", me: "Nazywam się {sender} i reprezentuję {company}.", community: "Piszę w sprawie Państwa społeczności „{group}”{tp}.", profile: "Piszę w sprawie Państwa profilu „{group}”{tp}.", free: "Czy moglibyśmy od czasu do czasu udostępniać posty przydatne dla członków? Częstotliwość i format ustalają Państwo, a my przestrzegamy zasad.", freeProfile: "Czy byliby Państwo zainteresowani współpracą: post, relacja lub collab na temat bliski Państwa odbiorcom? Format i częstotliwość ustalają Państwo.", exchange: "Proponujemy wymianę: my polecamy Państwa w naszych kanałach, a Państwo nas. Format i częstotliwość uzgodnimy.", paid: "Interesuje nas płatna publikacja. Czy mogliby Państwo podać cenę jednego posta i pakietu miesięcznego oraz wymagania dotyczące formatu?", join: "Wysłaliśmy też prośbę o dołączenie do grupy.", bot: "Najprościej dodać naszego bota {bot}: publikuje tylko uzgodnione treści i można go w każdej chwili usunąć.", partner: "Jeśli się Państwo zgadzają, prosimy potwierdzić przez ten link, gdzie można też ustalić częstotliwość:", bye: "Dziękuję! {sender}" },
 };
+export const LETTER_LANGS = Object.keys(LETTERS);
 
-export async function outreachDrafts(card: GroupCard, lang: OLang = "ru") {
-  const settings = await loadSettings();
-  const bot = botHandle();
-  const fill = (tpl: string) => tpl
-    .replace(/\{sender\}/g, settings.senderName || "—")
-    .replace(/\{company\}/g, settings.companyName || "нашей компании")
-    .replace(/\{topic\}/g, card.topic || "недвижимость")
-    .replace(/\{place\}/g, [card.city, card.country].filter(Boolean).join(", ") || "ваш город")
-    .replace(/\{group\}/g, card.name)
-    .replace(/\{bot\}/g, bot);
-  const set = OUTREACH[lang] || OUTREACH.ru;
-  const add = addBotUrl(card);
-  const tail = "\n\n" + (INVITE[lang] || INVITE.ru)[card.platform === "telegram" ? "telegram" : "other"] + " " + add;
-  return { free: fill(set.free) + tail, exchange: fill(set.exchange) + tail, paid: fill(set.paid) + tail, contactUrl: contactUrl(card), addBotUrl: add };
+// The community's own language when we have a letter for it, else English.
+export function letterLang(card: Pick<GroupCard, "language">, wanted?: string) {
+  const l = String(wanted || card.language || "").toLowerCase().slice(0, 2);
+  return LETTERS[l] ? l : "en";
 }
 
-const INVITE: Record<OLang, Record<"telegram" | "other", string>> = {
-  ru: { telegram: "➕ Добавить бота в одно нажатие (только публикация, убрать можно в любой момент):", other: "🤝 Подключиться к публикациям и согласовать частоту:" },
-  en: { telegram: "➕ Add the bot in one tap (posting only, remove it any time):", other: "🤝 Join as a partner and set the frequency:" },
-  es: { telegram: "➕ Añada el bot con un toque (solo publicar, puede quitarlo cuando quiera):", other: "🤝 Únase como socio y fije la frecuencia:" },
-};
+// Groups you can join (and so send a join request to); channels and profiles are followed, not joined.
+export function joinUrl(card: Pick<GroupCard, "platform" | "kind" | "url">) {
+  if (card.platform === "telegram" && card.kind !== "channel") return card.url || undefined;
+  if (card.platform === "facebook" && card.kind !== "page") return card.url || undefined;
+  return undefined;
+}
+
+type LetterSettings = { senderName?: string; companyName?: string };
+
+export function adminLetter(card: GroupCard, kind: OutreachKind = "free", settings: LetterSettings = {}, wanted?: string) {
+  const lang = letterLang(card, wanted);
+  const t = LETTERS[lang];
+  const cyr = (s: string) => /[а-яёіїєґ]/i.test(s);
+  // Topic and place were typed by us (often in Russian): mention them only when they read in the letter's script.
+  const extra = [card.topic && card.topic !== "разные тематики" ? card.topic : "", [card.city, card.country].filter(Boolean).join(", ")].filter(Boolean).join(", ");
+  const tp = extra && cyr(extra) === (lang === "ru" || lang === "uk") ? " (" + extra + ")" : "";
+  const profile = card.platform === "instagram" || card.platform === "tiktok" || card.kind === "profile";
+  const ask = kind === "exchange" ? t.exchange : kind === "paid" ? t.paid : profile ? t.freeProfile : t.free;
+  const join = joinUrl(card) ? " " + t.join : "";
+  const add = addBotUrl(card);
+  const invite = card.platform === "telegram" ? t.bot + "\n" + add : t.partner + "\n" + add;
+  const fill = (s: string) => s.replace(/\{sender\}/g, settings.senderName || "—").replace(/\{company\}/g, settings.companyName || "AURELIUS").replace(/\{group\}/g, card.name).replace(/\{tp\}/g, tp).replace(/\{bot\}/g, botHandle());
+  const text = fill([t.hi + " " + t.me, (profile ? t.profile : t.community) + " " + ask + join, invite, t.bye].join("\n\n"));
+  return { lang, text, contactUrl: contactUrl(card, text), joinUrl: joinUrl(card), addBotUrl: add };
+}
+
+export async function outreachDrafts(card: GroupCard, lang?: string) {
+  const settings = await loadSettings();
+  const free = adminLetter(card, "free", settings, lang);
+  return { lang: free.lang, langs: LETTER_LANGS, free: free.text, exchange: adminLetter(card, "exchange", settings, lang).text, paid: adminLetter(card, "paid", settings, lang).text, contactUrl: free.contactUrl, joinUrl: free.joinUrl, addBotUrl: free.addBotUrl };
+}
 
 // One-tap link for the group's own admin: Telegram opens "add to group/channel" with posting rights pre-ticked.
 // Other networks have no bots in groups, so the admin gets the partner sign-up (consent + limits) instead.
-export function addBotUrl(card: Pick<GroupCard, "platform" | "kind">) {
+// With the card's id the partner link is personal: the admin taps it and their community is filled in.
+export function addBotUrl(card: Pick<GroupCard, "platform" | "kind"> & { id?: string }) {
   const base = "https://t.me/" + botHandle().replace(/^@/, "");
-  if (card.platform !== "telegram") return base + "?start=partner";
+  if (card.platform !== "telegram") return base + "?start=partner" + (card.id && /^[\w-]{1,50}$/.test(card.id) ? "_" + card.id : "");
   return card.kind === "channel" ? base + "?startchannel=true&admin=post_messages" : base + "?startgroup=true&admin=post_messages";
 }
 
-export function contactUrl(card: GroupCard) {
-  const c = card.adminContact || "";
-  if (/^@\w+$/.test(c)) return "https://t.me/" + c.slice(1);
-  if (/@/.test(c)) return "mailto:" + c;
+// Where the person opens a chat with the admin: a named contact first, else the network's own DM/admin page.
+export function contactUrl(card: GroupCard, text = "") {
+  const c = (card.adminContact || "").trim();
+  if (/^[\w.+-]+@[\w-]+\.[\w.]+$/.test(c)) return "mailto:" + c + "?subject=" + encodeURIComponent(card.name) + (text ? "&body=" + encodeURIComponent(text) : "");
+  const handle = /^@([\w.]{2,32})$/.exec(c)?.[1];
+  const slug = card.url.replace(/\/+$/, "").split("/").pop() || "";
+  if (card.platform === "instagram") return "https://ig.me/m/" + (handle || slug);
+  if (card.platform === "tiktok") return handle ? "https://www.tiktok.com/@" + handle : card.url;
+  if (handle) return "https://t.me/" + handle;
+  if (card.platform === "facebook") return card.kind === "page" ? "https://m.me/" + slug : card.url.replace(/\/+$/, "") + "/members/admins";
   return card.url;
 }
 
@@ -1049,7 +1076,7 @@ export async function postingSummary() {
 export const PLATFORM_LABEL: Record<Platform, string> = { telegram: "Telegram", facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok" };
 const ADS_LABEL: Record<AdsPolicy, string> = { allowed: "разрешена", admin: "через админа", paid: "платно", forbidden: "запрещена", unknown: "не указано" };
 export const ACTIVITY_LABEL: Record<"active" | "inactive" | "unknown", string> = { active: "активна", inactive: "неактивна — исключена из размещения", unknown: "не проверено (нет публичной ленты)" };
-const STATUS_LABEL: Record<GroupStatus, string> = { new: "новая", contacted: "написали админу", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
+const STATUS_LABEL: Record<GroupStatus, string> = { new: "новая", contacted: "запрос отправлен", replied: "админ ответил", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
 export { ADS_LABEL, STATUS_LABEL };
 
 export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = [], tasks: CampaignTask[] = []) {
@@ -1096,6 +1123,18 @@ export async function groupsXlsx(groups: GroupCard[], posts: PostLog[] = [], tas
     language: g.language || "", relevance: g.relevance === "adjacent" ? "смежное" : g.relevance === "core" ? "профильное" : "", foundBy: safe(g.foundBy || ""),
     activity: ACTIVITY_LABEL[g.activity || "unknown"], lastPost: (g.lastPostAt || "").slice(0, 10), perWeek: g.postsPerWeek ?? "" });
   styleSheet(ws, { statusColumns: ["ads", "status", "relevance", "activity", "bot"], title: "база сообществ" });
+  // One personal request per community, ready to copy, with where to send it and its status.
+  const asks = groups.filter((g) => g.status !== "declined" && !g.botConnected);
+  if (asks.length) {
+    const settings = await loadSettings();
+    const rq = wb.addWorksheet("Запросы админам");
+    rq.columns = [{ header: "Платформа", key: "platform", width: 11 }, { header: "Сообщество", key: "name", width: 30 }, { header: "Язык письма", key: "lang", width: 8 }, { header: "Статус запроса", key: "status", width: 17 }, { header: "Отправлен", key: "sent", width: 11 }, { header: "Ответ", key: "replied", width: 11 }, { header: "Написать админу", key: "contact", width: 34 }, { header: "Вступить", key: "join", width: 30 }, { header: "Письмо", key: "text", width: 90 }];
+    for (const g of asks) {
+      const l = adminLetter(g, "free", settings);
+      rq.addRow({ platform: PLATFORM_LABEL[g.platform], name: safe(g.name), lang: l.lang, status: STATUS_LABEL[g.status] || g.status, sent: (g.requestSentAt || "").slice(0, 10), replied: (g.repliedAt || "").slice(0, 10), contact: { text: l.contactUrl.slice(0, 80), hyperlink: l.contactUrl }, join: l.joinUrl ? { text: l.joinUrl, hyperlink: l.joinUrl } : "", text: safe(l.text) });
+    }
+    styleSheet(rq, { statusColumns: ["status"], title: "запросы админам" });
+  }
   if (posts.length) {
     const log = wb.addWorksheet("Журнал публикаций");
     log.columns = [{ header: "Время (UTC)", key: "at", width: 20 }, { header: "Группа", key: "group", width: 32 }, { header: "Платформа", key: "platform", width: 11 }, { header: "Способ", key: "mode", width: 14 }, { header: "Статус", key: "status", width: 12 }, { header: "Ссылка", key: "link", width: 36 }, { header: "Текст", key: "text", width: 60 }, { header: "Ошибка", key: "error", width: 30 }];

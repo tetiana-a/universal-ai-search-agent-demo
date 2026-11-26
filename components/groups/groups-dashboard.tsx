@@ -45,7 +45,7 @@ function FilterNotes({ cards, hiddenAdult }: Readonly<{ cards: GroupCard[]; hidd
 const KEY_STORAGE = "aurelius-scout-key";
 const inputClass = "scout-input w-full min-h-9 rounded-lg border border-[var(--line-soft)] bg-[var(--surface-strong)] px-3 py-1.5 text-[12.5px] text-[var(--text)] outline-none focus:border-[var(--line)]";
 const ADS: Record<string, string> = { allowed: "разрешена", admin: "через админа", paid: "платно", forbidden: "запрещена", unknown: "—" };
-const STATUS: Record<GroupStatus, string> = { new: "новая", contacted: "написали админу", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
+const STATUS: Record<GroupStatus, string> = { new: "новая", contacted: "запрос отправлен", replied: "админ ответил", free: "бесплатно", exchange: "обмен", paid: "платно", declined: "отказ" };
 
 function Button({ children, onClick, variant = "ghost", disabled, href }: Readonly<{ children: ReactNode; onClick?: () => void; variant?: "ghost" | "spectrum"; disabled?: boolean; href?: string }>) {
   const cls = "scout-button inline-flex min-h-[30px] items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-medium transition disabled:opacity-40 " +
@@ -89,7 +89,7 @@ export default function GroupsDashboard() {
   // The last search's own results, shown instead of the whole base until the user asks for everything.
   const [lastFound, setLastFound] = useState<{ message: string; ids: string[] } | null>(null);
   const [tab, setTab] = useState<"all" | "telegram" | "facebook" | "instagram" | "tiktok">("all");
-  const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { free: string; exchange: string; paid: string; contactUrl: string; addBotUrl?: string } } | null>(null);
+  const [outreach, setOutreach] = useState<{ group: GroupCard; drafts: { lang: string; langs: string[]; free: string; exchange: string; paid: string; contactUrl: string; joinUrl?: string; addBotUrl?: string } } | null>(null);
 
   useEffect(() => {
     try {
@@ -132,6 +132,15 @@ export default function GroupsDashboard() {
     return base.filter((g) => !q || [g.name, g.city, g.country, g.topic, g.adminContact].join(" ").toLowerCase().includes(q));
   }, [state, filter, lastFound]);
   const groups = useMemo(() => scoped.filter((g) => tab === "all" || g.platform === tab), [scoped, tab]);
+  // Admin requests: the next community nobody has written to yet, in the current tab.
+  const nextRequest = (after?: string) => groups.find((g) => g.status === "new" && !g.botConnected && g.id !== after);
+  const openRequest = async (g: GroupCard, lang?: string) => { const d = await act("outreach", { id: g.id, lang }, "o"); if (d?.drafts) setOutreach({ group: g, drafts: d.drafts }); };
+  const setRequestStatus = async (g: GroupCard, status: GroupStatus, note: string) => {
+    await act("update", { id: g.id, patch: { status } });
+    setOutreach((o) => (o ? { ...o, group: { ...o.group, status } } : o));
+    setToast(note);
+  };
+  const requestCounts = (["new", "contacted", "replied", "free", "declined"] as const).map((st) => [st, groups.filter((g) => (st === "free" ? ["free", "exchange", "paid"].includes(g.status) : g.status === st)).length] as const);
   const tabs = [["all", "Все"], ["telegram", "✈️ Telegram"], ["facebook", "📘 Facebook"], ["instagram", "📸 Instagram"], ["tiktok", "🎵 TikTok"]] as const;
 
   const saveKey = () => { try { window.localStorage.setItem(KEY_STORAGE, key); } catch {} void load(); };
@@ -218,6 +227,11 @@ export default function GroupsDashboard() {
           {lastFound && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-[var(--surface-2,rgba(10,132,255,.08))] px-3 py-2 text-[12px]"><span>{lastFound.message}</span><Button onClick={() => setLastFound(null)}>Показать всю базу ({state?.groups?.length || 0})</Button></div>}
           <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Площадка">{tabs.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={"rounded-full border px-3 py-1 text-[12px] " + (tab === id ? "border-[#0a84ff] bg-[#0a84ff]/15" : "border-[var(--border,rgba(127,127,127,.3))] opacity-80 hover:opacity-100")}>{label} · {id === "all" ? scoped.length : scoped.filter((g) => g.platform === id).length}</button>)}</div>
           <FilterNotes cards={scoped} hiddenAdult={state?.hiddenAdult || 0} />
+          {groups.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px]">
+            <span className="text-[var(--text-muted)]">Запросы админам:</span>
+            {requestCounts.map(([st, n]) => <span key={st} className="rounded-full border border-[var(--line-soft)] px-2 py-0.5">{st === "new" ? "не отправлено" : st === "free" ? "разрешили" : STATUS[st]} · {n}</span>)}
+            {nextRequest() && <Button variant="spectrum" disabled={Boolean(busy)} onClick={() => { const g = nextRequest(); if (g) void openRequest(g); }}><MessageSquare size={12} />Следующий запрос</Button>}
+          </div>}
           {!groups.length ? <p className="text-[12.5px] text-[var(--text-muted)]">{lastFound ? "Этот поиск ничего не нашёл. Попробуйте другую тему или город." : "Пока пусто. Запустите поиск выше."}</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-[12px]">
@@ -233,7 +247,7 @@ export default function GroupsDashboard() {
                       <td className="px-2 py-1.5"><select className={inputClass + " min-h-7 w-36"} value={g.status} onChange={(e) => void act("update", { id: g.id, patch: { status: e.target.value } })}>{Object.entries(STATUS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></td>
                       <td className="px-2 py-1.5"><input className={inputClass + " min-h-7 w-20"} type="number" min={0} defaultValue={g.price ?? ""} onBlur={(e) => String(g.price ?? "") !== e.target.value && void act("update", { id: g.id, patch: { price: Number(e.target.value), currency: "EUR" } })} /></td>
                       <td className="px-2 py-1.5">{g.botConnected ? <label className="flex items-center gap-1.5"><input type="checkbox" checked={Boolean(g.postingEnabled)} onChange={(e) => void act("update", { id: g.id, patch: { postingEnabled: e.target.checked } })} />вкл.</label> : <span className="text-[var(--text-muted)]">нет бота</span>}</td>
-                      <td className="px-2 py-1.5"><div className="flex gap-1.5"><Button onClick={async () => { const d = await act("outreach", { id: g.id }, "o"); if (d?.drafts) setOutreach({ group: g, drafts: d.drafts }); }}><MessageSquare size={12} />Письмо</Button><Button onClick={() => void act("remove", { id: g.id })}><X size={12} /></Button></div></td>
+                      <td className="px-2 py-1.5"><div className="flex gap-1.5"><Button onClick={() => void openRequest(g)}><MessageSquare size={12} />Запрос</Button><Button onClick={() => void act("remove", { id: g.id })}><X size={12} /></Button></div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -297,25 +311,45 @@ export default function GroupsDashboard() {
         <div className="fixed inset-0 z-50 grid place-items-center p-4">
           <button type="button" aria-label="Закрыть" className="absolute inset-0 bg-black/50" onClick={() => setOutreach(null)} />
           <div role="dialog" aria-modal="true" aria-label={"Письмо админу · " + outreach.group.name} className="glass relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-[var(--surface-strong)] p-4">
-            <div className="mb-3 flex items-center justify-between"><h3 className="text-[15px]">Письмо админу · {outreach.group.name}</h3><Button onClick={() => setOutreach(null)}><X size={13} /></Button></div>
-            {([["free", "Бесплатно"], ["exchange", "Обмен"], ["paid", "Платное размещение"]] as const).map(([k, label]) => (
+            <div className="mb-3 flex items-center justify-between gap-2"><h3 className="text-[15px]">Запрос админу · {outreach.group.name}</h3><Button onClick={() => setOutreach(null)}><X size={13} /></Button></div>
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px]">
+              <span>{({ telegram: "✈️ Telegram", facebook: "📘 Facebook", instagram: "📸 Instagram", tiktok: "🎵 TikTok" } as Record<string, string>)[outreach.group.platform]}</span>
+              <span className="text-[var(--text-muted)]">Статус: <b>{STATUS[outreach.group.status]}</b></span>
+              <label className="ml-auto flex items-center gap-1.5 text-[var(--text-muted)]">Язык письма
+                <select className={inputClass + " min-h-7 w-20"} value={outreach.drafts.lang} onChange={(e) => void openRequest(outreach.group, e.target.value)}>{outreach.drafts.langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>
+              </label>
+            </div>
+            <ol className="mb-3 list-decimal space-y-0.5 pl-5 text-[11.5px] text-[var(--text-muted)]">
+              {outreach.drafts.joinUrl && <li>Нажмите «Вступить», чтобы отправить запрос на вступление.</li>}
+              <li>«Копировать и написать»: письмо скопируется, откроется чат админа. Вставьте и отправьте.</li>
+              <li>Когда админ ответит, нажмите «Ответил», «Разрешил» или «Отказ». После «Разрешил» объявления кампаний пойдут туда сами.</li>
+            </ol>
+            {([["free", "Просьба разместить"], ["exchange", "Обмен"], ["paid", "Платное размещение"]] as const).map(([k, label]) => (
               <div key={k} className="mb-3 rounded-lg border border-[var(--line-soft)] p-3">
                 <div className="mb-1.5 text-[12px] text-[var(--text-muted)]">{label}</div>
                 <p className="whitespace-pre-wrap text-[12.5px]">{outreach.drafts[k]}</p>
-                <div className="mt-2 flex gap-2">
-                  <Button onClick={async () => {
-                    const ok = await copy(outreach.drafts[k]);
-                    if (ok && outreach.group.status === "new") {
-                      await act("update", { id: outreach.group.id, patch: { status: "contacted" } });
-                    }
-                    setToast(ok ? "Скопировано. Вставьте в чат с админом." : "Не удалось скопировать");
-                  }}><Copy size={12} />Копировать</Button>
-                  <Button href={outreach.drafts.contactUrl}><ExternalLink size={12} />Написать админу</Button>
-                  {outreach.drafts.addBotUrl && <Button href={outreach.drafts.addBotUrl}><ExternalLink size={12} />{outreach.group.platform === "telegram" ? "Ссылка «Добавить бота»" : "Ссылка для партнёра"}</Button>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button onClick={() => {
+                    const g = outreach.group;
+                    const pending = copy(outreach.drafts[k]);
+                    window.open(outreach.drafts.contactUrl, "_blank", "noopener");
+                    void pending.then(async (ok) => {
+                      if (g.status === "new") await setRequestStatus(g, "contacted", ok ? "Скопировано. Вставьте письмо в чат и отправьте." : "Не удалось скопировать: выделите текст вручную.");
+                      else setToast(ok ? "Скопировано." : "Не удалось скопировать.");
+                    });
+                  }}><Copy size={12} />Копировать и написать</Button>
+                  {k === "free" && outreach.drafts.joinUrl && <Button href={outreach.drafts.joinUrl}><ExternalLink size={12} />Вступить</Button>}
                 </div>
               </div>
             ))}
-            <p className="text-[11px] text-[var(--text-muted)]">Письмо отправляете вы сами, со своего аккаунта. Когда админ ответит, поменяйте статус и цену в таблице.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => void setRequestStatus(outreach.group, "contacted", "Отмечено: запрос отправлен.")}>📨 Отправил</Button>
+              <Button onClick={() => void setRequestStatus(outreach.group, "replied", "Отмечено: админ ответил.")}>💬 Ответил</Button>
+              <Button onClick={() => void setRequestStatus(outreach.group, "free", "Разрешение записано. Кампании начнут публиковать сюда.")}>✅ Разрешил</Button>
+              <Button onClick={() => void setRequestStatus(outreach.group, "declined", "Отмечено: отказ.")}>✖️ Отказ</Button>
+              {nextRequest(outreach.group.id) && <Button variant="spectrum" onClick={() => { const g = nextRequest(outreach.group.id); if (g) void openRequest(g); }}>Следующий →</Button>}
+            </div>
+            <p className="mt-2 text-[11px] text-[var(--text-muted)]">Письмо уходит с вашего аккаунта: соцсети не дают ботам писать незнакомым людям. Ссылка в конце письма даёт админу подключиться в одно нажатие.</p>
           </div>
         </div>
       )}
