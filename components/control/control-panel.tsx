@@ -11,7 +11,8 @@ import type { Campaign, CampaignTask } from "@/lib/scout/campaigns";
 // Numbers are live: communities in the base, places with admin consent, today's placements, errors.
 
 type Cap = { day: string; target: number; places: number; verified: number; failed: number; awaiting: number };
-type Data = { campaigns: Campaign[]; tasks: CampaignTask[]; capacity: Cap; communities: number };
+type Worker = { state: "on" | "off" | "stale"; text: string; dead: Array<{ at: string; job: string; error: string }> };
+type Data = { campaigns: Campaign[]; tasks: CampaignTask[]; capacity: Cap; communities: number; worker?: Worker };
 
 const KEY_STORAGE = "aurelius-scout-key";
 const DONE = new Set(["sent", "verified"]);
@@ -64,7 +65,7 @@ export default function ControlPanel() {
     setNeedKey(false);
     const camp = await c.json();
     const groups = g?.ok ? await g.json().catch(() => null) : null;
-    setData({ campaigns: camp.campaigns || [], tasks: camp.tasks || [], capacity: camp.capacity, communities: groups?.summary?.groups?.total ?? groups?.groups?.length ?? 0 });
+    setData({ campaigns: camp.campaigns || [], tasks: camp.tasks || [], capacity: camp.capacity, worker: camp.worker, communities: groups?.summary?.groups?.total ?? groups?.groups?.length ?? 0 });
     setAt(new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }));
   }, [headers]);
 
@@ -141,6 +142,20 @@ export default function ControlPanel() {
           <Tile label="Опубликовано сегодня" value={cap ? fmt(cap.verified) + " / " + fmt(cap.target) : "—"} hint={cap && cap.awaiting ? "ещё ждут: " + cap.awaiting : undefined} />
           <Tile label="Блокировки и ошибки" value={cap ? fmt(cap.failed) : "—"} hint="за сегодня" />
         </div>
+
+        {data?.worker && (
+          <div className="glass rounded-2xl px-4 py-3 text-[12.5px]">
+            <div className="flex items-center gap-2">
+              <span aria-hidden className={"h-2 w-2 shrink-0 rounded-full " + (data.worker.state === "on" ? "bg-emerald-500" : data.worker.state === "stale" ? "bg-amber-500" : "bg-[var(--text-muted)]")} />
+              <span>Фоновая очередь: {data.worker.text}</span>
+            </div>
+            {data.worker.dead.length > 0 && (
+              <ul className="mt-2 space-y-0.5 text-[11.5px] text-red-500">
+                {data.worker.dead.map((d) => <li key={d.at + d.job}>{d.at.slice(5, 16).replace("T", " ")} · {d.job}: {d.error}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
 
         <section className="space-y-2">
           <h2 className="px-1 text-[14px] font-normal">Кампании</h2>

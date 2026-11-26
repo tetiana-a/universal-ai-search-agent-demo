@@ -7,16 +7,24 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "worker": "tsx worker/index.ts"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
+    "@sentry/core": "^10.78.0",
+    "@sentry/nextjs": "^10.78.0",
+    "@sentry/node": "^10.78.0",
+    "@types/pg": "^8.23.1",
     "exceljs": "^4.4.0",
+    "graphile-worker": "^0.16.6",
     "lucide-react": "^0.545.0",
     "next": "^16.3.0",
     "pdfmake": "^0.2.20",
+    "pg": "^8.23.1",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
