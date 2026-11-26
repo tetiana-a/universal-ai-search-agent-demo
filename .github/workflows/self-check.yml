@@ -18,4 +18,5 @@ jobs:
           APP_URL: ${{ vars.APP_URL || 'https://universal-ai-search-agent-demo.vercel.app' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
-          curl -sS --fail-with-body --max-time 150 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/scout/selfcheck" | python3 -m json.tool
+          curl -sS --fail-with-body --max-time 150 -H "Authorization: Bearer $CRON_SECRET" -o result.json "$APP_URL/api/scout/selfcheck"
+          cat result.json
