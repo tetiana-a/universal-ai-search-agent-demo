@@ -65,10 +65,11 @@ export async function apifySearch(queries: string[], country: string, language =
     if (!response.ok) {
       const body: any = await response.json().catch(() => null);
       const reason = String(body?.error?.message || body?.error?.type || "").replace(/\s+/g, " ").slice(0, 160);
+      if (/TIMED-OUT/i.test(reason)) return { ok: false, hits: [], httpStatus: response.status, message: "Apify не успел ответить за " + runSeconds + " с (таймаут) — результаты из других источников." };
       return { ok: false, hits: [], httpStatus: response.status, message: "Apify HTTP " + response.status + (reason ? ": " + reason : "") };
     }
     return { ok: true, hits: mapApifyItems(await response.json()) };
   } catch (error) {
-    return { ok: false, hits: [], message: error instanceof Error && /timeout|abort/i.test(error.name + error.message) ? "Apify timed out." : "Apify request failed." };
+    return { ok: false, hits: [], message: error instanceof Error && /timeout|abort/i.test(error.name + error.message) ? "Apify не успел ответить (таймаут) — результаты из других источников." : "Apify request failed." };
   }
 }

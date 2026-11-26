@@ -209,7 +209,7 @@ const SCHEMA = {
     languages: { type: "array", items: { type: "string", description: "ISO 639-1" }, description: "target languages: the local language(s) of the region plus the owner's language and the audience's language; the task may be written or spoken in any language" },
     keywords: { type: "array", items: { type: "string" }, description: "40 keywords for finding communities on the topic: word forms, synonyms, translations into the languages of the region and of the target audience" },
     adjacent_keywords: { type: "array", items: { type: "string" }, description: "8-15 phrases for ADJACENT communities where the same audience gathers and such an ad is appropriate (classifieds, flea markets, expats and relocants, city and district communities), with the city, in local languages" },
-    questions: { type: "array", items: { type: "string" }, description: "clarifying questions in the owner's language for missing essentials (region, ad text, platforms); empty if the task is clear" },
+    questions: { type: "array", items: { type: "string" }, description: "0-2 clarifying questions in the owner's language, only when the region or the ad's subject is really missing; never ask about budget, platforms (default: all) or schedule; empty if the task is clear" },
     translations: { type: "array", items: { type: "object", properties: { lang: { type: "string" }, text: { type: "string" } } }, description: "the ad text adapted to each target language (ISO 639-1)" },
     platforms: { type: "array", items: { type: "string", enum: ALL_PLATFORMS } },
     daily_target: { type: "number" },
@@ -240,11 +240,12 @@ export async function parseCampaign(text: string, deadlineAt = Date.now() + 70_0
     topic: String(p.topic || base.topic).slice(0, 80),
     region: String(p.region || base.region).slice(0, 80),
     languages: cleanKeywords(Array.isArray(p.languages) ? p.languages : base.languages, 5),
-    keywords: cleanKeywords([...(Array.isArray(p.keywords) ? p.keywords : []), ...base.keywords], 40),
+    // Raw words of the task ("where", "find") only fill in when the AI gave too few keywords.
+    keywords: (() => { const k = cleanKeywords(Array.isArray(p.keywords) ? p.keywords : [], 40); return k.length >= 10 ? k : cleanKeywords([...k, ...base.keywords], 40); })(),
     adjacent: cleanKeywords(Array.isArray(p.adjacent_keywords) ? p.adjacent_keywords : [], 15),
     queries: [],
     exclusions: [],
-    questions: (Array.isArray(p.questions) ? p.questions : []).map((q: unknown) => String(q).slice(0, 200)).filter(Boolean).slice(0, 4),
+    questions: (Array.isArray(p.questions) ? p.questions : []).map((q: unknown) => String(q).slice(0, 200)).filter(Boolean).filter((q: string) => !/budget|бюджет|platform|площадк|платформ/i.test(q)).slice(0, 2),
     translations: Object.fromEntries((Array.isArray(p.translations) ? p.translations : []).filter((t: any) => t?.lang && t?.text).map((t: any) => [String(t.lang).slice(0, 5).toLowerCase(), String(t.text).slice(0, 3500)])),
     platforms: platforms.length ? platforms : base.platforms,
     dailyTarget: Number(p.daily_target) > 0 ? Math.min(2000, Math.round(Number(p.daily_target))) : base.dailyTarget,
@@ -380,16 +381,18 @@ export async function findForCampaign(id: string, deadlineAt = Date.now() + 260_
   const seen = new Map<string, GroupCard>();
   const notes = new Set<string>();
   let attempted = 0;
+  let skipApify = false; // after one Apify timeout the rest of this run goes without it
   const done = { core: 0, adjacent: 0 };
   // One query at a time, preserving the budget and provider rate limits.
   for (let i = 0; i < plan.length && Date.now() < deadlineAt - 20_000; i += 1) {
     attempted += 1;
     done[plan[i].relevance] += 1;
     const batch = plan.slice(i, i + 1);
-    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: q.language || c.languages[0], platforms: c.platforms }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
+    const results = await Promise.all(batch.map((q) => findGroups({ ...place, topic: q.topic, relevance: q.relevance, exclusions: c.exclusions, language: q.language || c.languages[0], platforms: c.platforms, skipApify }, Math.min(deadlineAt - 10_000, Date.now() + 90_000)).catch(() => null)));
     for (const r of results) {
       if (!r) continue;
       r.notes.forEach((n) => notes.add(n));
+      if (r.notes.some((n) => /^Apify.*(таймаут|timed)/i.test(n))) skipApify = true;
       for (const g of r.found) if (c.platforms.includes(g.platform) && (!seen.has(g.id) || g.relevance === "core")) seen.set(g.id, g);
     }
   }
@@ -436,6 +439,12 @@ export function topicHit(g: GroupCard, c: Campaign) {
   if (!c.platforms.includes(g.platform)) return false;
   const own = groupText(g);
   return campaignWords(c).some((w) => own.includes(w));
+}
+
+// How many found or consented places could take this campaign today (admin permission given).
+export function placeableCount(c: Campaign, groups: GroupCard[]) {
+  const eligible = new Set(audienceIds(c));
+  return groups.filter((g) => modeFor(g) && (eligible.has(g.id) ? matchesCampaign(g, c) : topicHit(g, c))).length;
 }
 
 export type PlanResult = { day: string; created: number; byMode: Record<TaskMode, number>; perCampaign: Record<string, number> };

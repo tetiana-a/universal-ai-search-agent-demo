@@ -869,14 +869,19 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     else await handleJoin(String(message.chat.id), String(message.from.id), who, join[3] || "");
     return {};
   }
-  // Owner's voice message → campaign task (TZ 1.2: voice control).
+  // Owner's voice message → research question or campaign task (TZ 1.2: voice control).
   const voice = message?.voice || message?.audio;
   if (voice?.file_id && !message.from?.is_bot) {
     const chatId = String(message.chat?.id || "");
     const userId = String(message.from?.id || "");
     if (!(await isControl(chatId, userId, String(message.chat?.type || "")))) return {};
     if (await advisorMode(chatId)) return handleAdvisorVoice(chatId, voice.file_id);
-    return handleVoice(chatId, voice.file_id, userId);
+    // A question ("find…", "where…") gets the universal research, like a typed one.
+    return handleVoice(chatId, voice.file_id, userId, async (text) => {
+      const task = await loadTask(chatId);
+      const run = task?.state === "clarifying" ? await answerQuestion(task, text) : await startResearch(chatId, userId, text);
+      if (run) await run();
+    });
   }
   // Telegram owner photo with explicit time + caption -> Postiz media upload and
   // A video (or mp4 file) captioned /ttqueue TIME | text: scheduled on the owner's own TikTok via Postiz.

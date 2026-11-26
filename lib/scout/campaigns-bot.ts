@@ -1,12 +1,13 @@
-import { answerCampaign, parseSchedule, parseWatch, recallCheck, recallText, scheduleText, watchText, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, today, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign, type CampaignTask } from "@/lib/scout/campaigns";
+import { answerCampaign, placeableCount, parseSchedule, parseWatch, recallCheck, recallText, scheduleText, watchText, capacity, capacityText, cleanKeywords, createCampaign, digestText, dispatchBotTasks, findForCampaign, listCampaigns, monitorCampaign, notifyPartners, planDay, setCampaignStatus, submitProof, today, transcribeTelegramVoice, updateCampaign, verifyProof, type Campaign, type CampaignTask } from "@/lib/scout/campaigns";
 import { dashboardUrl } from "@/lib/scout/config";
-import { activityThreshold, setActivityThreshold, addGroupManually, groupsXlsx, PLATFORM_LABEL, platformOfUrl, updateGroup, type GroupCard } from "@/lib/scout/groups";
+import { activityThreshold, setActivityThreshold, addGroupManually, listGroups, groupsXlsx, PLATFORM_LABEL, platformOfUrl, updateGroup, type GroupCard } from "@/lib/scout/groups";
 import { botHandle } from "@/lib/scout/config";
 import { controlIds, reportChatId } from "@/lib/scout/telegram";
 import { deleteValue, getOne, getValue, listAll, removeMany, setValue } from "@/lib/scout/store";
 import { answerCallback, editMessage, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, stableId } from "@/lib/scout/text";
 import { isPolishWineCampaign, POLISH_WINE_NOTICE } from "@/lib/scout/wine-compliance";
+import { isCampaignIntent, isSearchQuestion } from "@/lib/scout/ad-wizard";
 
 // Telegram control for campaigns (TZ 1.2):
 //   voice or /campaign <task> → AI task + clarifying questions + 40 keywords for approval
@@ -59,10 +60,10 @@ export function campaignCard(c: Campaign) {
     "\n📡 <b>Мониторинг:</b> " + escapeHtml(watchText(c.watch)) +
     (c.recall ? "\n🎯 <b>Полнота (контроль):</b> " + c.recall.percent + "% · " + c.recall.found + "/" + c.recall.live : "") +
     (c.found ? "\n👥 <b>Найдено:</b> " + c.found.total + " (профильных " + c.found.core + ", смежных " + c.found.adjacent + ", неактивных " + c.found.inactive + ")" : "") +
-    "\n\n📝 <b>Объявление</b>\n<blockquote>" + escapeHtml(c.adText.slice(0, 900)) + "</blockquote>" +
+    "\n\n📝 <b>Объявление</b>\n<blockquote>" + escapeHtml(c.adText.slice(0, 900)) + "</blockquote>\n" +
     (Object.keys(c.translations || {}).length ? "<i>Переводы: " + Object.keys(c.translations).join(", ") + "</i>\n" : "") +
     (c.questions.length ? "\n❓ <b>Уточните, пожалуйста</b> (одним сообщением)\n" + c.questions.map((q) => "• " + escapeHtml(q)).join("\n") + "\n" : "") +
-    "\n🔑 <b>Ключевые слова · " + c.keywords.length + "</b>\n<blockquote expandable>" + escapeHtml(c.keywords.join(" · ")) + "</blockquote>" +
+    "\n🔑 <b>Ключевые слова · " + c.keywords.length + "</b>\n<blockquote expandable>" + escapeHtml(c.keywords.join(" · ")) + "</blockquote>\n" +
     (c.adjacent.length ? "🧭 <b>Смежные сообщества:</b> " + escapeHtml(c.adjacent.join(", ")) + "\n" : "") +
     (c.queries.length ? "➕ <b>Свои запросы:</b> " + escapeHtml(c.queries.join(", ")) + "\n" : "") +
     (c.exclusions.length ? "🚫 <b>Исключения:</b> " + escapeHtml(c.exclusions.join(", ")) + "\n" : "") +
@@ -103,16 +104,27 @@ export async function startCampaignFromText(chatId: string, text: string, ownerI
   return { background: async () => { const { campaign } = await createCampaign(text, source, ownerId, photo); await showDraft(chatId, campaign); } };
 }
 
-// A voice message from the owner: speech → text → campaign draft.
-export async function handleVoice(chatId: string, fileId: string, ownerId: string): Promise<Result> {
+// Search questions go to the universal research; ad tasks, answers to a draft's questions
+// and voices right after «Новая кампания» go to campaigns.
+export async function voiceIsSearch(chatId: string, text: string) {
+  if (isCampaignIntent(text) || (await getValue<string>("cmp-new:" + chatId))) return false;
+  if (await getValue<string>("cmp-answer:" + chatId)) return isSearchQuestion(text);
+  return true;
+}
+
+// A voice message from the owner: speech → text → research answer or campaign draft.
+export async function handleVoice(chatId: string, fileId: string, ownerId: string, search?: (text: string) => Promise<void>): Promise<Result> {
   await sendMessage(chatId, "🎙 Распознаю голосовое…");
   return {
     background: async () => {
       const voice = await transcribeTelegramVoice(fileId);
       if (!voice.ok) { await sendMessage(chatId, "⚠️ " + escapeHtml(voice.message)); return; }
       await sendMessage(chatId, "📝 <i>" + escapeHtml(voice.text.slice(0, 1500)) + "</i>");
+      if (search && (await voiceIsSearch(chatId, voice.text))) { await deleteValue("cmp-answer:" + chatId); await search(voice.text); return; }
       const pending = await getValue<string>("cmp-answer:" + chatId);
       if (pending) { await deleteValue("cmp-answer:" + chatId); const c = await answerCampaign(pending, voice.text); if (c) { await showDraft(chatId, c); return; } }
+      await deleteValue("cmp-new:" + chatId);
+      await sendMessage(chatId, "🧠 Это задача на рекламу — готовлю черновик кампании…");
       const { campaign } = await createCampaign(voice.text, "voice", ownerId);
       await showDraft(chatId, campaign);
     },
@@ -133,6 +145,8 @@ export async function maybeAnswer(chatId: string, text: string, ownerId = chatId
   const pending = await getValue<string>("cmp-answer:" + chatId);
   if (!pending || text.startsWith("/")) return null;
   await deleteValue("cmp-answer:" + chatId);
+  // A new question typed after a draft is a new search, not an answer to the draft.
+  if (isSearchQuestion(text) && !isCampaignIntent(text)) return null;
   await sendMessage(chatId, "🧠 Дополняю задачу…");
   return { background: async () => { const c = await answerCampaign(pending, text); if (c) await showDraft(chatId, c); } };
 }
@@ -173,6 +187,10 @@ async function startPlacement(chatId: string, id: string) {
   }
   if (!existing.found?.total) {
     await sendMessage(chatId, "⛔ Размещение не запущено: найдено 0 подтверждённых сообществ. Исправьте ключевые слова или проверьте поисковые API.");
+    return;
+  }
+  if (!placeableCount({ ...existing, status: "approved" }, await listGroups())) {
+    await sendMessage(chatId, "⛔ <b>Размещение не запущено</b>: публиковать пока негде.\nНайдено сообществ: " + existing.found.total + ", но ни в одном админ ещё не разрешил публикацию (бот не добавлен админом, партнёр не подтвердил).\n\nЧто сделать: напишите админам найденных групп (кнопка «Письмо» на странице Группы) — когда они добавят бота или подтвердят, запустите снова.");
     return;
   }
   const c = await setCampaignStatus(id, "approved");
@@ -347,11 +365,14 @@ export async function handleCampaignCallback(query: any, action: string, id: str
       if (c && messageId) await editMessage(chatId, messageId, "⏹ Кампания остановлена: " + escapeHtml(c.title));
       return {};
     }
-    case "del":
+    case "del": {
+      const gone = await getOne<Campaign>("campaigns", id);
       await removeMany("campaigns", [id]);
+      await deleteValue("cmp-answer:" + chatId);
       await answerCallback(query.id, "Удалено");
-      if (messageId) await editMessage(chatId, messageId, "✖️ Черновик удалён.");
+      if (messageId) await editMessage(chatId, messageId, "✖️ Черновик удалён (вы нажали «Удалить черновик»)" + (gone ? ": " + escapeHtml(gone.title) : "") + ".");
       return {};
+    }
     case "mon":
       await answerCallback(query.id, "Мониторинг…");
       return { background: () => runMonitor(chatId, id) };
