@@ -43,7 +43,7 @@ describe("Apify group search", () => {
     await deleteValue("provider-paused:apify"); // set by the quota test above
     const calls = mockFetch([{ match: (u) => u.startsWith("https://api.apify.com/"), respond: () => json({ error: { type: "run-failed", message: "Actor run did not succeed (status: TIMED-OUT)" } }, 400) }]);
     const result = await apifySearch(["kwiaty"], "Poland", "pl");
-    expect(result.message).toMatch(/HTTP 400: Actor run did not succeed/);
+    expect(result.message).toMatch(/Apify не успел ответить за 115 с \(таймаут\)/);
     expect(String(calls[0].url)).toContain("timeout=115");
   });
 });

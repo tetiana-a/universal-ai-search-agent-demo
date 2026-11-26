@@ -315,6 +315,7 @@ export type FindInput = {
   relevance?: "core" | "adjacent"; exclusions?: string[]; language?: string;
   platforms?: Platform[];
   broadPage?: number;
+  skipApify?: boolean;
   // The topic in the place's local language (second search round), filled by findGroups.
   localTopic?: string;
 };
@@ -486,12 +487,12 @@ export async function findGroups(input: FindInput, deadlineAt = Date.now() + 45_
     selected.includes("telegram") && !broad && tgStatEnabled()
       ? tgStatSearch(input.topic, input.country || "")
       : Promise.resolve({ ok: false, urls: [], source: "tgstat" as const }),
-    apifyEnabled()
+    apifyEnabled() && !input.skipApify
       ? apifySearch(paidQueries.map((d) => d.query), input.country || input.city || "", searchLang, budget - 15_000)
       : Promise.resolve<Awaited<ReturnType<typeof apifySearch>>>({ ok: false, hits: [] }),
   ]);
   for (const result of paid) if (!result.ok && result.message) notes.push(result.message);
-  if (!apify.ok && apify.message && apifyEnabled()) notes.push(apify.message);
+  if (!apify.ok && apify.message && apifyEnabled() && !input.skipApify) notes.push(apify.message);
   const paidHits = paid.flatMap((result, i) => result.hits.map((h) => ({ ...h, sourceQuery: paidQueries[i].query })));
   const keylessHits = keyless.flatMap((result) => result.hits.map((h) => ({ ...h, sourceQuery: result.query || "" })));
   const apifyHits = apify.hits.map((h) => ({ ...h, sourceQuery: h.query }));

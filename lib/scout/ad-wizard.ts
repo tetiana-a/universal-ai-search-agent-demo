@@ -45,6 +45,16 @@ export function isAdPostingIntent(text: string) {
   return action && advert;
 }
 
+// An owner's task that is about advertising (sell, rent, promote), not a question to research.
+export function isCampaignIntent(text: string) {
+  return isAdPostingIntent(text) || /реклам|объявлен|оголошен|продаю|продам|продаётся|продается|сдаю|сдам|сдаётся|сдается|кампани|розміст|размест|\bcampaign|\badvertis|\bpromote\b|\bfor (?:sale|rent)\b|\bselling\b|\banuncio|\bvendo\b|\balquilo\b/iu.test(text);
+}
+
+// A plain question or a "find me…" request: goes to the universal research, not to a campaign.
+export function isSearchQuestion(text: string) {
+  return /\?|найд|найти|ищ[уи]|поиск|подбер|где\b|кто\b|какие|какой|список|знайд|шукаю|\bfind\b|\bsearch|\blook(?:ing)? for\b|\bwhere\b|\bwho\b|\bwhich\b|\bbest\b|\blist\b|\bbusca|\bencuentra|\bdónde/iu.test(text);
+}
+
 export function platformChoice(value: string): Platform[] {
   const t = value.trim().toLowerCase();
   if (/^(all|все|всі|всё|todos)$/.test(t)) return ["telegram", "facebook", "instagram", "tiktok"];
