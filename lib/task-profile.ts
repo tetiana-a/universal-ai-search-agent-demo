@@ -90,7 +90,7 @@ export function heuristicFields(kind: ResearchKind, text: string) {
 
 export type ClarifyingQuestion = { id: string; ru: string; en: string; placeholderRu: string; placeholderEn: string };
 
-const GEO_HINT = /\b(in|near|around|across)\s+[A-ZÀ-Ý][\w-]+|\b(в|во|на|под)\s+[А-ЯЁІЇЄ][\wа-яё-]+|madrid|amsterdam|spain|italy|china|europe|usa|london|berlin|paris|мадрид|амстердам|испани|итали|кита|европ|сша|лондон|берлин|париж|прага|praha|czech|чехи|украин|ukrain|киев|kyiv/i;
+const GEO_HINT = /\b(in|near|around|across)\s+[A-ZÀ-Ý][\w-]+|(?:^|\s)(в|во|на|под)\s+[А-ЯЁІЇЄ][\wа-яё-]+|madrid|amsterdam|spain|italy|china|europe|usa|london|berlin|paris|мадрид|амстердам|испани|итали|кита|европ|сша|лондон|берлин|париж|прага|praha|czech|чехи|украин|ukrain|киев|kyiv/i;
 const NUMBER = /\d/;
 
 function hasAny(q: string, re: RegExp) { return re.test(q); }

@@ -664,6 +664,7 @@ async function handleCallback(query: any): Promise<BotResult> {
   if (kind === "menu") {
     await answerCallback(query.id, "✓");
     if (action === "find") {
+      await setValue("find-next:" + chatId + ":" + userId, "1", 600);
       await tgForceReply(chatId, "🔎 Что найти? Напишите запрос обычным сообщением.");
       return {};
     }
@@ -834,6 +835,8 @@ async function handleInbound(message: any): Promise<BotResult> {
 function addressedText(message: any) {
   const text = String(message.text || "").trim();
   if (message.chat?.type === "private") return text;
+  // "Найди…" / "Find…" at the start is a task for the bot even without @mention.
+  if (/^(найди|найти|поищи|ищи|знайди|find|search)\s/i.test(text)) return text;
   const handle = botHandle().toLowerCase();
   const mentioned = text.toLowerCase().includes(handle);
   const replyToBot = Boolean(message.reply_to_message?.from?.is_bot);
@@ -842,7 +845,10 @@ function addressedText(message: any) {
 }
 
 async function handleResearchText(message: any, chatId: string, userId: string): Promise<BotResult> {
-  const text = addressedText(message);
+  // After «🔎 Найти» the next message from that person is the query, even if not sent as a reply.
+  const findNext = await getValue<string>("find-next:" + chatId + ":" + userId);
+  if (findNext) await deleteValue("find-next:" + chatId + ":" + userId);
+  const text = findNext ? String(message.text || "").trim() : addressedText(message);
   if (!text) return {};
   if (await isEditingCriteria(chatId)) return { background: await applyCriteriaChange(chatId, text) };
   const task = await loadTask(chatId);
