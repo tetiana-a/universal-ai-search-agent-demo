@@ -1,20 +1,22 @@
 import { recordGroupSearch } from "@/lib/memory";
 import { dashboardUrl } from "@/lib/scout/config";
-import { ADS_LABEL, PLATFORM_LABEL, findGroups, groupsXlsx, listQueue, markQueued, postViaBot, postingSummary, postingTargets, queueManual } from "@/lib/scout/groups";
+import { ADS_LABEL, PLATFORM_LABEL, STATUS_LABEL, adminLetter, findGroups, listGroups, updateGroup, groupsXlsx, listQueue, markQueued, postViaBot, postingSummary, postingTargets, queueManual } from "@/lib/scout/groups";
 import { deleteValue, getValue, setValue } from "@/lib/scout/store";
 import { answerCallback, editMessage, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { escapeHtml, randomId } from "@/lib/scout/text";
-import type { QueueItem } from "@/lib/scout/groups";
+import type { GroupCard, GroupStatus, Platform, QueueItem } from "@/lib/scout/groups";
+import { loadSettings } from "@/lib/scout/config";
 
 // Telegram commands for the group finder and compliant posting:
 //   /groups Испания, Барселона, недвижимость — find groups, get a table + Excel
 //   /post <текст> (or a photo with caption /post …) — preview, then send via the bot or queue for manual posting
 //   /queue — next post to publish by hand from your own account
 //   /posts — today's posting report
+//   /requests [telegram|facebook|instagram|tiktok] — next community to ask: personal letter + one-tap buttons
 
 type Result = { background?: () => Promise<void> };
 
-export const GROUP_COMMANDS = ["groups", "post", "queue", "posts"];
+export const GROUP_COMMANDS = ["groups", "post", "queue", "posts", "requests"];
 
 function groupsPageUrl() {
   return dashboardUrl().replace(/\/scout$/, "/groups");
@@ -68,6 +70,11 @@ export async function handleGroupCommand(chatId: string, cmd: string, args: stri
     return {};
   }
 
+  if (cmd === "requests") {
+    await showNextRequest(chatId, platformArg(args));
+    return {};
+  }
+
   if (cmd === "queue") {
     await showNextQueued(chatId);
     return {};
@@ -100,9 +107,59 @@ async function showNextQueued(chatId: string) {
   ]);
 }
 
+const PLATFORMS: Platform[] = ["telegram", "facebook", "instagram", "tiktok"];
+const RQ_STATUS: Record<string, [GroupStatus, string]> = { rqsent: ["contacted", "📨 Запрос отправлен"], rqreply: ["replied", "💬 Админ ответил"], rqok: ["free", "✅ Разрешил — кампании будут публиковать сюда"], rqno: ["declined", "✖️ Отказ"] };
+
+function platformArg(args: string): Platform | "" {
+  const a = args.trim().toLowerCase();
+  if (/^(tg|tele|телег)/.test(a)) return "telegram";
+  if (/^(fb|face|фейс)/.test(a)) return "facebook";
+  if (/^(ig|insta|инст)/.test(a)) return "instagram";
+  if (/^(tt|tik|тик)/.test(a)) return "tiktok";
+  return "";
+}
+
+// Communities nobody has written to yet, biggest first (bot-connected ones need no request).
+async function pendingRequests(platform: Platform | "") {
+  return (await listGroups()).filter((g) => g.status === "new" && !g.botConnected && g.ads !== "forbidden" && g.activity !== "inactive" && (!platform || g.platform === platform)).sort((a, b) => (b.members || 0) - (a.members || 0));
+}
+
+async function showNextRequest(chatId: string, platform: Platform | "", skip = 0) {
+  const list = await pendingRequests(platform);
+  const g = list[skip];
+  if (!g) { await sendMessage(chatId, skip ? "Это был последний запрос в списке ✅ /requests — начать сначала." : "Все запросы отправлены ✅ Новые сообщества появятся после следующего поиска."); return; }
+  const letter = adminLetter(g, "free", await loadSettings());
+  const pf = String(PLATFORMS.indexOf(platform as Platform) + 1);
+  await sendMessage(chatId, "<b>Запрос админу</b> " + (skip + 1) + " из " + list.length + "\n" + PLATFORM_LABEL[g.platform] + " · <a href=\"" + escapeHtml(g.url) + "\">" + escapeHtml(g.name.slice(0, 80)) + "</a>" + (g.members ? " · " + g.members.toLocaleString("ru-RU") : "") + " · язык " + letter.lang +
+    "\n\nСкопируйте письмо, откройте чат админа и отправьте со своего аккаунта:\n\n<code>" + escapeHtml(letter.text) + "</code>", [
+    [{ text: "✉️ Написать админу", url: letter.contactUrl }, ...(letter.joinUrl ? [{ text: "🚪 Вступить", url: letter.joinUrl }] : [])],
+    [{ text: "📨 Отправил", callback_data: "gp:rqsent:" + g.id }, { text: "⏭ Следующий", callback_data: "gp:rqnext:" + pf + "." + (skip + 1) }],
+  ]);
+}
+
+function requestButtons(g: GroupCard): Keyboard {
+  return [[{ text: "💬 Ответил", callback_data: "gp:rqreply:" + g.id }, { text: "✅ Разрешил", callback_data: "gp:rqok:" + g.id }, { text: "✖️ Отказ", callback_data: "gp:rqno:" + g.id }]];
+}
+
 export async function handleGroupCallback(query: any, action: string, id: string, by: string): Promise<Result> {
   const chatId = String(query.message?.chat?.id || "");
   const messageId = Number(query.message?.message_id || 0);
+  if (action === "rqnext") {
+    const [pf, skip] = id.split(".");
+    await answerCallback(query.id, "Следующий");
+    await showNextRequest(chatId, PLATFORMS[Number(pf) - 1] || "", Math.max(0, Number(skip) || 0));
+    return {};
+  }
+  if (RQ_STATUS[action]) {
+    const [status, label] = RQ_STATUS[action];
+    const g = await updateGroup(id, { status }, by);
+    await answerCallback(query.id, g ? label : "Сообщество не найдено");
+    if (!g) return {};
+    // The message becomes a status line with the next-step buttons until the admin's answer is recorded.
+    if (messageId) await editMessage(chatId, messageId, label + ": " + escapeHtml(g.name) + " — " + escapeHtml(by) + "\nСтатус: " + (STATUS_LABEL[g.status] || g.status), ["contacted", "replied"].includes(status) ? requestButtons(g) : undefined);
+    if (action === "rqsent") await showNextRequest(chatId, "");
+    return {};
+  }
   if (action === "done" || action === "skip") {
     const item = await markQueued(id, action === "done" ? "published" : "skipped", by);
     await answerCallback(query.id, item ? (action === "done" ? "Записал в журнал" : "Пропущено") : "Уже отмечено");

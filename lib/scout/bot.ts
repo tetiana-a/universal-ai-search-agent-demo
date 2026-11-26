@@ -11,7 +11,7 @@ import { answerQuestion, applyCriteriaChange, handleResearchCallback, isEditingC
 import { answerCallback, controlIds, editMessage, isOpenGroup, isOwnersGroupAdmin, reportChatId, sendDocument, sendLong, sendMessage, type Keyboard } from "@/lib/scout/telegram";
 import { detectLang, escapeHtml, formatMoney, nowIso, stableId } from "@/lib/scout/text";
 import { collectOperationalHealth } from "@/lib/scout/health";
-import { addBotUrl, fullExportXlsx, groupsCsv, handleMyChatMember, listGroups, registerOwnedTelegramGroup } from "@/lib/scout/groups";
+import { addBotUrl, fullExportXlsx, groupsCsv, handleMyChatMember, listGroups, registerOwnedTelegramGroup, type GroupCard } from "@/lib/scout/groups";
 import { GROUP_COMMANDS, handleGroupCallback, handleGroupCommand } from "@/lib/scout/groups-bot";
 import { CAMPAIGN_COMMANDS, campaignSummary, handleCampaignCallback, handleCampaignCommand, handleJoin, handleLeave, handleProof, handleVoice, maybeAnswer, partnerInviteLink, promptNewCampaign } from "@/lib/scout/campaigns-bot";
 import { ADVISOR_COMMANDS, advisorMode, handleAdvisorCallback, handleAdvisorCommand, handleAdvisorText, handleAdvisorVoice } from "@/lib/scout/advisor-bot";
@@ -50,6 +50,7 @@ const HELP = [
   "/campaign — новая кампания · /campaigns — все кампании",
   "/capacity — ёмкость сети · /creport — отчёт за день",
   "/schedule — расписание · /cwatch — параметры мониторинга",
+  "/requests — запросы админам: личное письмо каждому сообществу",
   "/recall — проверка полноты по ручному списку · /activity — порог активности",
   "/cstop all — остановить всё",
   "",
@@ -606,6 +607,7 @@ async function handleCommand(chatId: string, userId: string, userName: string, c
     case "post":
     case "queue":
     case "posts":
+    case "requests":
       return handleGroupCommand(chatId, cmd, args, userName);
 
     default:
@@ -688,7 +690,7 @@ async function handleCallback(query: any): Promise<BotResult> {
       return {};
     }
     if (action === "groups") {
-      await sendMessage(chatId, "<b>Группы и постинг</b>\n\n<code>/groups Испания, Барселона, недвижимость</code> — найти группы (таблица + Excel)\n<code>/post текст</code> — опубликовать ботом там, где его добавили админы, или поставить в очередь\n/queue — следующий пост для ручной публикации со своего аккаунта\n/posts — отчёт за сегодня");
+      await sendMessage(chatId, "<b>Группы и постинг</b>\n\n<code>/groups Испания, Барселона, недвижимость</code> — найти группы (таблица + Excel)\n<code>/post текст</code> — опубликовать ботом там, где его добавили админы, или поставить в очередь\n/requests — запрос админу: личное письмо каждому сообществу (можно /requests tiktok)\n/queue — следующий пост для ручной публикации со своего аккаунта\n/posts — отчёт за сегодня");
       return {};
     }
     if (["status", "tasks", "results", "report", "scan", "sources", "drafts", "leads", "settings", "health", "posts", "queue", "campaigns", "capacity", "creport"].includes(action)) {
@@ -862,11 +864,15 @@ export async function handleUpdate(update: any): Promise<BotResult> {
     return {};
   }
   // Publisher Network: any admin can connect their community in a private chat (owner approves).
-  const join = message?.text && message.chat?.type === "private" && !message.from?.is_bot ? /^\/(join|leave)(@\w+)?(?:\s+([\s\S]*))?$|^\/start(?:@\w+)?\s+partner\b/i.exec(String(message.text).trim()) : null;
+  const join = message?.text && message.chat?.type === "private" && !message.from?.is_bot ? /^\/(join|leave)(@\w+)?(?:\s+([\s\S]*))?$|^\/start(?:@\w+)?\s+partner(?:_([\w-]{1,50}))?$/i.exec(String(message.text).trim()) : null;
   if (join) {
     const who = message.from?.username ? "@" + message.from.username : message.from?.first_name || String(message.from?.id);
     if (join[1]?.toLowerCase() === "leave") await handleLeave(String(message.chat.id), String(message.from.id), join[3] || "");
-    else await handleJoin(String(message.chat.id), String(message.from.id), who, join[3] || "");
+    else {
+      // Personal link from an admin request (?start=partner_<card id>): the community is already known.
+      const card = join[4] ? await getOne<GroupCard>("groups", join[4]) : null;
+      await handleJoin(String(message.chat.id), String(message.from.id), who, card?.url || join[3] || "");
+    }
     return {};
   }
   // Owner's voice message → research question or campaign task (TZ 1.2: voice control).

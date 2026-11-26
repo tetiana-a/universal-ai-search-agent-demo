@@ -207,6 +207,7 @@ export const BOT_COMMANDS = [
   { command: "advisor", description: "Советник: разговор текстом или голосом" },
   { command: "client", description: "Подобрать сообщества под клиента" },
   { command: "groups", description: "Найти сообщества: страна, город, тема" },
+  { command: "requests", description: "Запросы админам: письмо каждому сообществу" },
   { command: "find", description: "Найти что угодно" },
   { command: "status", description: "Что сейчас происходит" },
   { command: "help", description: "Как пользоваться" },
