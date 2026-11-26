@@ -75,22 +75,33 @@ export function groqSearchKey() {
 
 // Groq Compound runs a real web search and lists what it found in executed_tools;
 // only those result URLs are used, never links written by the model itself.
+let groqCompoundModel = "groq/compound-mini";
+
 export async function groqSearch(query: string, language = "en", customPrompt?: string): Promise<GeminiSearchOutcome> {
   const key = groqSearchKey();
   if (!key) return { ok: false, hits: [], status: "error", message: "GROQ_API_KEY is not set." };
   const prompt = (customPrompt || "Search the web for specific primary sources for: ") + query + (language === "ru" ? ". Кратко перечисли найденные источники." : ". Briefly list the sources you found.");
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    // gpt-oss models search through the built-in browser_search tool; Compound models search on their own.
+    const call = (model: string) => fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer " + key },
-      body: JSON.stringify({ model: process.env.GROQ_SEARCH_MODEL || "groq/compound-mini", messages: [{ role: "user", content: prompt }], temperature: 0 }),
-      signal: AbortSignal.timeout(25000),
+      body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0, ...(/gpt-oss/i.test(model) ? { tools: [{ type: "browser_search" }], tool_choice: "required" } : {}) }),
+      signal: AbortSignal.timeout(40_000),
       cache: "no-store",
     });
+    let response = await call(process.env.GROQ_SEARCH_MODEL || groqCompoundModel);
+    // Groq renames/retires models (404): pick the current Compound (web search) model from its list once.
+    if (response.status === 404) {
+      const ids: string[] = ((await fetch("https://api.groq.com/openai/v1/models", { headers: { authorization: "Bearer " + key }, signal: AbortSignal.timeout(8000), cache: "no-store" }).then((r) => r.json()).catch(() => null))?.data || []).map((m: any) => String(m?.id || ""));
+      const next = ids.find((id) => /compound.*mini/i.test(id)) || ids.find((id) => /compound/i.test(id)) || ids.find((id) => /gpt-oss-120b/i.test(id)) || "openai/gpt-oss-120b";
+      groqCompoundModel = next;
+      response = await call(next);
+    }
     if (!response.ok) {
       const limited = response.status === 429;
       return { ok: false, hits: [], httpStatus: response.status, status: limited ? "rate_limited" : "error",
-        message: limited ? "Groq search daily free quota is used up (HTTP 429)." : "Groq search failed (HTTP " + response.status + ")." };
+        message: limited ? "Groq search daily free quota is used up (HTTP 429)." : "Groq search failed (HTTP " + response.status + ", " + groqCompoundModel + "): " + (await response.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 160) };
     }
     const message = (await response.json().catch(() => null))?.choices?.[0]?.message;
     const tools: any[] = Array.isArray(message?.executed_tools) ? message.executed_tools : [];
