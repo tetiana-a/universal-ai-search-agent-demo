@@ -87,7 +87,7 @@ export async function groqSearch(query: string, language = "en", customPrompt?: 
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer " + key },
       body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0, ...(/gpt-oss/i.test(model) ? { tools: [{ type: "browser_search" }], tool_choice: "required" } : {}) }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(40_000),
       cache: "no-store",
     });
     let response = await call(process.env.GROQ_SEARCH_MODEL || groqCompoundModel);
