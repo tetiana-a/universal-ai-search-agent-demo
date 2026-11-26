@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const ai = await Promise.all(configuredAiProviders("free").map(async (p) => {
     const r = await runStructuredExtraction({
       system: "You are a health check.", user: "Return {\"ok\": true}.", schema: { type: "object", properties: { ok: { type: "boolean" } } },
-      deadlineAt: Math.min(deadline, Date.now() + 25_000), maxTokens: 30, perCallTimeoutMs: 20_000, prefer: p.id,
+      deadlineAt: Math.min(deadline, Date.now() + 25_000), maxTokens: 400, perCallTimeoutMs: 20_000, prefer: p.id,
     });
     const own = r.attempts.filter((a) => a.provider === p.id);
     return { provider: p.id, ok: r.provider === p.id, model: r.provider === p.id ? r.model : own[0]?.model, error: r.provider === p.id ? undefined : own.map((a) => a.message).join(" ").slice(0, 300) };
