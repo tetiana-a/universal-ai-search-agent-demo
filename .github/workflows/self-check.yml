@@ -1,0 +1,21 @@
+name: Production self-check
+
+# Manual: GitHub → Actions → «Production self-check» → Run workflow.
+# Calls every configured AI provider once, sends one test event to Sentry, prints the result.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Call self-check endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://universal-ai-search-agent-demo.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          curl -sS --fail-with-body --max-time 150 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/scout/selfcheck" | python3 -m json.tool
